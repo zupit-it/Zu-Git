@@ -53,6 +53,7 @@ let lastPendingReviewCount = -1; // -1 = not yet seen (skip notification on firs
 let notificationsEnabled = defaultSettings.notificationsEnabled;
 let settingsDirty = false;
 let settingsSaving = false;
+let refreshInProgress = false;
 
 
 function renderSecretStoreInfo(secretStore: {
@@ -968,11 +969,32 @@ function renderWarnings(snapshot: DashboardSnapshot) {
   const target = document.querySelector<HTMLElement>("[data-warnings]");
   if (!target) return;
 
-  target.innerHTML = snapshot.warnings
-    .map((warning) => `<li>${warning}</li>`)
-    .join("");
+  const errors: string[] = [];
 
-  target.parentElement?.toggleAttribute("hidden", snapshot.warnings.length === 0);
+  // Repo sync failures with full error text
+  for (const repo of snapshot.repoSyncs ?? []) {
+    if (!repo.ok) {
+      errors.push(`<strong>${repo.repo}</strong>: ${repo.detail}`);
+    }
+  }
+
+  // Integration-level issues
+  for (const integration of snapshot.integrations ?? []) {
+    if (integration.configured && !integration.ok) {
+      errors.push(`<strong>${integration.name}</strong>: ${integration.detail}`);
+    }
+  }
+
+  // Generic warnings (catch-all, deduplicated)
+  const alreadyShown = new Set(errors.map((e) => e.toLowerCase()));
+  for (const warning of snapshot.warnings ?? []) {
+    if (!alreadyShown.has(warning.toLowerCase())) {
+      errors.push(warning);
+    }
+  }
+
+  target.innerHTML = errors.map((e) => `<li class="warning-item">${e}</li>`).join("");
+  target.parentElement?.toggleAttribute("hidden", errors.length === 0);
 }
 
 function renderSettings(values: SettingsFormValues) {
@@ -1115,6 +1137,11 @@ async function saveSettingsAndRefresh(event: SubmitEvent) {
 }
 
 async function refreshDashboard(mode: "manual" | "auto" = "manual") {
+  if (refreshInProgress) {
+    if (mode === "manual") setStatus("Refresh already in progress…");
+    return;
+  }
+  refreshInProgress = true;
   configureAutoRefresh(); // reset the countdown on every refresh
   setStatus(
     mode === "auto" ? "Auto-refreshing GitHub and Jira data…" : "Refreshing GitHub and Jira data…",
@@ -1132,6 +1159,8 @@ async function refreshDashboard(mode: "manual" | "auto" = "manual") {
       "danger",
     );
     setListLoading(false);
+  } finally {
+    refreshInProgress = false;
   }
 }
 

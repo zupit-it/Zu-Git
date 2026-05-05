@@ -12,6 +12,7 @@ fn account(key: &str) -> &str {
 
 // ── macOS: use the `security` CLI directly (same as original Electrobun code) ──
 
+/// Returns true if the secret was stored successfully.
 #[cfg(target_os = "macos")]
 pub fn get_secret(key: &str) -> String {
     let output = std::process::Command::new("security")
@@ -27,15 +28,19 @@ pub fn get_secret(key: &str) -> String {
 }
 
 #[cfg(target_os = "macos")]
-pub fn set_secret(key: &str, value: &str) {
+pub fn set_secret(key: &str, value: &str) -> bool {
     if value.is_empty() {
-        let _ = std::process::Command::new("security")
+        std::process::Command::new("security")
             .args(["delete-generic-password", "-s", SERVICE, "-a", account(key)])
-            .output();
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     } else {
-        let _ = std::process::Command::new("security")
+        std::process::Command::new("security")
             .args(["add-generic-password", "-U", "-s", SERVICE, "-a", account(key), "-w", value])
-            .output();
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 }
 
@@ -64,6 +69,106 @@ fn probe_secure_store() -> Option<String> {
     }
 }
 
+// ── File-based token encryption (fallback when keyring fails) ────────────────
+//
+// On Windows we use DPAPI via PowerShell's ConvertTo/From-SecureString, which
+// is the same mechanism underlying the Credential Manager.  The ciphertext is a
+// DPAPI hex blob that can only be decrypted by the same user on the same machine.
+// On other platforms (where keyring should always work) we store plaintext with a
+// "plain:" sentinel so legacy migration still works.
+
+/// Encrypts a token for storage in the settings file.
+/// Returns `dpapi:<hex-blob>` on Windows, `plain:<token>` elsewhere.
+pub fn encrypt_token_for_file(plaintext: &str) -> String {
+    if plaintext.is_empty() {
+        return String::new();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        encrypt_dpapi(plaintext)
+            .map(|c| format!("dpapi:{c}"))
+            .unwrap_or_else(|| format!("plain:{plaintext}"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    format!("plain:{plaintext}")
+}
+
+/// Decrypts a token stored by `encrypt_token_for_file`.
+/// Also accepts raw plaintext for backward-compatible migration.
+pub fn decrypt_token_from_file(stored: &str) -> String {
+    if stored.is_empty() {
+        return String::new();
+    }
+    if let Some(cipher) = stored.strip_prefix("dpapi:") {
+        #[cfg(target_os = "windows")]
+        return decrypt_dpapi(cipher).unwrap_or_default();
+        #[cfg(not(target_os = "windows"))]
+        { let _ = cipher; return String::new(); }
+    }
+    if let Some(plain) = stored.strip_prefix("plain:") {
+        return plain.to_string();
+    }
+    // Legacy: no prefix → raw plaintext (Electrobun migration).
+    stored.to_string()
+}
+
+/// DPAPI encrypt via PowerShell ConvertFrom-SecureString (no key = user+machine).
+/// Token is passed via stdin to avoid any quoting/escaping issues.
+#[cfg(target_os = "windows")]
+fn encrypt_dpapi(plaintext: &str) -> Option<String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let script = concat!(
+        "$t = $input | Out-String; ",
+        "$t = $t.TrimEnd([char]10,[char]13); ",
+        "ConvertFrom-SecureString (ConvertTo-SecureString $t -AsPlainText -Force)"
+    );
+
+    let mut child = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(plaintext.as_bytes()).ok()?;
+    }
+
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// DPAPI decrypt via PowerShell ConvertTo-SecureString.
+/// The ciphertext is a hex-only string (safe to embed directly).
+#[cfg(target_os = "windows")]
+fn decrypt_dpapi(ciphertext: &str) -> Option<String> {
+    use std::process::{Command, Stdio};
+
+    let script = format!(
+        "$ss = ConvertTo-SecureString '{ciphertext}'; \
+         [Runtime.InteropServices.Marshal]::PtrToStringAuto(\
+           [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))"
+    );
+
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 // ── Other platforms: use the `keyring` crate ──────────────────────────────────
 
 #[cfg(not(target_os = "macos"))]
@@ -74,22 +179,31 @@ pub fn get_secret(key: &str) -> String {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn set_secret(key: &str, value: &str) {
-    if let Ok(entry) = keyring::Entry::new(SERVICE, account(key)) {
-        if value.is_empty() {
-            let _ = entry.delete_credential();
-        } else {
-            let _ = entry.set_password(value);
-        }
+pub fn set_secret(key: &str, value: &str) -> bool {
+    let Ok(entry) = keyring::Entry::new(SERVICE, account(key)) else {
+        return false;
+    };
+    if value.is_empty() {
+        entry.delete_credential().is_ok()
+    } else {
+        entry.set_password(value).is_ok()
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 fn probe_secure_store() -> Option<String> {
     const CANARY: &str = "__zugit_probe__";
-    let entry = keyring::Entry::new(SERVICE, "__probe__").ok()?;
-    entry.set_password(CANARY).ok()?;
-    let read_back = entry.get_password().ok()?;
+    let entry = match keyring::Entry::new(SERVICE, "__probe__") {
+        Ok(e) => e,
+        Err(e) => return Some(format!("Could not create credential entry: {e}")),
+    };
+    if entry.set_password(CANARY).is_err() {
+        return Some("Could not write to credential store.".to_string());
+    }
+    let read_back = match entry.get_password() {
+        Ok(v) => v,
+        Err(e) => return Some(format!("Could not read back from credential store: {e}")),
+    };
     let _ = entry.delete_credential();
     if read_back == CANARY {
         None

@@ -7,7 +7,7 @@ use crate::models::{
     normalize_settings, AppSettings, ListFilterPreferences,
     SettingsFormValues,
 };
-use crate::secret_store::{get_secret, set_secret};
+use crate::secret_store::{decrypt_token_from_file, encrypt_token_for_file, get_secret, set_secret};
 
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
@@ -94,7 +94,10 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         if !from_keychain.is_empty() {
             from_keychain
         } else {
-            persisted.github_token.clone().unwrap_or_default()
+            persisted.github_token
+                .as_deref()
+                .map(decrypt_token_from_file)
+                .unwrap_or_default()
         }
     };
     let jira_token = {
@@ -102,7 +105,10 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         if !from_keychain.is_empty() {
             from_keychain
         } else {
-            persisted.jira_token.clone().unwrap_or_default()
+            persisted.jira_token
+                .as_deref()
+                .map(decrypt_token_from_file)
+                .unwrap_or_default()
         }
     };
 
@@ -142,11 +148,11 @@ pub async fn save_settings(
 ) -> Result<AppSettings, String> {
     let normalized = normalize_settings(values);
 
-    // Persist tokens to keychain.
-    set_secret("githubToken", &normalized.github_token);
-    set_secret("jiraToken", &normalized.jira_token);
+    // Persist tokens to keychain; fall back to settings file if it fails.
+    let github_in_keychain = set_secret("githubToken", &normalized.github_token);
+    let jira_in_keychain   = set_secret("jiraToken",   &normalized.jira_token);
 
-    // Write everything-except-tokens to disk.
+    // Write everything-except-tokens to disk (unless keychain failed, then include them).
     ensure_data_dir(app)?;
     let persisted = PersistedSettings {
         github_api_base_url: normalized.github_api_base_url.clone(),
@@ -158,8 +164,8 @@ pub async fn save_settings(
         jira_email: normalized.jira_email.clone(),
         jira_repo_boards: normalized.jira_repo_boards.clone(),
         notifications_enabled: normalized.notifications_enabled,
-        github_token: None,
-        jira_token: None,
+        github_token: if github_in_keychain { None } else { Some(encrypt_token_for_file(&normalized.github_token)) },
+        jira_token:   if jira_in_keychain   { None } else { Some(encrypt_token_for_file(&normalized.jira_token))   },
     };
 
     let path = settings_path(app)?;
