@@ -28,34 +28,40 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+            // On macOS the menu bar lives at the top of the screen (system-wide),
+            // so we keep it. On Windows/Linux it would render as an in-window bar,
+            // which we don't want.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 
-            let menu = Menu::with_items(
-                app,
-                &[
-                    &Submenu::with_items(
-                        app,
-                        "ZuGit",
-                        true,
-                        &[&PredefinedMenuItem::quit(app, None)?],
-                    )?,
-                    &Submenu::with_items(
-                        app,
-                        "Edit",
-                        true,
-                        &[
-                            &PredefinedMenuItem::undo(app, None)?,
-                            &PredefinedMenuItem::redo(app, None)?,
-                            &PredefinedMenuItem::separator(app)?,
-                            &PredefinedMenuItem::cut(app, None)?,
-                            &PredefinedMenuItem::copy(app, None)?,
-                            &PredefinedMenuItem::paste(app, None)?,
-                            &PredefinedMenuItem::select_all(app, None)?,
-                        ],
-                    )?,
-                ],
-            )?;
-            app.set_menu(menu)?;
+                let menu = Menu::with_items(
+                    app,
+                    &[
+                        &Submenu::with_items(
+                            app,
+                            "ZuGit",
+                            true,
+                            &[&PredefinedMenuItem::quit(app, None)?],
+                        )?,
+                        &Submenu::with_items(
+                            app,
+                            "Edit",
+                            true,
+                            &[
+                                &PredefinedMenuItem::undo(app, None)?,
+                                &PredefinedMenuItem::redo(app, None)?,
+                                &PredefinedMenuItem::separator(app)?,
+                                &PredefinedMenuItem::cut(app, None)?,
+                                &PredefinedMenuItem::copy(app, None)?,
+                                &PredefinedMenuItem::paste(app, None)?,
+                                &PredefinedMenuItem::select_all(app, None)?,
+                            ],
+                        )?,
+                    ],
+                )?;
+                app.set_menu(menu)?;
+            }
             Ok(())
         })
         .manage(AppState {
