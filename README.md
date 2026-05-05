@@ -33,10 +33,9 @@ Notifications are skipped on the first load to avoid a burst on startup, and can
 
 ## How it fetches data
 
-On each refresh, ZuGit fetches all open PRs for every configured repository in parallel.
-For each PR it fetches reviews, CI status, and check runs — but only if something has changed:
-the result is cached in memory and reused as long as the PR's `updated_at` timestamp and HEAD SHA
-stay the same. Stale cache entries (closed or merged PRs) are evicted automatically.
+On each refresh, ZuGit sends a single GraphQL query per repository to the GitHub API.
+Each query returns all open PRs with reviews, CI status, additions/deletions, and assignees in one round trip.
+Stale entries (closed or merged PRs) are evicted automatically.
 
 Jira tickets are fetched in bulk once per refresh and cached in memory for the same session.
 The cache is cleared entirely only when settings are saved.

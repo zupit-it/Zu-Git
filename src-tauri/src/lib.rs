@@ -27,7 +27,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
+        .setup(|_app| {
             // On macOS the menu bar lives at the top of the screen (system-wide),
             // so we keep it. On Windows/Linux it would render as an in-window bar,
             // which we don't want.
