@@ -748,6 +748,64 @@ function renderListBoard(prs: PullRequestSummary[]) {
   renderListTable(prs);
 }
 
+function renderReviewerLoad(snapshot: DashboardSnapshot) {
+  const target = document.querySelector<HTMLElement>("[data-reviewer-load]");
+  if (!target) return;
+
+  // For each reviewer track:
+  //   pending = PRs where they still need to review
+  //   total   = PRs where they appear in any reviewer role (pending, approved, changes requested, etc.)
+  const map = new Map<string, { login: string; avatarUrl?: string; pending: number; total: number }>();
+
+  const touch = (actor: { login: string; avatarUrl?: string }, pending: boolean) => {
+    const entry = map.get(actor.login);
+    if (entry) {
+      if (pending) entry.pending++;
+      entry.total++;
+    } else {
+      map.set(actor.login, { login: actor.login, avatarUrl: actor.avatarUrl, pending: pending ? 1 : 0, total: 1 });
+    }
+  };
+
+  for (const pr of snapshot.prs) {
+    if (pr.isDraft) continue;
+    for (const r of pr.pendingReviewers)   touch(r, true);
+    for (const r of pr.currentApprovers)   touch(r, false);
+    for (const r of pr.blockingReviewers)  touch(r, false);
+    for (const r of pr.staleApprovers)     touch(r, false);
+    for (const r of pr.commentedReviewers) touch(r, false);
+  }
+
+  // Only show reviewers who have at least one pending review.
+  const active = Array.from(map.values())
+    .filter(r => r.pending > 0)
+    .sort((a, b) => b.pending - a.pending || b.total - a.total);
+
+  if (active.length === 0) {
+    target.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+
+  const viewer = snapshot.viewerLogin?.toLowerCase();
+
+  target.hidden = false;
+  target.innerHTML =
+    `<span class="reviewer-load-label">Review load</span>` +
+    active.map(r => {
+      const isMe = viewer && r.login.toLowerCase() === viewer;
+      return `<span class="reviewer-load-item${isMe ? " reviewer-load-item--me" : ""}">` +
+        avatarSm(r.login, r.avatarUrl) +
+        `<span class="reviewer-load-name">${r.login}</span>` +
+        `<span class="reviewer-load-count">` +
+          `<span class="reviewer-load-count__pending">${r.pending}</span>` +
+          `<span class="reviewer-load-count__sep">/</span>` +
+          `<span class="reviewer-load-count__total">${r.total}</span>` +
+        `</span>` +
+        `</span>`;
+    }).join("");
+}
+
 function renderListFilters(snapshot: DashboardSnapshot) {
   const searchInput = document.querySelector<HTMLInputElement>("[data-list-search]");
   const myReviewToggle = document.querySelector<HTMLInputElement>("[data-filter-my-review-pending]");
@@ -1147,6 +1205,7 @@ function renderDashboard(snapshot: DashboardSnapshot) {
   renderRepoSyncs(snapshot);
   renderTokenStore(snapshot.tokenStore);
   renderListFilters(snapshot);
+  renderReviewerLoad(snapshot);
   renderListBoard(filteredPrs);
   renderWarnings(snapshot);
 
