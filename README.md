@@ -2,6 +2,13 @@
 
 A desktop app for monitoring GitHub pull requests enriched with Jira data, built with Tauri 2.
 
+> **macOS — first launch**
+> The app is not notarized. macOS will block it with a "damaged" error.
+> Run this once after installation, then open normally:
+> ```bash
+> xattr -cr /Applications/ZuGit.app
+> ```
+
 ![ZuGit screenshot](readme-img.png)
 
 ## Features
@@ -83,4 +90,14 @@ npm run dev
 npm run build
 ```
 
-Produces installers for macOS (universal), Windows, and Linux via GitHub Actions on tag push.
+## Release
+
+Releases are cut via the **Release** workflow on GitHub Actions (`Actions → Release → Run workflow`).
+
+Enter the version number **without** the `v` prefix (e.g. `0.2.0`). The workflow will:
+
+1. Bump the version in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`
+2. Commit the changes and push a `v0.2.0` tag
+3. Trigger the build workflow on that tag
+
+The build workflow compiles and packages the app for macOS (arm64 + x86\_64), Windows, and Linux, then uploads the installers to a GitHub Release draft. Publish the draft manually from the GitHub UI when ready.
