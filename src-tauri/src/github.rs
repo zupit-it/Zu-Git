@@ -167,7 +167,10 @@ pub async fn request_review(
     client: &reqwest::Client,
 ) -> Result<(), String> {
     let base = settings.github_api_base_url.trim_end_matches('/');
-    let url = format!("{}/repos/{}/pulls/{}/requested_reviewers", base, repo, pr_number);
+    let url = format!(
+        "{}/repos/{}/pulls/{}/requested_reviewers",
+        base, repo, pr_number
+    );
     let body = serde_json::json!({ "reviewers": [login] });
 
     let response = client
@@ -273,7 +276,11 @@ async fn fetch_repo_pull_requests_inner(
             created_at: pr.created_at.clone(),
             author: pr.user.login.clone(),
             assignee: pr.assignees.first().map(|u| u.login.clone()),
-            requested_reviewers: pr.requested_reviewers.iter().map(|u| u.login.clone()).collect(),
+            requested_reviewers: pr
+                .requested_reviewers
+                .iter()
+                .map(|u| u.login.clone())
+                .collect(),
             participant_avatars: details.participant_avatars,
             head_ref: pr.head.ref_name.clone(),
             updated_at: pr.updated_at.clone(),
@@ -299,9 +306,15 @@ async fn fetch_pr_details(
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Result<CachedPrDetails, String> {
-    let url_reviews = format!("{}/repos/{}/pulls/{}/reviews?per_page=100", base, repo, pr.number);
+    let url_reviews = format!(
+        "{}/repos/{}/pulls/{}/reviews?per_page=100",
+        base, repo, pr.number
+    );
     let url_status = format!("{}/repos/{}/commits/{}/status", base, repo, pr.head.sha);
-    let url_checks = format!("{}/repos/{}/commits/{}/check-runs?per_page=100", base, repo, pr.head.sha);
+    let url_checks = format!(
+        "{}/repos/{}/commits/{}/check-runs?per_page=100",
+        base, repo, pr.head.sha
+    );
 
     let (reviews, combined_status, check_runs_resp) = tokio::try_join!(
         github_request::<Vec<GithubReview>>(&url_reviews, settings, client),
@@ -323,11 +336,13 @@ async fn fetch_pr_details(
         }
     }
 
-    let requested_logins: Vec<String> =
-        pr.requested_reviewers.iter().map(|r| r.login.clone()).collect();
+    let requested_logins: Vec<String> = pr
+        .requested_reviewers
+        .iter()
+        .map(|r| r.login.clone())
+        .collect();
     let review_summary = summarize_reviews(&reviews, &requested_logins);
-    let pipeline_state =
-        summarize_pipeline_state(&combined_status, &check_runs_resp.check_runs);
+    let pipeline_state = summarize_pipeline_state(&combined_status, &check_runs_resp.check_runs);
 
     Ok(CachedPrDetails {
         updated_at: pr.updated_at.clone(),
@@ -340,7 +355,10 @@ async fn fetch_pr_details(
 
 // ── Review summary ────────────────────────────────────────────────────────────
 
-fn summarize_reviews(reviews: &[GithubReview], requested_reviewers: &[String]) -> GithubReviewSummary {
+fn summarize_reviews(
+    reviews: &[GithubReview],
+    requested_reviewers: &[String],
+) -> GithubReviewSummary {
     let mut latest: HashMap<String, &GithubReview> = HashMap::new();
 
     for review in reviews {
@@ -349,7 +367,9 @@ fn summarize_reviews(reviews: &[GithubReview], requested_reviewers: &[String]) -
             None => continue,
         };
         match latest.get(login.as_str()) {
-            None => { latest.insert(login.clone(), review); }
+            None => {
+                latest.insert(login.clone(), review);
+            }
             Some(current) => {
                 let current_ts = parse_ts(current.submitted_at.as_deref());
                 let next_ts = parse_ts(review.submitted_at.as_deref());
@@ -379,7 +399,12 @@ fn summarize_reviews(reviews: &[GithubReview], requested_reviewers: &[String]) -
         }
     }
 
-    GithubReviewSummary { current_approvers, stale_approvers, blocking_reviewers, commented_reviewers }
+    GithubReviewSummary {
+        current_approvers,
+        stale_approvers,
+        blocking_reviewers,
+        commented_reviewers,
+    }
 }
 
 fn parse_ts(s: Option<&str>) -> i64 {
@@ -411,9 +436,9 @@ fn summarize_pipeline_state(
         return PipelineState::Failure;
     }
 
-    let has_action_required = latest.iter().any(|cr| {
-        cr.status == "completed" && cr.conclusion.as_deref() == Some("action_required")
-    });
+    let has_action_required = latest
+        .iter()
+        .any(|cr| cr.status == "completed" && cr.conclusion.as_deref() == Some("action_required"));
 
     let all_completed = !latest.is_empty() && latest.iter().all(|cr| cr.status == "completed");
     if all_completed && !has_action_required {

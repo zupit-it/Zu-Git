@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
@@ -193,6 +193,21 @@ pub struct RepoSyncStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TokenStoreStatus {
+    /// "keychain" | "credential-manager" | "secret-service" | "fallback-file"
+    pub provider: String,
+    /// Human-readable description of the provider.
+    pub provider_detail: String,
+    /// Whether the probe passed (i.e. the system store is actually usable).
+    pub provider_ok: bool,
+    pub github_token_present: bool,
+    pub jira_token_present: bool,
+    /// None = never saved in this session; Some(true) = vault used; Some(false) = file fallback used.
+    pub last_save_used_vault: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DashboardSnapshot {
     pub prs: Vec<PullRequestSummary>,
     pub viewer_login: Option<String>,
@@ -201,6 +216,7 @@ pub struct DashboardSnapshot {
     pub refreshed_at: String,
     pub integrations: Vec<IntegrationStatus>,
     pub repo_syncs: Vec<RepoSyncStatus>,
+    pub token_store: TokenStoreStatus,
 }
 
 #[derive(Debug, Serialize)]
@@ -277,7 +293,11 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         auto_refresh_minutes: if auto_refresh > 0 { auto_refresh } else { 5 },
         internal_author_marker: {
             let m = values.internal_author_marker.trim().to_string();
-            if m.is_empty() { "-zupit".to_string() } else { m }
+            if m.is_empty() {
+                "-zupit".to_string()
+            } else {
+                m
+            }
         },
         collaborator_github_users: split_multiline_list(&values.collaborator_github_users),
         jira_base_url: values
@@ -309,7 +329,11 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
             .map(|(repo, board)| format!("{} = {}", repo, board))
             .collect::<Vec<_>>()
             .join("\n"),
-        notifications_enabled: if settings.notifications_enabled { "on".to_string() } else { String::new() },
+        notifications_enabled: if settings.notifications_enabled {
+            "on".to_string()
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -352,9 +376,15 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             current_reviewer_avatar_url: None,
             previous_approver: Some("luca".to_string()),
             previous_approver_avatar_url: None,
-            pending_reviewers: vec![ReviewActor { login: "chiara".to_string(), avatar_url: None }],
+            pending_reviewers: vec![ReviewActor {
+                login: "chiara".to_string(),
+                avatar_url: None,
+            }],
             current_approvers: vec![],
-            stale_approvers: vec![ReviewActor { login: "luca".to_string(), avatar_url: None }],
+            stale_approvers: vec![ReviewActor {
+                login: "luca".to_string(),
+                avatar_url: None,
+            }],
             blocking_reviewers: vec![],
             commented_reviewers: vec![],
             review_state: ReviewState::ApprovedStale,
@@ -389,7 +419,10 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             previous_approver: None,
             previous_approver_avatar_url: None,
             pending_reviewers: vec![],
-            current_approvers: vec![ReviewActor { login: "federico".to_string(), avatar_url: None }],
+            current_approvers: vec![ReviewActor {
+                login: "federico".to_string(),
+                avatar_url: None,
+            }],
             stale_approvers: vec![],
             blocking_reviewers: vec![],
             commented_reviewers: vec![],
@@ -424,7 +457,10 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             current_reviewer_avatar_url: None,
             previous_approver: None,
             previous_approver_avatar_url: None,
-            pending_reviewers: vec![ReviewActor { login: "andrea".to_string(), avatar_url: None }],
+            pending_reviewers: vec![ReviewActor {
+                login: "andrea".to_string(),
+                avatar_url: None,
+            }],
             current_approvers: vec![],
             stale_approvers: vec![],
             blocking_reviewers: vec![],

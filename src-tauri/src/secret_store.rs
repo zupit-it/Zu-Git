@@ -16,7 +16,14 @@ fn account(key: &str) -> &str {
 #[cfg(target_os = "macos")]
 pub fn get_secret(key: &str) -> String {
     let output = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", SERVICE, "-a", account(key), "-w"])
+        .args([
+            "find-generic-password",
+            "-s",
+            SERVICE,
+            "-a",
+            account(key),
+            "-w",
+        ])
         .output()
         .ok();
     match output {
@@ -30,14 +37,32 @@ pub fn get_secret(key: &str) -> String {
 #[cfg(target_os = "macos")]
 pub fn set_secret(key: &str, value: &str) -> bool {
     if value.is_empty() {
-        std::process::Command::new("security")
+        let output = std::process::Command::new("security")
             .args(["delete-generic-password", "-s", SERVICE, "-a", account(key)])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .output();
+
+        match output {
+            Ok(out) if out.status.success() => true,
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                stderr.contains("could not be found")
+                    || stderr.contains("The specified item could not be found")
+                    || stderr.contains("-25300")
+            }
+            Err(_) => false,
+        }
     } else {
         std::process::Command::new("security")
-            .args(["add-generic-password", "-U", "-s", SERVICE, "-a", account(key), "-w", value])
+            .args([
+                "add-generic-password",
+                "-U",
+                "-s",
+                SERVICE,
+                "-a",
+                account(key),
+                "-w",
+                value,
+            ])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -47,17 +72,44 @@ pub fn set_secret(key: &str, value: &str) -> bool {
 #[cfg(target_os = "macos")]
 fn probe_secure_store() -> Option<String> {
     const CANARY: &str = "__zugit_probe__";
-    let write = std::process::Command::new("security")
-        .args(["add-generic-password", "-U", "-s", SERVICE, "-a", "__probe__", "-w", CANARY])
-        .output()
-        .ok()?;
-    if !write.status.success() {
-        return Some("Could not write to macOS Keychain.".to_string());
+
+    let run = |args: &[&str]| {
+        std::process::Command::new("security")
+            .args(args)
+            .output()
+            .map_err(|e| format!("Could not run `security`: {e}"))
+            .and_then(|o| {
+                if o.status.success() {
+                    Ok(o)
+                } else {
+                    Err(format!("`security` exited with {}", o.status))
+                }
+            })
+    };
+
+    if let Err(e) = run(&[
+        "add-generic-password",
+        "-U",
+        "-s",
+        SERVICE,
+        "-a",
+        "__probe__",
+        "-w",
+        CANARY,
+    ]) {
+        return Some(format!("Keychain write failed: {e}"));
     }
-    let read = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", SERVICE, "-a", "__probe__", "-w"])
-        .output()
-        .ok()?;
+    let read = match run(&[
+        "find-generic-password",
+        "-s",
+        SERVICE,
+        "-a",
+        "__probe__",
+        "-w",
+    ]) {
+        Ok(o) => o,
+        Err(e) => return Some(format!("Keychain read failed: {e}")),
+    };
     let _ = std::process::Command::new("security")
         .args(["delete-generic-password", "-s", SERVICE, "-a", "__probe__"])
         .output();
@@ -71,14 +123,14 @@ fn probe_secure_store() -> Option<String> {
 
 // ── File-based token encryption (fallback when keyring fails) ────────────────
 //
-// On Windows we use DPAPI via PowerShell's ConvertTo/From-SecureString, which
-// is the same mechanism underlying the Credential Manager.  The ciphertext is a
-// DPAPI hex blob that can only be decrypted by the same user on the same machine.
-// On other platforms (where keyring should always work) we store plaintext with a
-// "plain:" sentinel so legacy migration still works.
+// On Windows we use DPAPI via PowerShell's ConvertTo/From-SecureString. The
+// ciphertext can only be decrypted by the same user on the same machine.
+// Other platforms intentionally do not have a file fallback for new writes:
+// legacy plaintext values can still be read and migrated, but we never create
+// new plaintext token entries.
 
 /// Encrypts a token for storage in the settings file.
-/// Returns `dpapi:<hex-blob>` on Windows, `plain:<token>` elsewhere.
+/// Returns `dpapi:<hex-blob>` on Windows. Returns an empty string elsewhere.
 pub fn encrypt_token_for_file(plaintext: &str) -> String {
     if plaintext.is_empty() {
         return String::new();
@@ -87,10 +139,13 @@ pub fn encrypt_token_for_file(plaintext: &str) -> String {
     {
         encrypt_dpapi(plaintext)
             .map(|c| format!("dpapi:{c}"))
-            .unwrap_or_else(|| format!("plain:{plaintext}"))
+            .unwrap_or_default()
     }
     #[cfg(not(target_os = "windows"))]
-    format!("plain:{plaintext}")
+    {
+        let _ = plaintext;
+        String::new()
+    }
 }
 
 /// Decrypts a token stored by `encrypt_token_for_file`.
@@ -103,7 +158,10 @@ pub fn decrypt_token_from_file(stored: &str) -> String {
         #[cfg(target_os = "windows")]
         return decrypt_dpapi(cipher).unwrap_or_default();
         #[cfg(not(target_os = "windows"))]
-        { let _ = cipher; return String::new(); }
+        {
+            let _ = cipher;
+            return String::new();
+        }
     }
     if let Some(plain) = stored.strip_prefix("plain:") {
         return plain.to_string();
@@ -146,14 +204,16 @@ fn encrypt_dpapi(plaintext: &str) -> Option<String> {
 
 /// DPAPI decrypt via PowerShell ConvertTo-SecureString.
 /// The ciphertext is a hex-only string (safe to embed directly).
+/// Uses try/finally to free the BSTR allocated by SecureStringToBSTR.
 #[cfg(target_os = "windows")]
 fn decrypt_dpapi(ciphertext: &str) -> Option<String> {
     use std::process::{Command, Stdio};
 
     let script = format!(
         "$ss = ConvertTo-SecureString '{ciphertext}'; \
-         [Runtime.InteropServices.Marshal]::PtrToStringAuto(\
-           [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))"
+         $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss); \
+         try {{ [Runtime.InteropServices.Marshal]::PtrToStringAuto($ptr) }} \
+         finally {{ [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }}"
     );
 
     let out = Command::new("powershell")
@@ -184,7 +244,11 @@ pub fn set_secret(key: &str, value: &str) -> bool {
         return false;
     };
     if value.is_empty() {
-        entry.delete_credential().is_ok()
+        // NoEntry is fine — the desired state (nothing stored) is already achieved.
+        matches!(
+            entry.delete_credential(),
+            Ok(()) | Err(keyring::Error::NoEntry)
+        )
     } else {
         entry.set_password(value).is_ok()
     }
@@ -220,18 +284,43 @@ pub fn get_secret_store_info() -> SecretStoreInfo {
     #[cfg(target_os = "windows")]
     let (provider, label) = (
         "credential-manager",
-        format!("Windows Credential Manager ({}). Secured by your Windows account.", SERVICE),
+        format!(
+            "Windows Credential Manager ({}). Secured by your Windows account.",
+            SERVICE
+        ),
     );
     #[cfg(target_os = "linux")]
-    let (provider, label) = ("secret-service", format!("Linux Secret Service ({}).", SERVICE));
+    let (provider, label) = (
+        "secret-service",
+        format!("Linux Secret Service ({}).", SERVICE),
+    );
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    let (provider, label) = ("fallback-file", "No supported system credential store.".to_string());
+    let (provider, label) = (
+        "fallback-file",
+        "No supported system credential store.".to_string(),
+    );
 
     match probe_secure_store() {
-        None => SecretStoreInfo { provider: provider.to_string(), detail: label },
-        Some(err) => SecretStoreInfo {
-            provider: "fallback-file".to_string(),
-            detail: format!("Secure store probe failed: {}. Tokens will not persist between sessions.", err),
+        None => SecretStoreInfo {
+            provider: provider.to_string(),
+            detail: label,
         },
+        Some(err) => {
+            #[cfg(target_os = "windows")]
+            let detail = format!(
+                "Secure store probe failed: {}. Tokens can fall back to the app data folder with DPAPI encryption.",
+                err
+            );
+            #[cfg(not(target_os = "windows"))]
+            let detail = format!(
+                "Secure store probe failed: {}. Tokens cannot be persisted securely until the system credential store is available.",
+                err
+            );
+
+            SecretStoreInfo {
+                provider: "fallback-file".to_string(),
+                detail,
+            }
+        }
     }
 }

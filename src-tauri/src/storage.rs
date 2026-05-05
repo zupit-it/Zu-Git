@@ -3,33 +3,23 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-use crate::models::{
-    normalize_settings, AppSettings, ListFilterPreferences,
-    SettingsFormValues,
+use crate::models::{normalize_settings, AppSettings, ListFilterPreferences, SettingsFormValues};
+use crate::secret_store::{
+    decrypt_token_from_file, encrypt_token_for_file, get_secret, set_secret,
 };
-use crate::secret_store::{decrypt_token_from_file, encrypt_token_for_file, get_secret, set_secret};
 
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("settings.json"))
 }
 
 fn filters_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("list-filters.json"))
 }
 
 fn ensure_data_dir(app: &tauri::AppHandle) -> Result<(), String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
 }
 
@@ -55,17 +45,57 @@ struct PersistedSettings {
     jira_repo_boards: std::collections::HashMap<String, String>,
     #[serde(default = "default_notifications_enabled")]
     notifications_enabled: bool,
-    // Legacy field – migrate on first load.
-    #[serde(default, skip_serializing)]
+    // Legacy/fallback field. New fallback writes are only produced when they can
+    // be protected by the platform (currently DPAPI on Windows).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     github_token: Option<String>,
-    #[serde(default, skip_serializing)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     jira_token: Option<String>,
 }
 
-fn default_api_base_url() -> String { "https://api.github.com".to_string() }
-fn default_refresh_minutes() -> u32 { 5 }
-fn default_author_marker() -> String { "-zupit".to_string() }
-fn default_notifications_enabled() -> bool { true }
+fn default_api_base_url() -> String {
+    "https://api.github.com".to_string()
+}
+fn default_refresh_minutes() -> u32 {
+    5
+}
+fn default_author_marker() -> String {
+    "-zupit".to_string()
+}
+fn default_notifications_enabled() -> bool {
+    true
+}
+
+fn token_fallback_value(token: &str) -> Option<String> {
+    let encrypted = encrypt_token_for_file(token);
+    if encrypted.is_empty() {
+        None
+    } else {
+        Some(encrypted)
+    }
+}
+
+fn validate_token_persistence(
+    label: &str,
+    token: &str,
+    stored_in_vault: bool,
+) -> Result<Option<String>, String> {
+    if stored_in_vault {
+        return Ok(None);
+    }
+
+    if token.is_empty() {
+        return Ok(None);
+    }
+
+    token_fallback_value(token)
+        .map(Some)
+        .ok_or_else(|| {
+            format!(
+                "Could not store the {label} token in the system credential store, and this platform has no encrypted file fallback."
+            )
+        })
+}
 
 pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String> {
     let path = settings_path(app)?;
@@ -94,7 +124,8 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         if !from_keychain.is_empty() {
             from_keychain
         } else {
-            persisted.github_token
+            persisted
+                .github_token
                 .as_deref()
                 .map(decrypt_token_from_file)
                 .unwrap_or_default()
@@ -105,7 +136,8 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         if !from_keychain.is_empty() {
             from_keychain
         } else {
-            persisted.jira_token
+            persisted
+                .jira_token
                 .as_deref()
                 .map(decrypt_token_from_file)
                 .unwrap_or_default()
@@ -113,10 +145,18 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
     };
 
     // If legacy tokens were in the file, migrate them to the keychain.
-    if persisted.github_token.as_deref().is_some_and(|t| !t.is_empty()) {
+    if persisted
+        .github_token
+        .as_deref()
+        .is_some_and(|t| !t.is_empty())
+    {
         set_secret("githubToken", &github_token);
     }
-    if persisted.jira_token.as_deref().is_some_and(|t| !t.is_empty()) {
+    if persisted
+        .jira_token
+        .as_deref()
+        .is_some_and(|t| !t.is_empty())
+    {
         set_secret("jiraToken", &jira_token);
     }
 
@@ -136,21 +176,32 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
             .map(|(repo, board)| format!("{} = {}", repo, board))
             .collect::<Vec<_>>()
             .join("\n"),
-        notifications_enabled: if persisted.notifications_enabled { "on".to_string() } else { String::new() },
+        notifications_enabled: if persisted.notifications_enabled {
+            "on".to_string()
+        } else {
+            String::new()
+        },
     };
 
     Ok(normalize_settings(&form))
 }
 
+/// Returns the normalised settings and whether both tokens were persisted to the system vault
+/// (`true`) or fell back to the encrypted settings file (`false`).
 pub async fn save_settings(
     app: &tauri::AppHandle,
     values: &SettingsFormValues,
-) -> Result<AppSettings, String> {
+) -> Result<(AppSettings, bool), String> {
     let normalized = normalize_settings(values);
 
-    // Persist tokens to keychain; fall back to settings file if it fails.
+    // Persist tokens to the system vault; fall back to an encrypted file only on
+    // platforms where `encrypt_token_for_file` can protect the token.
     let github_in_keychain = set_secret("githubToken", &normalized.github_token);
-    let jira_in_keychain   = set_secret("jiraToken",   &normalized.jira_token);
+    let jira_in_keychain = set_secret("jiraToken", &normalized.jira_token);
+    let github_token_fallback =
+        validate_token_persistence("GitHub", &normalized.github_token, github_in_keychain)?;
+    let jira_token_fallback =
+        validate_token_persistence("Jira", &normalized.jira_token, jira_in_keychain)?;
 
     // Write everything-except-tokens to disk (unless keychain failed, then include them).
     ensure_data_dir(app)?;
@@ -164,15 +215,16 @@ pub async fn save_settings(
         jira_email: normalized.jira_email.clone(),
         jira_repo_boards: normalized.jira_repo_boards.clone(),
         notifications_enabled: normalized.notifications_enabled,
-        github_token: if github_in_keychain { None } else { Some(encrypt_token_for_file(&normalized.github_token)) },
-        jira_token:   if jira_in_keychain   { None } else { Some(encrypt_token_for_file(&normalized.jira_token))   },
+        github_token: github_token_fallback,
+        jira_token: jira_token_fallback,
     };
 
     let path = settings_path(app)?;
     let json = serde_json::to_string_pretty(&persisted).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
 
-    Ok(normalized)
+    let used_vault = github_in_keychain && jira_in_keychain;
+    Ok((normalized, used_vault))
 }
 
 pub async fn load_list_filter_preferences(
@@ -187,8 +239,8 @@ pub async fn load_list_filter_preferences(
     });
     match content_opt {
         Some(content) => {
-            let partial: serde_json::Value =
-                serde_json::from_str(&content).unwrap_or(serde_json::Value::Object(Default::default()));
+            let partial: serde_json::Value = serde_json::from_str(&content)
+                .unwrap_or(serde_json::Value::Object(Default::default()));
             let defaults = ListFilterPreferences::default();
             Ok(ListFilterPreferences {
                 only_my_pending_reviews: partial

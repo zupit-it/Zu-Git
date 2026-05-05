@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { DashboardBootstrap, DashboardSnapshot, SaveSettingsResult } from "./shared/rpc";
+import type { DashboardBootstrap, DashboardSnapshot, SaveSettingsResult, TokenStoreStatus } from "./shared/rpc";
 import type { PullRequestSummary, ReviewActor } from "./shared/pr-model";
 import {
   defaultListFilterPreferences,
@@ -965,6 +965,61 @@ function renderRepoSyncs(snapshot: DashboardSnapshot) {
     .join("");
 }
 
+function renderTokenStore(ts: TokenStoreStatus) {
+  const target = document.querySelector<HTMLElement>("[data-token-store]");
+  if (!target) return;
+
+  const providerLabel: Record<string, string> = {
+    keychain: "macOS Keychain",
+    "credential-manager": "Windows Credential Manager",
+    "secret-service": "Linux Secret Service",
+    "fallback-file": "File fallback (DPAPI-encrypted on Windows)",
+    "": "Unknown",
+  };
+
+  const storeLabel = providerLabel[ts.provider] ?? ts.provider;
+  const storeOk = ts.providerOk;
+
+  const tokenRow = (label: string, present: boolean) =>
+    `<div class="token-store-row">
+       <span class="token-store-label">${label}</span>
+       <span class="token-store-badge token-store-badge-${present ? "ok" : "missing"}">
+         ${present ? "Present" : "Missing"}
+       </span>
+     </div>`;
+
+  const saveRow = () => {
+    if (ts.lastSaveUsedVault === null) {
+      return `<div class="token-store-row">
+        <span class="token-store-label">Last save</span>
+        <span class="token-store-badge token-store-badge-neutral">Not saved this session</span>
+      </div>`;
+    }
+    return `<div class="token-store-row">
+      <span class="token-store-label">Last save</span>
+      <span class="token-store-badge token-store-badge-${ts.lastSaveUsedVault ? "ok" : "warn"}">
+        ${ts.lastSaveUsedVault ? "System vault" : "File fallback"}
+      </span>
+    </div>`;
+  };
+
+  target.innerHTML = `
+    <article class="integration-card integration-${storeOk ? "ok" : "warn"}">
+      <div class="integration-header">
+        <span class="metric-label">Token storage</span>
+        <span class="integration-pill">${storeOk ? "Vault active" : "Fallback active"}</span>
+      </div>
+      <strong>${storeLabel}</strong>
+      <div class="token-store-rows">
+        ${tokenRow("GitHub token", ts.githubTokenPresent)}
+        ${tokenRow("Jira token", ts.jiraTokenPresent)}
+        ${saveRow()}
+      </div>
+      ${ts.providerDetail ? `<p>${ts.providerDetail}</p>` : ""}
+    </article>
+  `;
+}
+
 function renderWarnings(snapshot: DashboardSnapshot) {
   const target = document.querySelector<HTMLElement>("[data-warnings]");
   if (!target) return;
@@ -1029,6 +1084,7 @@ function renderDashboard(snapshot: DashboardSnapshot) {
   renderSummary(snapshot.prs);
   renderIntegrations(snapshot);
   renderRepoSyncs(snapshot);
+  renderTokenStore(snapshot.tokenStore);
   renderListFilters(snapshot);
   renderListBoard(filteredPrs);
   renderWarnings(snapshot);

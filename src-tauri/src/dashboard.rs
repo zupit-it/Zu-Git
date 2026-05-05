@@ -4,10 +4,21 @@ use std::sync::Mutex;
 use crate::github::{CachedPrDetails, GithubPullRequestRecord, GithubReviewSummary};
 use crate::jira::JiraIssueSummary;
 use crate::models::{
-    settings_ready_for_github, settings_ready_for_jira, AppSettings, AuthorType, DashboardSnapshot,
-    IntegrationStatus, MatchStrategy, PipelineState, Priority, PullRequestSummary, RepoSyncStatus,
-    ReviewActor, ReviewState, mock_pull_requests,
+    mock_pull_requests, settings_ready_for_github, settings_ready_for_jira, AppSettings,
+    AuthorType, DashboardSnapshot, IntegrationStatus, MatchStrategy, PipelineState, Priority,
+    PullRequestSummary, RepoSyncStatus, ReviewActor, ReviewState, TokenStoreStatus,
 };
+
+fn placeholder_token_store() -> TokenStoreStatus {
+    TokenStoreStatus {
+        provider: String::new(),
+        provider_detail: String::new(),
+        provider_ok: false,
+        github_token_present: false,
+        jira_token_present: false,
+        last_save_used_vault: None,
+    }
+}
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -58,15 +69,25 @@ pub async fn build_dashboard_snapshot(
             refreshed_at: now,
             integrations,
             repo_syncs,
+            token_store: placeholder_token_store(),
         };
     }
 
-    match fetch_live(settings, pr_cache, jira_cache, client, &mut integrations, &mut warnings).await
+    match fetch_live(
+        settings,
+        pr_cache,
+        jira_cache,
+        client,
+        &mut integrations,
+        &mut warnings,
+    )
+    .await
     {
         Ok(snapshot) => snapshot,
         Err(err) => {
             warnings.push(err);
-            warnings.push("Showing mock data while the live integration is unavailable.".to_string());
+            warnings
+                .push("Showing mock data while the live integration is unavailable.".to_string());
             integrations[0].ok = false;
             DashboardSnapshot {
                 prs: sort_pull_requests(mock_pull_requests()),
@@ -76,6 +97,7 @@ pub async fn build_dashboard_snapshot(
                 refreshed_at: now,
                 integrations,
                 repo_syncs: vec![],
+                token_store: placeholder_token_store(),
             }
         }
     }
@@ -116,7 +138,10 @@ async fn fetch_live(
             all_prs.extend(result.pull_requests.clone());
         } else {
             failed_count += 1;
-            let error = result.error.clone().unwrap_or_else(|| "Unknown error.".to_string());
+            let error = result
+                .error
+                .clone()
+                .unwrap_or_else(|| "Unknown error.".to_string());
             repo_syncs.push(RepoSyncStatus {
                 repo: result.repo.clone(),
                 ok: false,
@@ -166,7 +191,10 @@ async fn fetch_live(
         integrations[1].detail =
             "GitHub data is live, Jira enrichment is using placeholders.".to_string();
     } else {
-        let linked = enriched.iter().filter(|pr| pr.jira_key != "No ticket").count();
+        let linked = enriched
+            .iter()
+            .filter(|pr| pr.jira_key != "No ticket")
+            .count();
         integrations[1].ok = true;
         integrations[1].detail = format!(
             "Jira enrichment active for linked tickets. {} PRs include a Jira key. {} repo-to-board mappings configured.",
@@ -198,6 +226,7 @@ async fn fetch_live(
         refreshed_at: now,
         integrations: integrations.clone(),
         repo_syncs,
+        token_store: placeholder_token_store(), // overwritten in commands.rs
     })
 }
 
@@ -312,9 +341,10 @@ fn enrich(
         .unwrap_or("No ticket")
         .to_string();
 
-    let jira_url = n.jira_key.as_ref().map(|_| {
-        format!("{}/browse/{}", settings.jira_base_url, effective_key)
-    });
+    let jira_url = n
+        .jira_key
+        .as_ref()
+        .map(|_| format!("{}/browse/{}", settings.jira_base_url, effective_key));
 
     let rs = &pr.review_summary;
 
@@ -337,7 +367,9 @@ fn enrich(
         jira_release: issue
             .map(|i| i.release.clone())
             .unwrap_or_else(|| "Unscheduled".to_string()),
-        jira_release_date: issue.and_then(|i| i.release_date.clone()).and_then(|d| format_release_date(&d)),
+        jira_release_date: issue
+            .and_then(|i| i.release_date.clone())
+            .and_then(|d| format_release_date(&d)),
         jira_status: issue
             .map(|i| i.status.clone())
             .unwrap_or_else(|| "Unknown".to_string()),
@@ -354,10 +386,7 @@ fn enrich(
             .and_then(|a| pr.participant_avatars.get(a))
             .cloned(),
         current_reviewer: n.current_reviewer.clone(),
-        current_reviewer_avatar_url: pr
-            .participant_avatars
-            .get(&n.current_reviewer)
-            .cloned(),
+        current_reviewer_avatar_url: pr.participant_avatars.get(&n.current_reviewer).cloned(),
         previous_approver: n.previous_approver.clone(),
         previous_approver_avatar_url: n
             .previous_approver
@@ -390,9 +419,15 @@ fn build_actors(logins: &[String], avatars: &HashMap<String, String>) -> Vec<Rev
 }
 
 fn choose_review_state(rs: &GithubReviewSummary) -> ReviewState {
-    if !rs.blocking_reviewers.is_empty() { return ReviewState::ChangesRequested; }
-    if !rs.current_approvers.is_empty() { return ReviewState::Approved; }
-    if !rs.stale_approvers.is_empty() { return ReviewState::ApprovedStale; }
+    if !rs.blocking_reviewers.is_empty() {
+        return ReviewState::ChangesRequested;
+    }
+    if !rs.current_approvers.is_empty() {
+        return ReviewState::Approved;
+    }
+    if !rs.stale_approvers.is_empty() {
+        return ReviewState::ApprovedStale;
+    }
     ReviewState::NeedsReview
 }
 
@@ -417,7 +452,9 @@ fn priority_weight(p: &Priority) -> u8 {
 fn sort_pull_requests(mut prs: Vec<PullRequestSummary>) -> Vec<PullRequestSummary> {
     prs.sort_by(|a, b| {
         let stale = b.has_stale_approval.cmp(&a.has_stale_approval);
-        if stale != std::cmp::Ordering::Equal { return stale; }
+        if stale != std::cmp::Ordering::Equal {
+            return stale;
+        }
         priority_weight(&a.jira_priority).cmp(&priority_weight(&b.jira_priority))
     });
     prs
@@ -437,17 +474,25 @@ fn relative_date(iso: &str) -> String {
         .num_minutes()
         .max(0) as u64;
 
-    if minutes < 1 { return "just now".to_string(); }
-    if minutes < 60 { return format!("{} min ago", minutes); }
+    if minutes < 1 {
+        return "just now".to_string();
+    }
+    if minutes < 60 {
+        return format!("{} min ago", minutes);
+    }
     let hours = minutes / 60;
-    if hours < 24 { return format!("{} h ago", hours); }
+    if hours < 24 {
+        return format!("{} h ago", hours);
+    }
     format!("{} d ago", hours / 24)
 }
 
 fn format_release_date(iso_date: &str) -> Option<String> {
     use chrono::Datelike;
     let date = chrono::NaiveDate::parse_from_str(iso_date, "%Y-%m-%d").ok()?;
-    let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     Some(format!(
         "{} {}, {}",
         months[(date.month0()) as usize],

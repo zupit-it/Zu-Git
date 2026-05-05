@@ -7,8 +7,7 @@ use serde::Deserialize;
 
 use crate::models::{AppSettings, MatchStrategy};
 
-static JIRA_KEY_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b[A-Z][A-Z0-9]+-\d+\b").unwrap());
+static JIRA_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b[A-Z][A-Z0-9]+-\d+\b").unwrap());
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -43,15 +42,24 @@ pub fn extract_jira_key_from_title(title: &str, expected_board: Option<&str>) ->
     if let Some(board) = expected_board {
         let prefix = format!("{}-", board.to_uppercase());
         if let Some(k) = keys.iter().find(|k| k.starts_with(&prefix)) {
-            return JiraKeyMatch { key: Some(k.clone()), strategy: MatchStrategy::TitleBoard };
+            return JiraKeyMatch {
+                key: Some(k.clone()),
+                strategy: MatchStrategy::TitleBoard,
+            };
         }
     }
 
     if let Some(k) = keys.first() {
-        return JiraKeyMatch { key: Some(k.clone()), strategy: MatchStrategy::TitleAny };
+        return JiraKeyMatch {
+            key: Some(k.clone()),
+            strategy: MatchStrategy::TitleAny,
+        };
     }
 
-    JiraKeyMatch { key: None, strategy: MatchStrategy::None }
+    JiraKeyMatch {
+        key: None,
+        strategy: MatchStrategy::None,
+    }
 }
 
 // ── Jira API response types ───────────────────────────────────────────────────
@@ -78,10 +86,14 @@ struct JiraFields {
 }
 
 #[derive(Debug, Deserialize)]
-struct JiraPriorityField { name: Option<String> }
+struct JiraPriorityField {
+    name: Option<String>,
+}
 
 #[derive(Debug, Deserialize)]
-struct JiraStatusField { name: Option<String> }
+struct JiraStatusField {
+    name: Option<String>,
+}
 
 #[derive(Debug, Deserialize)]
 struct JiraAssigneeField {
@@ -95,7 +107,6 @@ struct JiraFixVersion {
     #[serde(rename = "releaseDate")]
     release_date: Option<String>,
 }
-
 
 fn map_issue(issue: &JiraIssueResponse) -> JiraIssueSummary {
     let release = issue
@@ -118,12 +129,34 @@ fn map_issue(issue: &JiraIssueResponse) -> JiraIssueSummary {
 
     JiraIssueSummary {
         key: issue.key.clone(),
-        summary: issue.fields.summary.clone().unwrap_or_else(|| "No Jira summary".to_string()),
-        priority: issue.fields.priority.as_ref().and_then(|p| p.name.clone()).unwrap_or_else(|| "Medium".to_string()),
-        status: issue.fields.status.as_ref().and_then(|s| s.name.clone()).unwrap_or_else(|| "Unknown".to_string()),
-        release: if release.is_empty() { "Unscheduled".to_string() } else { release },
+        summary: issue
+            .fields
+            .summary
+            .clone()
+            .unwrap_or_else(|| "No Jira summary".to_string()),
+        priority: issue
+            .fields
+            .priority
+            .as_ref()
+            .and_then(|p| p.name.clone())
+            .unwrap_or_else(|| "Medium".to_string()),
+        status: issue
+            .fields
+            .status
+            .as_ref()
+            .and_then(|s| s.name.clone())
+            .unwrap_or_else(|| "Unknown".to_string()),
+        release: if release.is_empty() {
+            "Unscheduled".to_string()
+        } else {
+            release
+        },
         release_date,
-        assignee: issue.fields.assignee.as_ref().and_then(|a| a.display_name.clone()),
+        assignee: issue
+            .fields
+            .assignee
+            .as_ref()
+            .and_then(|a| a.display_name.clone()),
     }
 }
 
@@ -141,7 +174,10 @@ pub async fn fetch_jira_issues(
 ) -> HashMap<String, Option<JiraIssueSummary>> {
     let unique_keys: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
-        keys.iter().filter(|k| !k.is_empty() && seen.insert(*k)).cloned().collect()
+        keys.iter()
+            .filter(|k| !k.is_empty() && seen.insert(*k))
+            .cloned()
+            .collect()
     };
 
     let mut result: HashMap<String, Option<JiraIssueSummary>> = HashMap::new();
@@ -206,7 +242,11 @@ async fn fetch_chunk(
     }
 
     if !status.is_success() {
-        return Err(format!("Jira search failed ({}) for {}", status, keys.join(", ")));
+        return Err(format!(
+            "Jira search failed ({}) for {}",
+            status,
+            keys.join(", ")
+        ));
     }
 
     let payload: JiraSearchResponse = response.json().await.map_err(|e| e.to_string())?;

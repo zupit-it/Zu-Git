@@ -16,6 +16,11 @@ pub struct AppState {
     pub pr_cache: Mutex<HashMap<String, CachedPrDetails>>,
     pub jira_cache: Mutex<HashMap<String, Option<JiraIssueSummary>>>,
     pub http_client: reqwest::Client,
+    /// Probe result cached after the first call — avoids re-running the probe on every refresh.
+    pub secret_store_info: std::sync::OnceLock<models::SecretStoreInfo>,
+    /// Whether the last `save_settings` successfully stored tokens in the system vault.
+    /// None = settings never saved in this session.
+    pub last_save_used_vault: Mutex<Option<bool>>,
 }
 
 pub fn run() {
@@ -57,6 +62,8 @@ pub fn run() {
             pr_cache: Mutex::new(HashMap::new()),
             jira_cache: Mutex::new(HashMap::new()),
             http_client: reqwest::Client::new(),
+            secret_store_info: std::sync::OnceLock::new(),
+            last_save_used_vault: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,

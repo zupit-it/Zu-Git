@@ -19,6 +19,16 @@ export interface RepoSyncStatus {
   detail: string;
 }
 
+export interface TokenStoreStatus {
+  provider: "keychain" | "credential-manager" | "secret-service" | "fallback-file" | "";
+  providerDetail: string;
+  providerOk: boolean;
+  githubTokenPresent: boolean;
+  jiraTokenPresent: boolean;
+  /** null = never saved in this session */
+  lastSaveUsedVault: boolean | null;
+}
+
 export interface DashboardSnapshot {
   prs: PullRequestSummary[];
   viewerLogin?: string;
@@ -27,6 +37,7 @@ export interface DashboardSnapshot {
   refreshedAt: string;
   integrations: IntegrationStatus[];
   repoSyncs: RepoSyncStatus[];
+  tokenStore: TokenStoreStatus;
 }
 
 export interface DashboardBootstrap {

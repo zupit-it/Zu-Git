@@ -1,19 +1,56 @@
 use crate::models::{
-    DashboardBootstrap, DashboardSnapshot, ListFilterPreferences, SaveSettingsResult,
-    SettingsFormValues, serialize_settings_form,
+    serialize_settings_form, AppSettings, DashboardBootstrap, DashboardSnapshot,
+    ListFilterPreferences, SaveSettingsResult, SettingsFormValues, TokenStoreStatus,
 };
 use crate::{dashboard, secret_store, storage, AppState};
+
+fn build_token_store_status(
+    settings: &AppSettings,
+    state: &tauri::State<'_, AppState>,
+) -> TokenStoreStatus {
+    let info = state
+        .secret_store_info
+        .get_or_init(|| secret_store::get_secret_store_info());
+    let last_save_used_vault = *state.last_save_used_vault.lock().unwrap();
+    let last_save_used_file_fallback = last_save_used_vault == Some(false);
+    let provider = if last_save_used_file_fallback {
+        "fallback-file".to_string()
+    } else {
+        info.provider.clone()
+    };
+    let provider_detail = if last_save_used_file_fallback {
+        "The last save used the encrypted file fallback because the system credential store write did not succeed.".to_string()
+    } else {
+        info.detail.clone()
+    };
+    let provider_ok = provider != "fallback-file";
+    TokenStoreStatus {
+        provider,
+        provider_detail,
+        provider_ok,
+        github_token_present: !settings.github_token.is_empty(),
+        jira_token_present: !settings.jira_token.is_empty(),
+        last_save_used_vault,
+    }
+}
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn bootstrap(
     app: tauri::AppHandle,
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<DashboardBootstrap, String> {
     let settings = storage::load_settings(&app).await?;
     let list_filters = storage::load_list_filter_preferences(&app).await?;
-    let secret_store = secret_store::get_secret_store_info();
+    // Initialises the OnceLock (runs probe once) and returns a reference.
+    let secret_store_ref = state
+        .secret_store_info
+        .get_or_init(|| secret_store::get_secret_store_info());
+    let secret_store = crate::models::SecretStoreInfo {
+        provider: secret_store_ref.provider.clone(),
+        detail: secret_store_ref.detail.clone(),
+    };
 
     Ok(DashboardBootstrap {
         settings: serialize_settings_form(&settings),
@@ -30,19 +67,21 @@ pub async fn save_settings(
     state: tauri::State<'_, AppState>,
     params: SettingsFormValues,
 ) -> Result<SaveSettingsResult, String> {
-    let settings = storage::save_settings(&app, &params).await?;
+    let (settings, used_vault) = storage::save_settings(&app, &params).await?;
+    *state.last_save_used_vault.lock().unwrap() = Some(used_vault);
 
     // Clear caches after settings change.
     state.pr_cache.lock().unwrap().clear();
     state.jira_cache.lock().unwrap().clear();
 
-    let snap = dashboard::build_dashboard_snapshot(
+    let mut snap = dashboard::build_dashboard_snapshot(
         &settings,
         &state.pr_cache,
         &state.jira_cache,
         &state.http_client,
     )
     .await;
+    snap.token_store = build_token_store_status(&settings, &state);
 
     Ok(SaveSettingsResult {
         settings: serialize_settings_form(&settings),
@@ -58,24 +97,25 @@ pub async fn refresh_dashboard(
     state: tauri::State<'_, AppState>,
 ) -> Result<DashboardSnapshot, String> {
     let settings = storage::load_settings(&app).await?;
-    Ok(dashboard::build_dashboard_snapshot(
+    let mut snap = dashboard::build_dashboard_snapshot(
         &settings,
         &state.pr_cache,
         &state.jira_cache,
         &state.http_client,
     )
-    .await)
+    .await;
+    snap.token_store = build_token_store_status(&settings, &state);
+    Ok(snap)
 }
 
 // ── Open external URL ─────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn open_external(
-    app: tauri::AppHandle,
-    url: String,
-) -> Result<bool, String> {
+pub async fn open_external(app: tauri::AppHandle, url: String) -> Result<bool, String> {
     use tauri_plugin_opener::OpenerExt;
-    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| e.to_string())?;
     Ok(true)
 }
 
