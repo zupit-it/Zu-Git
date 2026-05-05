@@ -1,0 +1,22 @@
+{
+  "name": "zugit",
+  "version": "1.0.0",
+  "description": "Desktop app per visualizzare PR GitHub arricchite con dati Jira.",
+  "scripts": {
+    "vite:dev": "vite",
+    "vite:build": "vite build",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "typecheck": "tsc --noEmit"
+  },
+  "private": true,
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^25.6.0",
+    "typescript": "^5",
+    "vite": "^6"
+  }
+}
