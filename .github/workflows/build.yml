@@ -1,10 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    # Normally triggered by release.yml after the version bump and tag push.
+    # Can also be run manually for ad-hoc builds (version will match whatever is in the repo).
 
 jobs:
   build:

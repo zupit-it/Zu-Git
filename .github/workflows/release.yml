@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # needed to trigger build.yml via gh workflow run
 
 jobs:
   bump:
@@ -20,6 +21,7 @@ jobs:
 
       - name: Bump versions
         run: |
+          set -e
           VERSION="${{ inputs.version }}"
 
           # package.json
@@ -28,7 +30,7 @@ jobs:
           # tauri.conf.json
           jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > _tmp && mv _tmp src-tauri/tauri.conf.json
 
-          # Cargo.toml (first occurrence only — the [package] block)
+          # Cargo.toml — first occurrence only (the [package] block)
           sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" src-tauri/Cargo.toml
 
       - name: Commit & tag
@@ -40,3 +42,10 @@ jobs:
           git tag "v${{ inputs.version }}"
           git push origin HEAD
           git push origin "v${{ inputs.version }}"
+
+      - name: Trigger build
+        # GITHUB_TOKEN cannot trigger workflows via git push (GitHub anti-loop policy),
+        # so we call build.yml explicitly on the tag we just created.
+        run: gh workflow run build.yml --ref "v${{ inputs.version }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
