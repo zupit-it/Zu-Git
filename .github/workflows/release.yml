@@ -1,67 +1,42 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.2.0)"
+        required: true
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
-          - platform: windows-latest
-            args: ""
-          - platform: ubuntu-22.04
-            args: ""
-
-    runs-on: ${{ matrix.platform }}
-
+  bump:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: "npm"
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-
-      - name: Cache Rust
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: "./src-tauri -> target"
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Bump versions
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
+          VERSION="${{ inputs.version }}"
 
-      - name: Install npm dependencies
-        run: npm ci
+          # package.json
+          jq --arg v "$VERSION" '.version = $v' package.json > _tmp && mv _tmp package.json
 
-      - name: Build
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "ZuGit ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+          # tauri.conf.json
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > _tmp && mv _tmp src-tauri/tauri.conf.json
+
+          # Cargo.toml (first occurrence only — the [package] block)
+          sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" src-tauri/Cargo.toml
+
+      - name: Commit & tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "chore: release v${{ inputs.version }}"
+          git tag "v${{ inputs.version }}"
+          git push origin HEAD
+          git push origin "v${{ inputs.version }}"
