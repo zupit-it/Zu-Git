@@ -307,6 +307,38 @@ async fn github_request<T: serde::de::DeserializeOwned>(
     response.json::<T>().await.map_err(|e| e.to_string())
 }
 
+/// Fetches avatar URLs for a list of GitHub logins via `GET /users/{login}` in parallel.
+/// Logins that fail (e.g. 404) are silently skipped.
+pub async fn fetch_user_avatars(
+    logins: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> HashMap<String, String> {
+    #[derive(Deserialize)]
+    struct GithubUser {
+        avatar_url: String,
+    }
+
+    let base = settings.github_api_base_url.trim_end_matches('/');
+    let futures: Vec<_> = logins
+        .iter()
+        .map(|login| {
+            let url = format!("{}/users/{}", base, login);
+            async move {
+                let result: Result<GithubUser, _> =
+                    github_request(&url, settings, client).await;
+                result.ok().map(|u| (login.clone(), u.avatar_url))
+            }
+        })
+        .collect();
+
+    futures::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 /// Derives the GraphQL endpoint from the REST base URL.
 /// - `https://api.github.com`       → `https://api.github.com/graphql`
 /// - `https://hostname/api/v3`      → `https://hostname/api/graphql`

@@ -44,6 +44,8 @@ let groupByRelease = defaultListFilterPreferences.groupByRelease;
 let showDraft = defaultListFilterPreferences.showDraft;
 let hiddenRepos = [...defaultListFilterPreferences.hiddenRepos];
 let currentAutoRefreshMinutes = defaultSettings.autoRefreshMinutes;
+let currentInternalMarker = defaultSettings.internalAuthorMarker;
+let currentCollaborators: string[] = [];
 let autoRefreshIntervalId: number | null = null;
 let syncLabelIntervalId: number | null = null;
 let lastSyncedAt: string | null = null;
@@ -752,58 +754,72 @@ function renderReviewerLoad(snapshot: DashboardSnapshot) {
   const target = document.querySelector<HTMLElement>("[data-reviewer-load]");
   if (!target) return;
 
-  // For each reviewer track:
-  //   pending = PRs where they still need to review
-  //   total   = PRs where they appear in any reviewer role (pending, approved, changes requested, etc.)
-  const map = new Map<string, { login: string; avatarUrl?: string; pending: number; total: number }>();
-
-  const touch = (actor: { login: string; avatarUrl?: string }, pending: boolean) => {
-    const entry = map.get(actor.login);
-    if (entry) {
-      if (pending) entry.pending++;
-      entry.total++;
-    } else {
-      map.set(actor.login, { login: actor.login, avatarUrl: actor.avatarUrl, pending: pending ? 1 : 0, total: 1 });
-    }
-  };
-
-  for (const pr of snapshot.prs) {
-    if (pr.isDraft) continue;
-    for (const r of pr.pendingReviewers)   touch(r, true);
-    for (const r of pr.currentApprovers)   touch(r, false);
-    for (const r of pr.blockingReviewers)  touch(r, false);
-    for (const r of pr.staleApprovers)     touch(r, false);
-    for (const r of pr.commentedReviewers) touch(r, false);
-  }
-
-  // Only show reviewers who have at least one pending review.
-  const active = Array.from(map.values())
-    .filter(r => r.pending > 0)
-    .sort((a, b) => b.pending - a.pending || b.total - a.total);
-
-  if (active.length === 0) {
+  // Use the configured collaborator list as the fixed set of reviewers to display.
+  if (currentCollaborators.length === 0) {
     target.hidden = true;
     target.innerHTML = "";
     return;
   }
 
+  // Build counts from non-draft PRs.
+  const pending = new Map<string, number>();
+  const total   = new Map<string, number>();
+
+  // Map from lowercased login → canonical login as typed in settings,
+  // so matching is case-insensitive but we keep the original key for lookups.
+  const collaboratorByLower = new Map(
+    currentCollaborators.map(l => [l.toLowerCase(), l])
+  );
+
+  const touch = (login: string, isPending: boolean) => {
+    const canonical = collaboratorByLower.get(login.toLowerCase());
+    if (!canonical) return;
+    total.set(canonical, (total.get(canonical) ?? 0) + 1);
+    if (isPending) pending.set(canonical, (pending.get(canonical) ?? 0) + 1);
+  };
+
+  for (const pr of snapshot.prs) {
+    if (pr.isDraft) continue;
+    for (const r of pr.pendingReviewers)   touch(r.login, true);
+    for (const r of pr.currentApprovers)   touch(r.login, false);
+    for (const r of pr.blockingReviewers)  touch(r.login, false);
+    for (const r of pr.staleApprovers)     touch(r.login, false);
+    for (const r of pr.commentedReviewers) touch(r.login, false);
+  }
+
   const viewer = snapshot.viewerLogin?.toLowerCase();
+
+  // Sort: most pending first, then most total assigned; "me" always last.
+  const sorted = [...currentCollaborators].sort((a, b) => {
+    const aIsMe = viewer && a.toLowerCase() === viewer ? 1 : 0;
+    const bIsMe = viewer && b.toLowerCase() === viewer ? 1 : 0;
+    if (aIsMe !== bIsMe) return aIsMe - bIsMe;
+    return (pending.get(b) ?? 0) - (pending.get(a) ?? 0) ||
+           (total.get(b)   ?? 0) - (total.get(a)   ?? 0);
+  });
+
+  const avatars = snapshot.reviewerAvatars ?? {};
+  const stripMarker = (login: string) =>
+    currentInternalMarker ? login.replace(currentInternalMarker, "") : login;
 
   target.hidden = false;
   target.innerHTML =
     `<span class="reviewer-load-label">Review load</span>` +
-    active.map(r => {
-      const isMe = viewer && r.login.toLowerCase() === viewer;
-      return `<span class="reviewer-load-item${isMe ? " reviewer-load-item--me" : ""}">` +
-        avatarSm(r.login, r.avatarUrl) +
-        `<span class="reviewer-load-name">${r.login}</span>` +
+    `<span class="reviewer-load-pills">` +
+    sorted.map(login => {
+      const p = pending.get(login) ?? 0;
+      const t = total.get(login)   ?? 0;
+      return `<span class="reviewer-load-item">` +
+        avatarSm(login, avatars[login]) +
+        `<span class="reviewer-load-name">${stripMarker(login)}</span>` +
         `<span class="reviewer-load-count">` +
-          `<span class="reviewer-load-count__pending">${r.pending}</span>` +
+          `<span class="reviewer-load-count__pending">${p}</span>` +
           `<span class="reviewer-load-count__sep">/</span>` +
-          `<span class="reviewer-load-count__total">${r.total}</span>` +
+          `<span class="reviewer-load-count__total">${t}</span>` +
         `</span>` +
         `</span>`;
-    }).join("");
+    }).join("") +
+    `</span>`;
 }
 
 function renderListFilters(snapshot: DashboardSnapshot) {
@@ -1252,6 +1268,9 @@ async function bootstrap() {
     showDraft = payload.listFilters.showDraft;
     hiddenRepos = payload.listFilters.hiddenRepos;
     currentAutoRefreshMinutes = Number.parseInt(payload.settings.autoRefreshMinutes, 10) || defaultSettings.autoRefreshMinutes;
+    currentInternalMarker = payload.settings.internalAuthorMarker || defaultSettings.internalAuthorMarker;
+    currentCollaborators = payload.settings.collaboratorGithubUsers
+      .split("\n").map(s => s.trim()).filter(Boolean);
     configureAutoRefresh();
   } catch (error) {
     stopSyncLabelTicker();
@@ -1283,6 +1302,9 @@ async function saveSettingsAndRefresh(event: SubmitEvent) {
     });
     currentAutoRefreshMinutes =
       Number.parseInt(payload.settings.autoRefreshMinutes, 10) || defaultSettings.autoRefreshMinutes;
+    currentInternalMarker = payload.settings.internalAuthorMarker || defaultSettings.internalAuthorMarker;
+    currentCollaborators = payload.settings.collaboratorGithubUsers
+      .split("\n").map(s => s.trim()).filter(Boolean);
     configureAutoRefresh();
     renderSettings(payload.settings);
     renderDashboard(payload.dashboard);

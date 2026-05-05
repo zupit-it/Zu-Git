@@ -219,6 +219,9 @@ pub struct DashboardSnapshot {
     pub integrations: Vec<IntegrationStatus>,
     pub repo_syncs: Vec<RepoSyncStatus>,
     pub token_store: TokenStoreStatus,
+    /// Avatar URLs for all configured collaborators (login → url).
+    /// Populated during live refresh; empty for mock data.
+    pub reviewer_avatars: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]

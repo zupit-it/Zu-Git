@@ -70,6 +70,7 @@ pub async fn build_dashboard_snapshot(
             integrations,
             repo_syncs,
             token_store: placeholder_token_store(),
+            reviewer_avatars: HashMap::new(),
         };
     }
 
@@ -98,6 +99,7 @@ pub async fn build_dashboard_snapshot(
                 integrations,
                 repo_syncs: vec![],
                 token_store: placeholder_token_store(),
+                reviewer_avatars: HashMap::new(),
             }
         }
     }
@@ -184,6 +186,26 @@ async fn fetch_live(
         .map(|n| enrich(n, &jira_issues, settings))
         .collect();
 
+    // ── Collaborator avatars ──────────────────────────────────────────────────
+    // Collect avatars already seen in PR participant maps.
+    let mut reviewer_avatars: HashMap<String, String> = HashMap::new();
+    for pr in &all_prs {
+        for (login, url) in &pr.participant_avatars {
+            reviewer_avatars.entry(login.clone()).or_insert_with(|| url.clone());
+        }
+    }
+    // For configured collaborators whose avatar we don't have yet, fetch via API.
+    let missing: Vec<String> = settings
+        .collaborator_github_users
+        .iter()
+        .filter(|login| !reviewer_avatars.contains_key(*login))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        let fetched = crate::github::fetch_user_avatars(&missing, settings, client).await;
+        reviewer_avatars.extend(fetched);
+    }
+
     if !jira_enabled {
         warnings.push(
             "Jira is not configured yet, so release and priority are placeholders.".to_string(),
@@ -227,6 +249,7 @@ async fn fetch_live(
         integrations: integrations.clone(),
         repo_syncs,
         token_store: placeholder_token_store(), // overwritten in commands.rs
+        reviewer_avatars,
     })
 }
 

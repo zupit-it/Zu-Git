@@ -38,6 +38,8 @@ export interface DashboardSnapshot {
   integrations: IntegrationStatus[];
   repoSyncs: RepoSyncStatus[];
   tokenStore: TokenStoreStatus;
+  /** Avatar URLs for configured collaborators: login → url */
+  reviewerAvatars: Record<string, string>;
 }
 
 export interface DashboardBootstrap {
