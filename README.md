@@ -19,7 +19,7 @@ A desktop app for monitoring GitHub pull requests enriched with Jira data, built
 
 ZuGit fires native OS notifications in two cases:
 
-- **Review requested** — when the number of PRs waiting for your review increases since the last refresh
+- **Review requested** — when one or more PRs are newly assigned to you for review since the last refresh (tracked by PR id, so resolving one and receiving another still triggers a notification)
 - **Changes requested** — when a new reviewer requests changes on one of your PRs
 
 Notifications are skipped on the first load to avoid a burst on startup, and can be disabled entirely from Settings. Each refresh resets the auto-refresh timer, so manually triggering a refresh does not cause double-firing.

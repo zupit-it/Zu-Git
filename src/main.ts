@@ -49,7 +49,7 @@ let syncLabelIntervalId: number | null = null;
 let lastSyncedAt: string | null = null;
 let lastSyncSource: "live" | "mock" = "mock";
 let lastMyChangesRequestedIds = new Set<string>();
-let lastPendingReviewCount = -1; // -1 = not yet seen (skip notification on first load)
+let lastMyPendingReviewIds: Set<string> | null = null; // null = first load, skip notification
 let notificationsEnabled = defaultSettings.notificationsEnabled;
 let settingsDirty = false;
 let settingsSaving = false;
@@ -381,6 +381,22 @@ function countMyChangesRequested(snapshot: DashboardSnapshot) {
   ).length;
 }
 
+function getMyPendingReviewIds(snapshot: DashboardSnapshot): Set<string> {
+  const viewerLogin = snapshot.viewerLogin?.toLowerCase();
+  if (!viewerLogin) return new Set();
+
+  return new Set(
+    snapshot.prs
+      .filter(
+        (pr) =>
+          !pr.isDraft &&
+          pr.pendingReviewers.some((a) => a.login.toLowerCase() === viewerLogin) &&
+          !pr.currentApprovers.some((a) => a.login.toLowerCase() === viewerLogin),
+      )
+      .map((pr) => `${pr.repo}#${pr.id}`),
+  );
+}
+
 function getMyChangesRequestedIds(snapshot: DashboardSnapshot) {
   const viewerLogin = snapshot.viewerLogin?.toLowerCase();
   if (!viewerLogin) {
@@ -410,8 +426,23 @@ function countNewIds(next: Set<string>, previous: Set<string>) {
   return count;
 }
 
+const PRIORITY_RANK: Record<string, number> = {
+  Highest: 0,
+  High: 1,
+  Medium: 2,
+  Low: 3,
+};
+
+function applyListSort(prs: PullRequestSummary[]): PullRequestSummary[] {
+  return [...prs].sort((a, b) => {
+    const ra = PRIORITY_RANK[a.jiraPriority] ?? 4;
+    const rb = PRIORITY_RANK[b.jiraPriority] ?? 4;
+    return ra - rb;
+  });
+}
+
 function applyListFilters(snapshot: DashboardSnapshot) {
-  return snapshot.prs.filter((pr) => {
+  return applyListSort(snapshot.prs.filter((pr) => {
     if (!matchesSearch(pr, listSearchQuery)) {
       return false;
     }
@@ -458,8 +489,9 @@ function applyListFilters(snapshot: DashboardSnapshot) {
     );
 
     return isPendingReviewer && !alreadyApproved;
-  });
+  }));
 }
+
 
 async function persistListFilters() {
   try {
@@ -1078,7 +1110,7 @@ function collectSettingsForm(): SettingsFormValues {
 
 function renderDashboard(snapshot: DashboardSnapshot) {
   currentDashboard = snapshot;
-  const pendingReviewCount = countPendingReviewsForViewer(snapshot);
+  const myPendingReviewIds = getMyPendingReviewIds(snapshot);
   const myChangesRequestedIds = getMyChangesRequestedIds(snapshot);
   const filteredPrs = applyListFilters(snapshot);
   renderSummary(snapshot.prs);
@@ -1100,14 +1132,15 @@ function renderDashboard(snapshot: DashboardSnapshot) {
   }
 
   if (notificationsEnabled) {
-    if (lastPendingReviewCount >= 0 && pendingReviewCount > lastPendingReviewCount) {
-      void notifyPendingReviewReminder(pendingReviewCount);
+    if (lastMyPendingReviewIds !== null) {
+      const newReviews = countNewIds(myPendingReviewIds, lastMyPendingReviewIds);
+      if (newReviews > 0) void notifyPendingReviewReminder(newReviews);
     }
     if (lastMyChangesRequestedIds.size > 0) {
       void notifyMyChangesRequested(countNewIds(myChangesRequestedIds, lastMyChangesRequestedIds));
     }
   }
-  lastPendingReviewCount = pendingReviewCount;
+  lastMyPendingReviewIds = myPendingReviewIds;
   lastMyChangesRequestedIds = myChangesRequestedIds;
 
   if (!github?.configured) {
