@@ -403,6 +403,8 @@ fn enrich(
         updated_at: relative_date(&pr.updated_at),
         pipeline_state: pr.pipeline_state.clone(),
         has_failed_pipeline: pr.pipeline_state == PipelineState::Failure,
+        additions: pr.additions,
+        deletions: pr.deletions,
     }
 }
 

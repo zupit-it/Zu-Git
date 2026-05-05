@@ -1032,6 +1032,43 @@ html, body {
   letter-spacing: 0;
 }
 
+.diffstat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+  padding: 0 7px 0 5px;
+  border-radius: 999px;
+  background: #FBFBF8;
+  border: 1px solid #ECEAE2;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+}
+
+.diffstat__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.diffstat__dot--xs { background: #10965F; }
+.diffstat__dot--s  { background: #3FA970; }
+.diffstat__dot--m  { background: #B88217; }
+.diffstat__dot--l  { background: #D87327; }
+.diffstat__dot--xl { background: #D0352B; }
+
+.diffstat__add { color: #10965F; }
+.diffstat__del { color: #D0352B; }
+
+.diffstat__sep {
+  color: #B5B4BA;
+  font-weight: 500;
+}
+
 .chip-neutral {
   background: var(--surface-alt);
   color: var(--ink-soft);

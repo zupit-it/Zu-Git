@@ -5,65 +5,220 @@ use serde::Deserialize;
 
 use crate::models::{AppSettings, PipelineState};
 
-// ── GitHub API response types ─────────────────────────────────────────────────
+// ── GraphQL query ─────────────────────────────────────────────────────────────
+
+const PR_QUERY: &str = r#"
+query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(
+      states: OPEN
+      first: 50
+      after: $cursor
+      orderBy: { field: UPDATED_AT, direction: DESC }
+    ) {
+      nodes {
+        number
+        title
+        body
+        url
+        isDraft
+        createdAt
+        updatedAt
+        additions
+        deletions
+        author { login avatarUrl }
+        assignees(first: 5) { nodes { login avatarUrl } }
+        reviewRequests(first: 20) {
+          nodes {
+            requestedReviewer {
+              ... on User { login avatarUrl }
+            }
+          }
+        }
+        reviews(first: 100) {
+          nodes {
+            state
+            submittedAt
+            author { login avatarUrl }
+          }
+        }
+        headRef {
+          name
+          target { oid }
+        }
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup {
+                state
+                contexts(first: 100) {
+                  nodes {
+                    __typename
+                    ... on CheckRun {
+                      databaseId
+                      name
+                      status
+                      conclusion
+                      startedAt
+                      completedAt
+                    }
+                    ... on StatusContext {
+                      context
+                      state
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"#;
+
+// ── GraphQL response types ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-struct GithubPullRequest {
+struct GqlResponse {
+    data: Option<GqlData>,
+    errors: Option<Vec<GqlError>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GqlError {
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GqlData {
+    repository: Option<GqlRepository>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlRepository {
+    pull_requests: GqlPrConnection,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlPrConnection {
+    nodes: Vec<GqlPr>,
+    page_info: GqlPageInfo,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlPageInfo {
+    has_next_page: bool,
+    end_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlPr {
     number: u64,
     title: String,
     body: Option<String>,
+    url: String,
+    is_draft: bool,
     created_at: String,
-    draft: bool,
     updated_at: String,
-    requested_reviewers: Vec<GithubUser>,
-    assignees: Vec<GithubUser>,
-    user: GithubUser,
-    head: GithubHead,
+    additions: u32,
+    deletions: u32,
+    author: Option<GqlActor>,
+    assignees: GqlNodes<GqlActor>,
+    review_requests: GqlNodes<GqlReviewRequest>,
+    reviews: GqlNodes<GqlReview>,
+    head_ref: Option<GqlHeadRef>,
+    commits: GqlNodes<GqlCommitNode>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct GithubUser {
+#[serde(rename_all = "camelCase")]
+struct GqlActor {
     login: String,
     avatar_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct GithubHead {
-    sha: String,
-    #[serde(rename = "ref")]
-    ref_name: String,
+struct GqlNodes<T> {
+    nodes: Vec<T>,
 }
 
 #[derive(Debug, Deserialize)]
-struct GithubViewer {
-    login: String,
+#[serde(rename_all = "camelCase")]
+struct GqlReviewRequest {
+    requested_reviewer: Option<GqlRequestedReviewer>,
+}
+
+/// Inline fragment on User — fields absent when the reviewer is a Team.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlRequestedReviewer {
+    login: Option<String>,
+    avatar_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct GithubReview {
+#[serde(rename_all = "camelCase")]
+struct GqlReview {
     state: String,
-    user: Option<GithubUser>,
     submitted_at: Option<String>,
+    author: Option<GqlActor>,
 }
 
 #[derive(Debug, Deserialize)]
-struct GithubCombinedStatus {
+#[serde(rename_all = "camelCase")]
+struct GqlHeadRef {
+    name: String,
+    target: Option<GqlTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GqlTarget {
+    oid: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GqlCommitNode {
+    commit: GqlCommit,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlCommit {
+    status_check_rollup: Option<GqlStatusCheckRollup>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GqlStatusCheckRollup {
     state: String,
+    contexts: GqlNodes<GqlStatusContext>,
 }
 
-#[derive(Debug, Deserialize)]
-struct GithubCheckRunsResponse {
-    check_runs: Vec<GithubCheckRun>,
-}
-
+/// Flat struct covering both CheckRun and StatusContext inline fragments.
+/// Discriminated at runtime via `__typename`.
 #[derive(Debug, Deserialize, Clone)]
-struct GithubCheckRun {
-    id: Option<u64>,
+#[serde(rename_all = "camelCase")]
+struct GqlStatusContext {
+    #[serde(rename = "__typename")]
+    typename: String,
+    // CheckRun fields
+    database_id: Option<u64>,
     name: Option<String>,
+    status: Option<String>,
+    conclusion: Option<String>,
     started_at: Option<String>,
     completed_at: Option<String>,
-    status: String,
-    conclusion: Option<String>,
+    // StatusContext fields (legacy) — present in JSON but aggregated via rollup.state
+    #[allow(dead_code)]
+    context: Option<String>,
+    #[allow(dead_code)]
+    state: Option<String>,
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -93,6 +248,8 @@ pub struct GithubPullRequestRecord {
     pub draft: bool,
     pub pipeline_state: PipelineState,
     pub review_summary: GithubReviewSummary,
+    pub additions: u32,
+    pub deletions: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +259,8 @@ pub struct CachedPrDetails {
     pub participant_avatars: HashMap<String, String>,
     pub pipeline_state: PipelineState,
     pub review_summary: GithubReviewSummary,
+    pub additions: u32,
+    pub deletions: u32,
 }
 
 pub struct GithubRepoFetchResult {
@@ -148,14 +307,59 @@ async fn github_request<T: serde::de::DeserializeOwned>(
     response.json::<T>().await.map_err(|e| e.to_string())
 }
 
+/// Derives the GraphQL endpoint from the REST base URL.
+/// - `https://api.github.com`       → `https://api.github.com/graphql`
+/// - `https://hostname/api/v3`      → `https://hostname/api/graphql`
+fn graphql_url(settings: &AppSettings) -> String {
+    let base = settings.github_api_base_url.trim_end_matches('/');
+    if base.ends_with("/api/v3") {
+        format!("{}/graphql", base.trim_end_matches("/v3"))
+    } else {
+        format!("{}/graphql", base)
+    }
+}
+
+async fn graphql_request(
+    query: &str,
+    variables: serde_json::Value,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<GqlResponse, String> {
+    let url = graphql_url(settings);
+    let body = serde_json::json!({ "query": query, "variables": variables });
+
+    let response = client
+        .post(&url)
+        .headers(github_headers(settings))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("GraphQL request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub GraphQL API returned {} for {}",
+            response.status(),
+            url
+        ));
+    }
+
+    response.json::<GqlResponse>().await.map_err(|e| e.to_string())
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 pub async fn fetch_viewer_login(
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Result<String, String> {
+    #[derive(Debug, Deserialize)]
+    struct GithubViewer {
+        login: String,
+    }
     let base = settings.github_api_base_url.trim_end_matches('/');
-    let viewer: GithubViewer = github_request(&format!("{}/user", base), settings, client).await?;
+    let viewer: GithubViewer =
+        github_request(&format!("{}/user", base), settings, client).await?;
     Ok(viewer.login)
 }
 
@@ -203,7 +407,7 @@ pub async fn fetch_open_pull_requests(
     futures::future::join_all(futures).await
 }
 
-// ── Per-repo fetch ────────────────────────────────────────────────────────────
+// ── Per-repo GraphQL fetch ────────────────────────────────────────────────────
 
 async fn fetch_repo_pull_requests(
     repo: &str,
@@ -233,64 +437,103 @@ async fn fetch_repo_pull_requests_inner(
     pr_cache: &Mutex<HashMap<String, CachedPrDetails>>,
     client: &reqwest::Client,
 ) -> Result<Vec<GithubPullRequestRecord>, String> {
-    let base = settings.github_api_base_url.trim_end_matches('/');
-    let url = format!(
-        "{}/repos/{}/pulls?state=open&per_page=50&sort=updated&direction=desc",
-        base, repo
-    );
+    let (owner, repo_name) = repo
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo format: {repo}"))?;
 
-    let pulls: Vec<GithubPullRequest> = github_request(&url, settings, client).await?;
+    // Fetch all pages (typically one for most repos).
+    let mut all_prs: Vec<GqlPr> = vec![];
+    let mut cursor: Option<String> = None;
 
-    let active_keys: std::collections::HashSet<String> = pulls
+    loop {
+        let variables = serde_json::json!({
+            "owner": owner,
+            "repo":  repo_name,
+            "cursor": cursor,
+        });
+
+        let resp = graphql_request(PR_QUERY, variables, settings, client).await?;
+
+        if let Some(errors) = &resp.errors {
+            let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
+            return Err(format!("GraphQL error: {}", msgs.join("; ")));
+        }
+
+        let connection = resp
+            .data
+            .and_then(|d| d.repository)
+            .ok_or_else(|| format!("Repository {repo} not found or inaccessible"))?
+            .pull_requests;
+
+        let has_next = connection.page_info.has_next_page;
+        let end_cursor = connection.page_info.end_cursor;
+        all_prs.extend(connection.nodes);
+
+        if has_next {
+            cursor = end_cursor;
+        } else {
+            break;
+        }
+    }
+
+    let active_keys: std::collections::HashSet<String> = all_prs
         .iter()
         .map(|pr| format!("{}#{}", repo, pr.number))
         .collect();
 
-    // Fetch all PR details in parallel, using cache where possible.
-    let detail_futures = pulls.iter().map(|pr| {
-        let cache_key = format!("{}#{}", repo, pr.number);
-        let cached = pr_cache.lock().unwrap().get(&cache_key).cloned();
-        async move {
-            if let Some(c) = cached {
-                if c.updated_at == pr.updated_at && c.head_sha == pr.head.sha {
-                    return Ok((cache_key, c, pr));
-                }
-            }
-            let d = fetch_pr_details(repo, pr, base, settings, client).await?;
-            Ok::<_, String>((cache_key, d, pr))
-        }
-    });
-
-    let results: Vec<Result<_, String>> = futures::future::join_all(detail_futures).await;
-
     let mut records = Vec::new();
-    for result in results {
-        let (cache_key, details, pr) = result?;
-        pr_cache.lock().unwrap().insert(cache_key, details.clone());
+    for pr in &all_prs {
+        let cache_key = format!("{}#{}", repo, pr.number);
+        let head_sha = pr
+            .head_ref
+            .as_ref()
+            .and_then(|h| h.target.as_ref())
+            .map(|t| t.oid.clone())
+            .unwrap_or_default();
+
+        // Reuse processed details if the PR hasn't changed since last refresh.
+        let cached = pr_cache.lock().unwrap().get(&cache_key).cloned();
+        let details = match cached {
+            Some(c) if c.updated_at == pr.updated_at && c.head_sha == head_sha => c,
+            _ => build_cached_details(pr, &head_sha),
+        };
+
+        pr_cache
+            .lock()
+            .unwrap()
+            .insert(cache_key, details.clone());
+
         records.push(GithubPullRequestRecord {
             repo: repo.to_string(),
             number: pr.number,
             title: pr.title.clone(),
-            url: format!("https://github.com/{}/pull/{}", repo, pr.number),
+            url: pr.url.clone(),
             body: pr.body.clone().unwrap_or_default(),
             created_at: pr.created_at.clone(),
-            author: pr.user.login.clone(),
-            assignee: pr.assignees.first().map(|u| u.login.clone()),
+            author: pr.author.as_ref().map(|a| a.login.clone()).unwrap_or_default(),
+            assignee: pr.assignees.nodes.first().map(|a| a.login.clone()),
             requested_reviewers: pr
-                .requested_reviewers
+                .review_requests
+                .nodes
                 .iter()
-                .map(|u| u.login.clone())
+                .filter_map(|rr| rr.requested_reviewer.as_ref()?.login.clone())
                 .collect(),
-            participant_avatars: details.participant_avatars,
-            head_ref: pr.head.ref_name.clone(),
+            participant_avatars: details.participant_avatars.clone(),
+            head_ref: pr
+                .head_ref
+                .as_ref()
+                .map(|h| h.name.clone())
+                .unwrap_or_default(),
             updated_at: pr.updated_at.clone(),
-            draft: pr.draft,
-            pipeline_state: details.pipeline_state,
-            review_summary: details.review_summary,
+            draft: pr.is_draft,
+            pipeline_state: details.pipeline_state.clone(),
+            review_summary: details.review_summary.clone(),
+            additions: details.additions,
+            deletions: details.deletions,
         });
     }
 
-    // Evict stale cache entries for this repo.
+    // Evict stale cache entries (closed / merged PRs) for this repo.
     pr_cache
         .lock()
         .unwrap()
@@ -299,84 +542,81 @@ async fn fetch_repo_pull_requests_inner(
     Ok(records)
 }
 
-async fn fetch_pr_details(
-    repo: &str,
-    pr: &GithubPullRequest,
-    base: &str,
-    settings: &AppSettings,
-    client: &reqwest::Client,
-) -> Result<CachedPrDetails, String> {
-    let url_reviews = format!(
-        "{}/repos/{}/pulls/{}/reviews?per_page=100",
-        base, repo, pr.number
-    );
-    let url_status = format!("{}/repos/{}/commits/{}/status", base, repo, pr.head.sha);
-    let url_checks = format!(
-        "{}/repos/{}/commits/{}/check-runs?per_page=100",
-        base, repo, pr.head.sha
-    );
+// ── Build processed details from a GraphQL PR node ────────────────────────────
 
-    let (reviews, combined_status, check_runs_resp) = tokio::try_join!(
-        github_request::<Vec<GithubReview>>(&url_reviews, settings, client),
-        github_request::<GithubCombinedStatus>(&url_status, settings, client),
-        github_request::<GithubCheckRunsResponse>(&url_checks, settings, client),
-    )?;
-
+fn build_cached_details(pr: &GqlPr, head_sha: &str) -> CachedPrDetails {
     let mut avatars: HashMap<String, String> = HashMap::new();
-    add_avatar(&mut avatars, &pr.user);
-    if let Some(assignee) = pr.assignees.first() {
-        add_avatar(&mut avatars, assignee);
+
+    let mut add = |login: &str, url: Option<&str>| {
+        if let Some(u) = url {
+            if !u.is_empty() {
+                avatars.insert(login.to_string(), u.to_string());
+            }
+        }
+    };
+
+    if let Some(a) = &pr.author {
+        add(&a.login, a.avatar_url.as_deref());
     }
-    for reviewer in &pr.requested_reviewers {
-        add_avatar(&mut avatars, reviewer);
+    for a in &pr.assignees.nodes {
+        add(&a.login, a.avatar_url.as_deref());
     }
-    for review in &reviews {
-        if let Some(user) = &review.user {
-            add_avatar(&mut avatars, user);
+    for rr in &pr.review_requests.nodes {
+        if let Some(rv) = &rr.requested_reviewer {
+            if let (Some(login), Some(url)) = (&rv.login, &rv.avatar_url) {
+                add(login, Some(url));
+            }
+        }
+    }
+    for rev in &pr.reviews.nodes {
+        if let Some(a) = &rev.author {
+            add(&a.login, a.avatar_url.as_deref());
         }
     }
 
     let requested_logins: Vec<String> = pr
-        .requested_reviewers
+        .review_requests
+        .nodes
         .iter()
-        .map(|r| r.login.clone())
+        .filter_map(|rr| rr.requested_reviewer.as_ref()?.login.clone())
         .collect();
-    let review_summary = summarize_reviews(&reviews, &requested_logins);
-    let pipeline_state = summarize_pipeline_state(&combined_status, &check_runs_resp.check_runs);
 
-    Ok(CachedPrDetails {
+    let review_summary = summarize_reviews(&pr.reviews.nodes, &requested_logins);
+    let rollup = pr
+        .commits
+        .nodes
+        .first()
+        .and_then(|c| c.commit.status_check_rollup.as_ref());
+    let pipeline_state = summarize_pipeline_state(rollup);
+
+    CachedPrDetails {
         updated_at: pr.updated_at.clone(),
-        head_sha: pr.head.sha.clone(),
+        head_sha: head_sha.to_string(),
         participant_avatars: avatars,
         pipeline_state,
         review_summary,
-    })
+        additions: pr.additions,
+        deletions: pr.deletions,
+    }
 }
 
 // ── Review summary ────────────────────────────────────────────────────────────
 
-fn summarize_reviews(
-    reviews: &[GithubReview],
-    requested_reviewers: &[String],
-) -> GithubReviewSummary {
-    let mut latest: HashMap<String, &GithubReview> = HashMap::new();
+fn summarize_reviews(reviews: &[GqlReview], requested_reviewers: &[String]) -> GithubReviewSummary {
+    let mut latest: HashMap<String, &GqlReview> = HashMap::new();
 
     for review in reviews {
-        let login = match &review.user {
+        let login = match &review.author {
             Some(u) => &u.login,
             None => continue,
         };
-        match latest.get(login.as_str()) {
-            None => {
-                latest.insert(login.clone(), review);
-            }
-            Some(current) => {
-                let current_ts = parse_ts(current.submitted_at.as_deref());
-                let next_ts = parse_ts(review.submitted_at.as_deref());
-                if next_ts >= current_ts {
-                    latest.insert(login.clone(), review);
-                }
-            }
+        let next_ts = parse_ts(review.submitted_at.as_deref());
+        let better = latest
+            .get(login.as_str())
+            .map(|cur| next_ts >= parse_ts(cur.submitted_at.as_deref()))
+            .unwrap_or(true);
+        if better {
+            latest.insert(login.clone(), review);
         }
     }
 
@@ -415,47 +655,52 @@ fn parse_ts(s: Option<&str>) -> i64 {
 
 // ── Pipeline state ────────────────────────────────────────────────────────────
 
-fn summarize_pipeline_state(
-    combined: &GithubCombinedStatus,
-    check_runs: &[GithubCheckRun],
-) -> PipelineState {
-    let latest = keep_latest_per_check(check_runs);
+fn summarize_pipeline_state(rollup: Option<&GqlStatusCheckRollup>) -> PipelineState {
+    let Some(rollup) = rollup else {
+        return PipelineState::Unknown;
+    };
+
+    let check_runs: Vec<&GqlStatusContext> = rollup
+        .contexts
+        .nodes
+        .iter()
+        .filter(|c| c.typename == "CheckRun")
+        .collect();
+
+    // Deduplicate check runs by name, keeping the most recent execution.
+    let latest = keep_latest_check_runs(&check_runs);
 
     let has_failed = latest.iter().any(|cr| {
-        cr.status == "completed"
+        cr.status.as_deref() == Some("completed")
             && matches!(
                 cr.conclusion.as_deref(),
-                Some("failure" | "timed_out" | "action_required" | "startup_failure")
+                Some("failure" | "timed_out" | "startup_failure")
             )
     });
     if has_failed {
         return PipelineState::Failure;
     }
 
-    if matches!(combined.state.as_str(), "failure" | "error") {
-        return PipelineState::Failure;
-    }
+    let has_action_required = latest.iter().any(|cr| {
+        cr.status.as_deref() == Some("completed")
+            && cr.conclusion.as_deref() == Some("action_required")
+    });
 
-    let has_action_required = latest
-        .iter()
-        .any(|cr| cr.status == "completed" && cr.conclusion.as_deref() == Some("action_required"));
-
-    let all_completed = !latest.is_empty() && latest.iter().all(|cr| cr.status == "completed");
-    if all_completed && !has_action_required {
-        return PipelineState::Success;
-    }
-
-    if combined.state == "success" && !has_action_required {
-        return PipelineState::Success;
+    // rollup.state aggregates both CheckRun and legacy StatusContext results.
+    match rollup.state.as_str() {
+        "FAILURE" | "ERROR" => return PipelineState::Failure,
+        "SUCCESS" if !has_action_required => return PipelineState::Success,
+        "PENDING" => return PipelineState::Pending,
+        _ => {}
     }
 
     let has_pending = latest.iter().any(|cr| {
         matches!(
-            cr.status.as_str(),
-            "queued" | "in_progress" | "waiting" | "requested" | "pending"
+            cr.status.as_deref(),
+            Some("queued" | "in_progress" | "waiting" | "requested" | "pending")
         )
     });
-    if combined.state == "pending" || has_pending {
+    if has_pending {
         return PipelineState::Pending;
     }
 
@@ -466,60 +711,43 @@ fn summarize_pipeline_state(
     PipelineState::Unknown
 }
 
-fn keep_latest_per_check(check_runs: &[GithubCheckRun]) -> Vec<GithubCheckRun> {
-    let mut latest: HashMap<String, GithubCheckRun> = HashMap::new();
+fn keep_latest_check_runs<'a>(runs: &[&'a GqlStatusContext]) -> Vec<&'a GqlStatusContext> {
+    let mut latest: HashMap<String, &'a GqlStatusContext> = HashMap::new();
 
-    for cr in check_runs {
+    for cr in runs {
         let key = cr
             .name
             .as_deref()
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| {
-                format!(
-                    "__unnamed__:{}:{}:{}",
-                    cr.id.map(|i| i.to_string()).unwrap_or_default(),
-                    cr.started_at.as_deref().unwrap_or("no-start"),
-                    cr.completed_at.as_deref().unwrap_or("no-end"),
-                )
-            });
+            .unwrap_or_else(|| format!("__unnamed__:{}", cr.database_id.unwrap_or(0)));
 
         let should_replace = match latest.get(&key) {
             None => true,
-            Some(current) => {
-                let cur_ts = cr_timestamp(current);
-                let cand_ts = cr_timestamp(cr);
+            Some(cur) => {
+                let cur_ts = ctx_timestamp(cur);
+                let cand_ts = ctx_timestamp(cr);
                 if cand_ts != cur_ts {
                     cand_ts > cur_ts
                 } else {
-                    cr.id.unwrap_or(0) > current.id.unwrap_or(0)
+                    cr.database_id.unwrap_or(0) > cur.database_id.unwrap_or(0)
                 }
             }
         };
 
         if should_replace {
-            latest.insert(key, cr.clone());
+            latest.insert(key, cr);
         }
     }
 
     latest.into_values().collect()
 }
 
-fn cr_timestamp(cr: &GithubCheckRun) -> i64 {
+fn ctx_timestamp(cr: &GqlStatusContext) -> i64 {
     cr.completed_at
         .as_deref()
         .or(cr.started_at.as_deref())
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.timestamp_millis())
         .unwrap_or(i64::MIN)
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn add_avatar(map: &mut HashMap<String, String>, user: &GithubUser) {
-    if let Some(url) = &user.avatar_url {
-        if !url.is_empty() {
-            map.insert(user.login.clone(), url.clone());
-        }
-    }
 }

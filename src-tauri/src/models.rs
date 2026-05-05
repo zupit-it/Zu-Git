@@ -169,6 +169,8 @@ pub struct PullRequestSummary {
     pub updated_at: String,
     pub pipeline_state: PipelineState,
     pub has_failed_pipeline: bool,
+    pub additions: u32,
+    pub deletions: u32,
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -392,6 +394,8 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             updated_at: "14 min ago".to_string(),
             pipeline_state: PipelineState::Success,
             has_failed_pipeline: false,
+            additions: 312,
+            deletions: 47,
         },
         PullRequestSummary {
             id: 918,
@@ -431,6 +435,8 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             updated_at: "1 h ago".to_string(),
             pipeline_state: PipelineState::Success,
             has_failed_pipeline: false,
+            additions: 58,
+            deletions: 120,
         },
         PullRequestSummary {
             id: 415,
@@ -470,6 +476,8 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             updated_at: "8 min ago".to_string(),
             pipeline_state: PipelineState::Pending,
             has_failed_pipeline: false,
+            additions: 5,
+            deletions: 3,
         },
     ]
 }

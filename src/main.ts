@@ -581,6 +581,32 @@ function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string): strin
     .join("");
 }
 
+function formatDiffNum(n: number): string {
+  if (n >= 1000) return `${Math.round(n / 100) / 10}k`;
+  return String(n);
+}
+
+function diffSizeBucket(total: number): string {
+  if (total <= 50)   return "xs";
+  if (total <= 200)  return "s";
+  if (total <= 500)  return "m";
+  if (total <= 1000) return "l";
+  return "xl";
+}
+
+function renderDiffStat(additions: number, deletions: number): string {
+  if (additions === 0 && deletions === 0) return "";
+  const total = additions + deletions;
+  const bucket = diffSizeBucket(total);
+  const title = `${additions.toLocaleString()} additions · ${deletions.toLocaleString()} deletions · ${total.toLocaleString()} lines (${bucket.toUpperCase()})`;
+  return `<span class="diffstat" title="${title}">` +
+    `<span class="diffstat__dot diffstat__dot--${bucket}" aria-hidden="true"></span>` +
+    `<span class="diffstat__add">+${formatDiffNum(additions)}</span>` +
+    `<span class="diffstat__sep">·</span>` +
+    `<span class="diffstat__del">−${formatDiffNum(deletions)}</span>` +
+    `</span>`;
+}
+
 function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin?: string): string {
   const isAging = Date.now() - Date.parse(pr.createdAtIso) > 14 * 24 * 60 * 60 * 1000;
   const priorityIconMap: Partial<Record<PullRequestSummary["jiraPriority"], string>> = {
@@ -617,6 +643,8 @@ function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin?: stri
             ? chip("action", "Action required", SVG.x)
             : "";
 
+  const diffChip = renderDiffStat(pr.additions, pr.deletions);
+
   const jiraBtn = pr.jiraUrl
     ? `<button class="icon-btn" data-jira-link="${pr.jiraUrl}" type="button">${SVG.jira}<span>Jira</span></button>`
     : "";
@@ -632,6 +660,7 @@ function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin?: stri
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:${pr.jiraSummary ? "6" : "0"}px">
           ${avatarSm(pr.author, pr.authorAvatarUrl)}
           <span style="font-size:12px;color:var(--ink-soft);font-weight:500;font-family:var(--font-mono)">${pr.author}</span>
+          ${diffChip}
           ${authorChip}${agingChip}
         </div>
         ${pr.jiraSummary ? `<div style="font-size:12.5px;color:var(--ink-muted);line-height:1.45;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${pr.jiraSummary}</div>` : ""}

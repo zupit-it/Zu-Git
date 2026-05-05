@@ -48,6 +48,8 @@ export interface PullRequestSummary {
   updatedAt: string;
   pipelineState: "success" | "pending" | "failure" | "action-required" | "unknown";
   hasFailedPipeline: boolean;
+  additions: number;
+  deletions: number;
 }
 
 export const mockPullRequests: PullRequestSummary[] = [
@@ -82,6 +84,8 @@ export const mockPullRequests: PullRequestSummary[] = [
     updatedAt: "14 min ago",
     pipelineState: "success",
     hasFailedPipeline: false,
+    additions: 312,
+    deletions: 47,
   },
   {
     id: 918,
@@ -113,6 +117,8 @@ export const mockPullRequests: PullRequestSummary[] = [
     updatedAt: "1 h ago",
     pipelineState: "success",
     hasFailedPipeline: false,
+    additions: 58,
+    deletions: 120,
   },
   {
     id: 415,
@@ -144,5 +150,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     updatedAt: "8 min ago",
     pipelineState: "pending",
     hasFailedPipeline: false,
+    additions: 5,
+    deletions: 3,
   },
 ];
