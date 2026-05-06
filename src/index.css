@@ -1509,6 +1509,15 @@ img.avatar { object-fit: cover; }
   margin-bottom: 4px;
 }
 
+.settings-version {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-faint);
+  letter-spacing: 0;
+  text-transform: none;
+  margin-left: 8px;
+}
+
 .settings-page-title {
   margin: 0 0 4px;
   font-size: 22px;

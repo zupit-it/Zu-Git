@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import type { DashboardBootstrap, DashboardSnapshot, SaveSettingsResult, TokenStoreStatus } from "./shared/rpc";
 import type { PullRequestSummary, ReviewActor } from "./shared/pr-model";
 import {
@@ -1729,4 +1730,10 @@ window.addEventListener("DOMContentLoaded", () => {
   syncSettingsSaveButton();
   setView(currentView);
   void bootstrap();
+
+  // Populate app version in settings header.
+  void getVersion().then((v) => {
+    const el = document.querySelector("[data-app-version]");
+    if (el) el.textContent = `v${v}`;
+  });
 });
