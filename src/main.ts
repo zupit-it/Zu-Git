@@ -46,6 +46,7 @@ let hiddenRepos = [...defaultListFilterPreferences.hiddenRepos];
 let currentAutoRefreshMinutes = defaultSettings.autoRefreshMinutes;
 let currentInternalMarker = defaultSettings.internalAuthorMarker;
 let currentCollaborators: string[] = [];
+let filteredReviewer: string | null = null;
 let autoRefreshIntervalId: number | null = null;
 let syncLabelIntervalId: number | null = null;
 let lastSyncedAt: string | null = null;
@@ -474,6 +475,15 @@ function applyListFilters(snapshot: DashboardSnapshot) {
       }
     }
 
+    if (filteredReviewer) {
+      const login = filteredReviewer.toLowerCase();
+      const isReviewer = [
+        ...pr.pendingReviewers, ...pr.currentApprovers,
+        ...pr.blockingReviewers, ...pr.staleApprovers, ...pr.commentedReviewers,
+      ].some(a => a.login.toLowerCase() === login);
+      if (!isReviewer) return false;
+    }
+
     if (!onlyMyPendingReviews) {
       return true;
     }
@@ -750,11 +760,36 @@ function renderListBoard(prs: PullRequestSummary[]) {
   renderListTable(prs);
 }
 
+/** Maps actionable count to a load level 0-4 (per-person scale). */
+function personLoadLevel(n: number): number {
+  if (n <= 0) return 0;
+  if (n === 1) return 1;
+  if (n === 2) return 2;
+  if (n === 3) return 3;
+  return 4;
+}
+
+/** Maps total team actionable to a load level 0-4 (team scale). */
+function teamLoadLevel(n: number): number {
+  if (n <= 0) return 0;
+  if (n <= 3) return 1;
+  if (n <= 5) return 2;
+  if (n <= 7) return 3;
+  return 4;
+}
+
+
+/** 2-char initials from a stripped login (e.g. "giorgio-betta" → "GB"). */
+function loginInitials(stripped: string): string {
+  const parts = stripped.split("-").filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return stripped.slice(0, 2).toUpperCase();
+}
+
 function renderReviewerLoad(snapshot: DashboardSnapshot) {
   const target = document.querySelector<HTMLElement>("[data-reviewer-load]");
   if (!target) return;
 
-  // Use the configured collaborator list as the fixed set of reviewers to display.
   if (currentCollaborators.length === 0) {
     target.hidden = true;
     target.innerHTML = "";
@@ -765,8 +800,7 @@ function renderReviewerLoad(snapshot: DashboardSnapshot) {
   const pending = new Map<string, number>();
   const total   = new Map<string, number>();
 
-  // Map from lowercased login → canonical login as typed in settings,
-  // so matching is case-insensitive but we keep the original key for lookups.
+  // Case-insensitive login → canonical mapping.
   const collaboratorByLower = new Map(
     currentCollaborators.map(l => [l.toLowerCase(), l])
   );
@@ -789,7 +823,7 @@ function renderReviewerLoad(snapshot: DashboardSnapshot) {
 
   const viewer = snapshot.viewerLogin?.toLowerCase();
 
-  // Sort: most pending first, then most total assigned; "me" always last.
+  // Sort: most pending first, then most total; "me" always last.
   const sorted = [...currentCollaborators].sort((a, b) => {
     const aIsMe = viewer && a.toLowerCase() === viewer ? 1 : 0;
     const bIsMe = viewer && b.toLowerCase() === viewer ? 1 : 0;
@@ -802,24 +836,62 @@ function renderReviewerLoad(snapshot: DashboardSnapshot) {
   const stripMarker = (login: string) =>
     currentInternalMarker ? login.replace(currentInternalMarker, "") : login;
 
+  // Team aggregate.
+  const teamPending = sorted.reduce((s, l) => s + (pending.get(l) ?? 0), 0);
+  const teamTotal   = sorted.reduce((s, l) => s + (total.get(l)   ?? 0), 0);
+
+  const renderAvatar = (login: string) => {
+    const url = avatars[login];
+    const color = avatarColor(login);
+    const initials = loginInitials(stripMarker(login));
+    return `<span class="rlb__avatar" style="background:${color}">` +
+      (url ? `<img src="${url}" alt="${login}" loading="lazy" />` : initials) +
+      `</span>`;
+  };
+
+  const renderChip = (login: string) => {
+    const isMe = viewer && login.toLowerCase() === viewer;
+    const p = pending.get(login) ?? 0;
+    const t = total.get(login)   ?? 0;
+    const isEmpty = t === 0;
+    const level = personLoadLevel(p);
+    const name = isMe ? "you" : stripMarker(login);
+    const tooltip = isEmpty
+      ? "Nessuna PR assegnata. Buon candidato per nuove review."
+      : `${p} da fare su ${t} totali`;
+    const isActive = filteredReviewer?.toLowerCase() === login.toLowerCase();
+    const classes = ["rlb__chip", isMe ? "rlb__chip--me" : "", isEmpty ? "rlb__chip--empty" : "", isActive ? "rlb__chip--active" : ""]
+      .filter(Boolean).join(" ");
+    return `<button class="${classes}" title="${tooltip}" data-reviewer-filter="${login}">` +
+      renderAvatar(login) +
+      `<span class="rlb__name">${name}</span>` +
+      `<span class="rlb__nums">` +
+        `<span class="rlb__num-strong rlb__num-strong--load-${level}">${p}</span>` +
+        `<span class="rlb__num-sep">/</span>` +
+        `<span class="rlb__num-total">${t}</span>` +
+      `</span>` +
+      `</button>`;
+  };
+
+  // Insert divider before "me".
+  const meIndex = sorted.findIndex(l => viewer && l.toLowerCase() === viewer);
+  const chips = sorted.map((login, i) =>
+    (i === meIndex && meIndex > 0 ? `<span class="rlb__divider"></span>` : "") +
+    renderChip(login)
+  ).join("");
+
   target.hidden = false;
   target.innerHTML =
-    `<span class="reviewer-load-label">Review load</span>` +
-    `<span class="reviewer-load-pills">` +
-    sorted.map(login => {
-      const p = pending.get(login) ?? 0;
-      const t = total.get(login)   ?? 0;
-      return `<span class="reviewer-load-item">` +
-        avatarSm(login, avatars[login]) +
-        `<span class="reviewer-load-name">${stripMarker(login)}</span>` +
-        `<span class="reviewer-load-count">` +
-          `<span class="reviewer-load-count__pending">${p}</span>` +
-          `<span class="reviewer-load-count__sep">/</span>` +
-          `<span class="reviewer-load-count__total">${t}</span>` +
-        `</span>` +
-        `</span>`;
-    }).join("") +
-    `</span>`;
+    `<div class="rlb__tag">` +
+      `<span class="rlb__tag-dot"></span>` +
+      `<span class="rlb__tag-label">Review load</span>` +
+    `</div>` +
+    `<div class="rlb__chips">${chips}</div>` +
+    `<div class="rlb__team">` +
+      `<span class="rlb__team-label">Team</span>` +
+      `<span class="rlb__team-actionable rlb__team-actionable--load-${teamLoadLevel(teamPending)}">${teamPending}</span>` +
+      `<span class="rlb__team-total">/ ${teamTotal}</span>` +
+    `</div>`;
 }
 
 function renderListFilters(snapshot: DashboardSnapshot) {
@@ -1457,7 +1529,9 @@ window.addEventListener("DOMContentLoaded", () => {
       const target = event.currentTarget;
       if (!(target instanceof HTMLInputElement)) return;
       onlyMyPendingReviews = target.checked;
-      if (target.checked) onlyMyPullRequests = false;
+      if (target.checked) { onlyMyPullRequests = false; filteredReviewer = null; }
+      document.querySelectorAll<HTMLButtonElement>("[data-reviewer-filter]")
+        .forEach(btn => btn.classList.remove("rlb__chip--active"));
       if (currentDashboard) {
         renderListFilters(currentDashboard);
         renderListBoard(applyListFilters(currentDashboard));
@@ -1470,7 +1544,9 @@ window.addEventListener("DOMContentLoaded", () => {
       const target = event.currentTarget;
       if (!(target instanceof HTMLInputElement)) return;
       onlyMyPullRequests = target.checked;
-      if (target.checked) onlyMyPendingReviews = false;
+      if (target.checked) { onlyMyPendingReviews = false; filteredReviewer = null; }
+      document.querySelectorAll<HTMLButtonElement>("[data-reviewer-filter]")
+        .forEach(btn => btn.classList.remove("rlb__chip--active"));
       if (currentDashboard) {
         renderListFilters(currentDashboard);
         renderListBoard(applyListFilters(currentDashboard));
@@ -1554,7 +1630,26 @@ window.addEventListener("DOMContentLoaded", () => {
     if (jiraUrl) { void openExternal(jiraUrl); return; }
 
     const rerequestButton = target.closest<HTMLButtonElement>(".review-badge-rerequest");
-    if (rerequestButton) { void rerequestReview(rerequestButton); }
+    if (rerequestButton) { void rerequestReview(rerequestButton); return; }
+
+    const reviewerChip = target.closest<HTMLButtonElement>("[data-reviewer-filter]");
+    if (reviewerChip && currentDashboard) {
+      const login = reviewerChip.dataset.reviewerFilter ?? null;
+      filteredReviewer = filteredReviewer?.toLowerCase() === login?.toLowerCase() ? null : login;
+      // Exclusive with "Review request" and "My PRs" filters.
+      if (filteredReviewer) {
+        onlyMyPendingReviews = false;
+        onlyMyPullRequests = false;
+        renderListFilters(currentDashboard);
+      }
+      // Update active class in-place without re-rendering the whole bar.
+      document.querySelectorAll<HTMLButtonElement>("[data-reviewer-filter]").forEach(btn => {
+        const isActive = filteredReviewer !== null &&
+          btn.dataset.reviewerFilter?.toLowerCase() === filteredReviewer.toLowerCase();
+        btn.classList.toggle("rlb__chip--active", isActive);
+      });
+      renderListBoard(applyListFilters(currentDashboard));
+    }
   });
   document
     .querySelector<HTMLButtonElement>("[data-discard-button]")
