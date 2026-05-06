@@ -10,6 +10,7 @@ export interface AppSettings {
   jiraToken: string;
   jiraRepoBoards: Record<string, string>;
   notificationsEnabled: boolean;
+  colorBlindMode: boolean;
 }
 
 export interface ListFilterPreferences {
@@ -34,6 +35,7 @@ export interface SettingsFormValues {
   jiraToken: string;
   jiraRepoBoards: string;
   notificationsEnabled: string; // "on" | ""
+  colorBlindMode: string;       // "on" | ""
 }
 
 export const defaultSettings: AppSettings = {
@@ -48,6 +50,7 @@ export const defaultSettings: AppSettings = {
   jiraToken: "",
   jiraRepoBoards: {},
   notificationsEnabled: true,
+  colorBlindMode: false,
 };
 
 export const defaultListFilterPreferences: ListFilterPreferences = {
@@ -105,6 +108,7 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
       .map(([repo, board]) => `${repo} = ${board}`)
       .join("\n"),
     notificationsEnabled: settings.notificationsEnabled ? "on" : "",
+    colorBlindMode: settings.colorBlindMode ? "on" : "",
   };
 }
 
@@ -128,6 +132,7 @@ export function normalizeSettings(
     jiraToken: values.jiraToken?.trim() ?? "",
     jiraRepoBoards: parseRepoBoards(values.jiraRepoBoards),
     notificationsEnabled: values.notificationsEnabled === "on",
+    colorBlindMode: values.colorBlindMode === "on",
   };
 }
 

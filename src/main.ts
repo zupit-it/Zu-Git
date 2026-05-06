@@ -1273,6 +1273,7 @@ function renderSettings(values: SettingsFormValues) {
   }
 
   notificationsEnabled = values.notificationsEnabled === "on";
+  document.documentElement.toggleAttribute("data-colorblind", values.colorBlindMode === "on");
   setSettingsDirtyState(false);
 }
 

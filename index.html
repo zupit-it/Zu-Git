@@ -273,6 +273,28 @@
                 </div>
               </div>
 
+              <!-- Accessibility card -->
+              <div class="settings-card">
+                <div class="settings-card-header">
+                  <span class="settings-card-icon">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="8" r="1" fill="currentColor"/><path d="M9 12h3v5"/></svg>
+                  </span>
+                  <div>
+                    <div class="settings-card-label">Accessibility</div>
+                    <div class="settings-card-title">Display preferences</div>
+                  </div>
+                </div>
+                <div class="settings-card-grid">
+                  <div class="settings-field">
+                    <label class="field-label">Color vision</label>
+                    <label class="filter-pill">
+                      <input id="colorBlindMode" name="colorBlindMode" type="checkbox" />
+                      <span>Color-blind friendly mode</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               <!-- Hidden submit (triggered by save bar button via form="settings-form") -->
               <button type="submit" class="primary-button form-actions" style="display:none" aria-hidden="true" tabindex="-1">Save</button>
             </form>

@@ -17,6 +17,7 @@ pub struct AppSettings {
     pub jira_token: String,
     pub jira_repo_boards: HashMap<String, String>,
     pub notifications_enabled: bool,
+    pub color_blind_mode: bool,
 }
 
 impl Default for AppSettings {
@@ -33,6 +34,7 @@ impl Default for AppSettings {
             jira_token: String::new(),
             jira_repo_boards: HashMap::new(),
             notifications_enabled: true,
+            color_blind_mode: false,
         }
     }
 }
@@ -52,6 +54,7 @@ pub struct SettingsFormValues {
     pub jira_token: String,
     pub jira_repo_boards: String,
     pub notifications_enabled: String, // "on" | ""
+    pub color_blind_mode: String,      // "on" | ""
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +317,7 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         jira_token: values.jira_token.trim().to_string(),
         jira_repo_boards: parse_repo_boards(&values.jira_repo_boards),
         notifications_enabled: values.notifications_enabled.trim() == "on",
+        color_blind_mode: values.color_blind_mode.trim() == "on",
     }
 }
 
@@ -335,6 +339,11 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
             .collect::<Vec<_>>()
             .join("\n"),
         notifications_enabled: if settings.notifications_enabled {
+            "on".to_string()
+        } else {
+            String::new()
+        },
+        color_blind_mode: if settings.color_blind_mode {
             "on".to_string()
         } else {
             String::new()

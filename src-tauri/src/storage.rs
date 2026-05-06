@@ -45,6 +45,8 @@ struct PersistedSettings {
     jira_repo_boards: std::collections::HashMap<String, String>,
     #[serde(default = "default_notifications_enabled")]
     notifications_enabled: bool,
+    #[serde(default)]
+    color_blind_mode: bool,
     // Legacy/fallback field. New fallback writes are only produced when they can
     // be protected by the platform (currently DPAPI on Windows).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -181,6 +183,11 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         } else {
             String::new()
         },
+        color_blind_mode: if persisted.color_blind_mode {
+            "on".to_string()
+        } else {
+            String::new()
+        },
     };
 
     Ok(normalize_settings(&form))
@@ -215,6 +222,7 @@ pub async fn save_settings(
         jira_email: normalized.jira_email.clone(),
         jira_repo_boards: normalized.jira_repo_boards.clone(),
         notifications_enabled: normalized.notifications_enabled,
+        color_blind_mode: normalized.color_blind_mode,
         github_token: github_token_fallback,
         jira_token: jira_token_fallback,
     };
