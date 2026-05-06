@@ -1454,6 +1454,42 @@ img.avatar { object-fit: cover; }
   border-color: var(--border-strong);
 }
 
+/* ── Update badge ─────────────────────────────────────────── */
+.update-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+  font: 600 11.5px/1 var(--font);
+  cursor: pointer;
+  transition: opacity 120ms;
+}
+
+.update-badge:hover { opacity: 0.8; }
+
+.update-badge[disabled] {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.update-badge.is-loading::before {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--ok);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* ── Settings ─────────────────────────────────────────────── */
 .settings-shell {
   max-width: 100%;

@@ -2,6 +2,16 @@ use crate::models::{
     serialize_settings_form, AppSettings, DashboardBootstrap, DashboardSnapshot,
     ListFilterPreferences, SaveSettingsResult, SettingsFormValues, TokenStoreStatus,
 };
+use serde::Serialize;
+
+// ── Update info ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub version: String,
+    pub body: Option<String>,
+}
 use crate::{dashboard, secret_store, storage, AppState};
 
 fn build_token_store_status(
@@ -153,6 +163,44 @@ pub async fn save_list_filters(
 ) -> Result<ListFilterPreferences, String> {
     storage::save_list_filter_preferences(&app, &params).await?;
     Ok(params)
+}
+
+// ── Auto-update ───────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app
+        .updater_builder()
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateInfo {
+        version: u.version.clone(),
+        body: u.body.clone(),
+    }))
+}
+
+#[tauri::command]
+pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app
+        .updater_builder()
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some(update) = update {
+        update
+            .download_and_install(|_chunk, _total| {}, || {})
+            .await
+            .map_err(|e| e.to_string())?;
+        app.restart();
+    }
+    Ok(())
 }
 
 // ── Request review ────────────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // On macOS the menu bar lives at the top of the screen (system-wide),
             // so we keep it. On Windows/Linux it would render as an in-window bar,
@@ -81,6 +82,8 @@ pub fn run() {
             commands::show_native_notification,
             commands::save_list_filters,
             commands::request_review,
+            commands::check_for_update,
+            commands::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

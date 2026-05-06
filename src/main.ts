@@ -1366,6 +1366,45 @@ async function bootstrap() {
 
   // Settings are shown — now load dashboard data in the background.
   void refreshDashboard("auto");
+
+  // Check for updates silently; show badge in toolbar if one is available.
+  void checkForUpdate();
+}
+
+interface UpdateInfo {
+  version: string;
+  body: string | null;
+}
+
+async function checkForUpdate() {
+  try {
+    const update = await invoke<UpdateInfo | null>("check_for_update");
+    if (!update) return;
+
+    const badge = document.querySelector<HTMLButtonElement>("[data-update-badge]");
+    const label = badge?.querySelector<HTMLElement>("[data-update-badge-label]");
+    if (!badge || !label) return;
+
+    label.textContent = `v${update.version} available`;
+    badge.hidden = false;
+
+    badge.addEventListener("click", async () => {
+      badge.classList.add("is-loading");
+      badge.disabled = true;
+      label.textContent = "Installing…";
+      try {
+        await invoke("install_update");
+        // app.restart() on the Rust side will relaunch the app automatically
+      } catch (err) {
+        badge.classList.remove("is-loading");
+        badge.disabled = false;
+        label.textContent = `v${update.version} available`;
+        console.error("Update install failed:", err);
+      }
+    }, { once: true });
+  } catch {
+    // Silently ignore: no internet, endpoint unavailable, etc.
+  }
 }
 
 async function saveSettingsAndRefresh(event: SubmitEvent) {
