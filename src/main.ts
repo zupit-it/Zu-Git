@@ -19,6 +19,7 @@ const reviewStateLabel: Record<PullRequestSummary["reviewState"], string> = {
 
 const authorTypeLabel: Record<PullRequestSummary["authorType"], string> = {
   internal: "Internal",
+  team: "Team",
   collaborator: "Collaborator",
 };
 
@@ -39,6 +40,7 @@ let listSearchQuery = "";
 let onlyMyPendingReviews = defaultListFilterPreferences.onlyMyPendingReviews;
 let onlyMyPullRequests = defaultListFilterPreferences.onlyMyPullRequests;
 let showInternalOnly = defaultListFilterPreferences.includeInternal;
+let showTeamOnly = defaultListFilterPreferences.includeTeam;
 let showCollaboratorOnly = defaultListFilterPreferences.includeCollaborator;
 let groupByRelease = defaultListFilterPreferences.groupByRelease;
 let showDraft = defaultListFilterPreferences.showDraft;
@@ -465,14 +467,12 @@ function applyListFilters(snapshot: DashboardSnapshot) {
       }
     }
 
-    if (showInternalOnly || showCollaboratorOnly) {
+    if (showInternalOnly || showTeamOnly || showCollaboratorOnly) {
       const matchesType =
-        (showInternalOnly && pr.authorType === "internal") ||
+        (showInternalOnly  && pr.authorType === "internal") ||
+        (showTeamOnly      && pr.authorType === "team") ||
         (showCollaboratorOnly && pr.authorType === "collaborator");
-
-      if (!matchesType) {
-        return false;
-      }
+      if (!matchesType) return false;
     }
 
     if (filteredReviewer) {
@@ -512,6 +512,7 @@ async function persistListFilters() {
         onlyMyPendingReviews,
         onlyMyPullRequests,
         includeInternal: showInternalOnly,
+        includeTeam: showTeamOnly,
         includeCollaborator: showCollaboratorOnly,
         groupByRelease,
         showDraft,
@@ -522,6 +523,7 @@ async function persistListFilters() {
     onlyMyPendingReviews = saved.onlyMyPendingReviews;
     onlyMyPullRequests = saved.onlyMyPullRequests;
     showInternalOnly = saved.includeInternal;
+    showTeamOnly = saved.includeTeam;
     showCollaboratorOnly = saved.includeCollaborator;
     groupByRelease = saved.groupByRelease;
     showDraft = saved.showDraft;
@@ -640,7 +642,9 @@ function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin?: stri
   const authorChip =
     pr.authorType === "internal"
       ? chip("neutral", "Internal", `<span class="chip-dot"></span>`)
-      : chip("ghost", "Collaborator");
+      : pr.authorType === "team"
+        ? chip("neutral", "Team", `<span class="chip-dot"></span>`)
+        : chip("ghost", "Collaborator");
 
   const agingChip = isAging ? ` ${chip("warn", "Older than 2 weeks", SVG.clock)}` : "";
 
@@ -899,6 +903,7 @@ function renderListFilters(snapshot: DashboardSnapshot) {
   const myReviewToggle = document.querySelector<HTMLInputElement>("[data-filter-my-review-pending]");
   const myPrsToggle = document.querySelector<HTMLInputElement>("[data-filter-my-prs]");
   const internalToggle = document.querySelector<HTMLInputElement>("[data-filter-internal]");
+  const teamToggle = document.querySelector<HTMLInputElement>("[data-filter-team]");
   const collaboratorToggle = document.querySelector<HTMLInputElement>("[data-filter-collaborator]");
   const groupByReleaseToggle = document.querySelector<HTMLInputElement>("[data-filter-group-by-release]");
   const showDraftToggle = document.querySelector<HTMLInputElement>("[data-filter-show-draft]");
@@ -938,6 +943,7 @@ function renderListFilters(snapshot: DashboardSnapshot) {
   }
 
   if (internalToggle) internalToggle.checked = showInternalOnly;
+  if (teamToggle) teamToggle.checked = showTeamOnly;
   if (collaboratorToggle) collaboratorToggle.checked = showCollaboratorOnly;
   if (groupByReleaseToggle) groupByReleaseToggle.checked = groupByRelease;
   if (showDraftToggle) showDraftToggle.checked = showDraft;
@@ -1336,13 +1342,14 @@ async function bootstrap() {
     onlyMyPendingReviews = payload.listFilters.onlyMyPendingReviews;
     onlyMyPullRequests = payload.listFilters.onlyMyPullRequests;
     showInternalOnly = payload.listFilters.includeInternal;
+    showTeamOnly = payload.listFilters.includeTeam;
     showCollaboratorOnly = payload.listFilters.includeCollaborator;
     groupByRelease = payload.listFilters.groupByRelease;
     showDraft = payload.listFilters.showDraft;
     hiddenRepos = payload.listFilters.hiddenRepos;
     currentAutoRefreshMinutes = Number.parseInt(payload.settings.autoRefreshMinutes, 10) || defaultSettings.autoRefreshMinutes;
     currentInternalMarker = payload.settings.internalAuthorMarker || defaultSettings.internalAuthorMarker;
-    currentCollaborators = payload.settings.collaboratorGithubUsers
+    currentCollaborators = payload.settings.teamMemberGithubUsers
       .split("\n").map(s => s.trim()).filter(Boolean);
     configureAutoRefresh();
   } catch (error) {
@@ -1376,7 +1383,7 @@ async function saveSettingsAndRefresh(event: SubmitEvent) {
     currentAutoRefreshMinutes =
       Number.parseInt(payload.settings.autoRefreshMinutes, 10) || defaultSettings.autoRefreshMinutes;
     currentInternalMarker = payload.settings.internalAuthorMarker || defaultSettings.internalAuthorMarker;
-    currentCollaborators = payload.settings.collaboratorGithubUsers
+    currentCollaborators = payload.settings.teamMemberGithubUsers
       .split("\n").map(s => s.trim()).filter(Boolean);
     configureAutoRefresh();
     renderSettings(payload.settings);
@@ -1559,8 +1566,18 @@ window.addEventListener("DOMContentLoaded", () => {
     ?.addEventListener("change", (event) => {
       const target = event.currentTarget;
       if (!(target instanceof HTMLInputElement)) return;
-      if (!target.checked && !showCollaboratorOnly) { target.checked = true; return; }
+      if (!target.checked && !showTeamOnly && !showCollaboratorOnly) { target.checked = true; return; }
       showInternalOnly = target.checked;
+      if (currentDashboard) renderListBoard(applyListFilters(currentDashboard));
+      void persistListFilters();
+    });
+  document
+    .querySelector<HTMLInputElement>("[data-filter-team]")
+    ?.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.checked && !showInternalOnly && !showCollaboratorOnly) { target.checked = true; return; }
+      showTeamOnly = target.checked;
       if (currentDashboard) renderListBoard(applyListFilters(currentDashboard));
       void persistListFilters();
     });
@@ -1569,7 +1586,7 @@ window.addEventListener("DOMContentLoaded", () => {
     ?.addEventListener("change", (event) => {
       const target = event.currentTarget;
       if (!(target instanceof HTMLInputElement)) return;
-      if (!target.checked && !showInternalOnly) { target.checked = true; return; }
+      if (!target.checked && !showInternalOnly && !showTeamOnly) { target.checked = true; return; }
       showCollaboratorOnly = target.checked;
       if (currentDashboard) renderListBoard(applyListFilters(currentDashboard));
       void persistListFilters();

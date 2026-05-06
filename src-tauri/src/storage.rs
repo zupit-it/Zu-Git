@@ -35,8 +35,8 @@ struct PersistedSettings {
     auto_refresh_minutes: u32,
     #[serde(default = "default_author_marker")]
     internal_author_marker: String,
-    #[serde(default)]
-    collaborator_github_users: Vec<String>,
+    #[serde(default, alias = "collaboratorGithubUsers")]
+    team_member_github_users: Vec<String>,
     #[serde(default)]
     jira_base_url: String,
     #[serde(default)]
@@ -168,7 +168,7 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         github_repos: persisted.github_repos.join("\n"),
         auto_refresh_minutes: persisted.auto_refresh_minutes.to_string(),
         internal_author_marker: persisted.internal_author_marker,
-        collaborator_github_users: persisted.collaborator_github_users.join("\n"),
+        team_member_github_users: persisted.team_member_github_users.join("\n"),
         jira_base_url: persisted.jira_base_url,
         jira_email: persisted.jira_email,
         jira_token,
@@ -217,7 +217,7 @@ pub async fn save_settings(
         github_repos: normalized.github_repos.clone(),
         auto_refresh_minutes: normalized.auto_refresh_minutes,
         internal_author_marker: normalized.internal_author_marker.clone(),
-        collaborator_github_users: normalized.collaborator_github_users.clone(),
+        team_member_github_users: normalized.team_member_github_users.clone(),
         jira_base_url: normalized.jira_base_url.clone(),
         jira_email: normalized.jira_email.clone(),
         jira_repo_boards: normalized.jira_repo_boards.clone(),
@@ -263,6 +263,10 @@ pub async fn load_list_filter_preferences(
                     .get("includeInternal")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(defaults.include_internal),
+                include_team: partial
+                    .get("includeTeam")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(defaults.include_team),
                 include_collaborator: partial
                     .get("includeCollaborator")
                     .and_then(|v| v.as_bool())

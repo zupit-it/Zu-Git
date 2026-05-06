@@ -5,7 +5,7 @@ export type ReviewState =
   | "changes-requested";
 
 export type Priority = "Highest" | "High" | "Medium" | "Low";
-export type AuthorType = "internal" | "collaborator";
+export type AuthorType = "internal" | "team" | "collaborator";
 export type MatchStrategy = "title-board" | "title-any" | "fallback-text" | "none";
 
 export interface ReviewActor {

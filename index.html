@@ -125,6 +125,10 @@
               <span>Internal</span>
             </label>
             <label class="filter-pill">
+              <input data-filter-team type="checkbox" />
+              <span>Team</span>
+            </label>
+            <label class="filter-pill">
               <input data-filter-collaborator type="checkbox" />
               <span>Collaborator</span>
             </label>
@@ -230,8 +234,8 @@
                     <input id="internalAuthorMarker" name="internalAuthorMarker" type="text" placeholder="-zupit" />
                   </div>
                   <div class="settings-field settings-field-wide">
-                    <label class="field-label" for="collaboratorGithubUsers">Collaborator GitHub usernames</label>
-                    <textarea id="collaboratorGithubUsers" name="collaboratorGithubUsers" rows="2" placeholder="external-user-one&#10;external-user-two"></textarea>
+                    <label class="field-label" for="teamMemberGithubUsers">Team members GitHub usernames</label>
+                    <textarea id="teamMemberGithubUsers" name="teamMemberGithubUsers" rows="2" placeholder="team-member-one&#10;team-member-two"></textarea>
                   </div>
                 </div>
               </div>

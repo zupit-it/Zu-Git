@@ -4,7 +4,7 @@ export interface AppSettings {
   githubRepos: string[];
   autoRefreshMinutes: number;
   internalAuthorMarker: string;
-  collaboratorGithubUsers: string[];
+  teamMemberGithubUsers: string[];
   jiraBaseUrl: string;
   jiraEmail: string;
   jiraToken: string;
@@ -17,6 +17,7 @@ export interface ListFilterPreferences {
   onlyMyPendingReviews: boolean;
   onlyMyPullRequests: boolean;
   includeInternal: boolean;
+  includeTeam: boolean;
   includeCollaborator: boolean;
   groupByRelease: boolean;
   showDraft: boolean;
@@ -29,7 +30,7 @@ export interface SettingsFormValues {
   githubRepos: string;
   autoRefreshMinutes: string;
   internalAuthorMarker: string;
-  collaboratorGithubUsers: string;
+  teamMemberGithubUsers: string;
   jiraBaseUrl: string;
   jiraEmail: string;
   jiraToken: string;
@@ -44,7 +45,7 @@ export const defaultSettings: AppSettings = {
   githubRepos: [],
   autoRefreshMinutes: 5,
   internalAuthorMarker: "-zupit",
-  collaboratorGithubUsers: [],
+  teamMemberGithubUsers: [],
   jiraBaseUrl: "",
   jiraEmail: "",
   jiraToken: "",
@@ -57,6 +58,7 @@ export const defaultListFilterPreferences: ListFilterPreferences = {
   onlyMyPendingReviews: false,
   onlyMyPullRequests: false,
   includeInternal: true,
+  includeTeam: true,
   includeCollaborator: true,
   groupByRelease: false,
   showDraft: true,
@@ -100,7 +102,7 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
     githubRepos: settings.githubRepos.join("\n"),
     autoRefreshMinutes: String(settings.autoRefreshMinutes),
     internalAuthorMarker: settings.internalAuthorMarker,
-    collaboratorGithubUsers: settings.collaboratorGithubUsers.join("\n"),
+    teamMemberGithubUsers: settings.teamMemberGithubUsers.join("\n"),
     jiraBaseUrl: settings.jiraBaseUrl,
     jiraEmail: settings.jiraEmail,
     jiraToken: settings.jiraToken,
@@ -126,7 +128,7 @@ export function normalizeSettings(
         ? autoRefreshMinutes
         : defaultSettings.autoRefreshMinutes,
     internalAuthorMarker: values.internalAuthorMarker?.trim() || defaultSettings.internalAuthorMarker,
-    collaboratorGithubUsers: splitMultilineList(values.collaboratorGithubUsers),
+    teamMemberGithubUsers: splitMultilineList(values.teamMemberGithubUsers),
     jiraBaseUrl: values.jiraBaseUrl?.trim().replace(/\/+$/, "") ?? "",
     jiraEmail: values.jiraEmail?.trim() ?? "",
     jiraToken: values.jiraToken?.trim() ?? "",

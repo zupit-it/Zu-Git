@@ -196,7 +196,7 @@ async fn fetch_live(
     }
     // For configured collaborators whose avatar we don't have yet, fetch via API.
     let missing: Vec<String> = settings
-        .collaborator_github_users
+        .team_member_github_users
         .iter()
         .filter(|login| !reviewer_avatars.contains_key(*login))
         .cloned()
@@ -273,17 +273,22 @@ fn normalise_pr<'a>(
 ) -> NormalisedPr<'a> {
     let jira_board = settings.jira_repo_boards.get(&pr.repo).cloned();
 
-    let collaborator_override = settings.collaborator_github_users.contains(&pr.author);
+    let is_team_member = settings
+        .team_member_github_users
+        .iter()
+        .any(|u| u.to_lowercase() == pr.author.to_lowercase());
     let marker_match = !settings.internal_author_marker.is_empty()
         && pr
             .author
             .to_lowercase()
             .contains(&settings.internal_author_marker.to_lowercase());
 
-    let author_type = if collaborator_override || !marker_match {
-        AuthorType::Collaborator
-    } else {
+    let author_type = if is_team_member {
+        AuthorType::Team
+    } else if marker_match {
         AuthorType::Internal
+    } else {
+        AuthorType::Collaborator
     };
 
     let title_match = crate::jira::extract_jira_key_from_title(&pr.title, jira_board.as_deref());
@@ -302,7 +307,7 @@ fn normalise_pr<'a>(
         },
     };
 
-    if author_type == AuthorType::Internal && jira_key.is_none() {
+    if matches!(author_type, AuthorType::Internal | AuthorType::Team) && jira_key.is_none() {
         warnings.push(format!(
             "{}#{}: internal PR without Jira key in the expected title pattern.",
             pr.repo, pr.number

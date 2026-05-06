@@ -11,7 +11,7 @@ pub struct AppSettings {
     pub github_repos: Vec<String>,
     pub auto_refresh_minutes: u32,
     pub internal_author_marker: String,
-    pub collaborator_github_users: Vec<String>,
+    pub team_member_github_users: Vec<String>,
     pub jira_base_url: String,
     pub jira_email: String,
     pub jira_token: String,
@@ -28,7 +28,7 @@ impl Default for AppSettings {
             github_repos: vec![],
             auto_refresh_minutes: 5,
             internal_author_marker: "-zupit".to_string(),
-            collaborator_github_users: vec![],
+            team_member_github_users: vec![],
             jira_base_url: String::new(),
             jira_email: String::new(),
             jira_token: String::new(),
@@ -48,7 +48,7 @@ pub struct SettingsFormValues {
     pub github_repos: String,
     pub auto_refresh_minutes: String,
     pub internal_author_marker: String,
-    pub collaborator_github_users: String,
+    pub team_member_github_users: String,
     pub jira_base_url: String,
     pub jira_email: String,
     pub jira_token: String,
@@ -63,6 +63,7 @@ pub struct ListFilterPreferences {
     pub only_my_pending_reviews: bool,
     pub only_my_pull_requests: bool,
     pub include_internal: bool,
+    pub include_team: bool,
     pub include_collaborator: bool,
     pub group_by_release: bool,
     pub show_draft: bool,
@@ -75,6 +76,7 @@ impl Default for ListFilterPreferences {
             only_my_pending_reviews: false,
             only_my_pull_requests: false,
             include_internal: true,
+            include_team: true,
             include_collaborator: true,
             group_by_release: false,
             show_draft: true,
@@ -113,6 +115,7 @@ pub enum Priority {
 #[serde(rename_all = "camelCase")]
 pub enum AuthorType {
     Internal,
+    Team,
     Collaborator,
 }
 
@@ -307,7 +310,7 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
                 m
             }
         },
-        collaborator_github_users: split_multiline_list(&values.collaborator_github_users),
+        team_member_github_users: split_multiline_list(&values.team_member_github_users),
         jira_base_url: values
             .jira_base_url
             .trim()
@@ -328,7 +331,7 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         github_repos: settings.github_repos.join("\n"),
         auto_refresh_minutes: settings.auto_refresh_minutes.to_string(),
         internal_author_marker: settings.internal_author_marker.clone(),
-        collaborator_github_users: settings.collaborator_github_users.join("\n"),
+        team_member_github_users: settings.team_member_github_users.join("\n"),
         jira_base_url: settings.jira_base_url.clone(),
         jira_email: settings.jira_email.clone(),
         jira_token: settings.jira_token.clone(),
