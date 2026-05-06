@@ -1,9 +1,12 @@
-name: Release
+name: Build
 
 on:
   workflow_dispatch:
     # Normally triggered by release.yml after the version bump and tag push.
     # Can also be run manually for ad-hoc builds (version will match whatever is in the repo).
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -53,7 +56,7 @@ jobs:
         run: npm ci
 
       - name: Build
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: "-"
@@ -64,5 +67,6 @@ jobs:
           releaseName: "ZuGit ${{ github.ref_name }}"
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
           args: ${{ matrix.args }}

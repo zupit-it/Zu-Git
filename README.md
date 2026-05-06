@@ -99,4 +99,9 @@ Enter the version number **without** the `v` prefix (e.g. `0.2.0`). The workflow
 2. Commit the changes and push a `v0.2.0` tag
 3. Trigger the build workflow on that tag
 
-The build workflow compiles and packages the app for macOS (arm64 + x86\_64), Windows, and Linux, then uploads the installers to a GitHub Release draft. Publish the draft manually from the GitHub UI when ready.
+The build workflow compiles and packages the app for macOS (arm64 + x86\_64), Windows, and Linux, then uploads the installers to a GitHub Release.
+
+The updater release requires the GitHub repository secrets `TAURI_SIGNING_PRIVATE_KEY`
+and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The public key matching that private key is
+stored in `src-tauri/tauri.conf.json`; Tauri generates the updater bundle signatures
+and the build workflow uploads `latest.json` to the GitHub Release.
