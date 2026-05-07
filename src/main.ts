@@ -62,6 +62,18 @@ let settingsDirty = false;
 let settingsSaving = false;
 let refreshInProgress = false;
 
+// ── Draft / new PR state ──────────────────────────────────────────────────────
+interface DraftPrInfo {
+  repo: string;
+  branch: string;
+  baseBranch: string;
+  suggestedTitle: string;
+}
+let draftPrInfo: DraftPrInfo | null = null;
+let draftReviewers: string[] = [];
+let draftBody = "";
+let draftBaseBranch = "";
+
 
 function renderSecretStoreInfo(secretStore: {
   provider: "keychain" | "credential-manager" | "secret-service" | "fallback-file";
@@ -1333,6 +1345,212 @@ function renderDashboard(snapshot: DashboardSnapshot) {
   }
 }
 
+// ── New PR card ───────────────────────────────────────────────────────────────
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function renderDraftPrCard() {
+  const container = document.querySelector<HTMLElement>("[data-new-pr-container]");
+  if (!container || !draftPrInfo) return;
+
+  const reviewerPillsHtml = draftReviewers
+    .map(login =>
+      `<span class="pr-new-reviewer-pill">
+        ${escHtml(login)}
+        <button class="pr-new-reviewer-pill-remove" data-remove-reviewer="${escHtml(login)}" type="button" title="Remove">×</button>
+      </span>`)
+    .join("");
+
+  const pickerItemsHtml = currentCollaborators
+    .filter(login => login !== (currentDashboard?.viewerLogin ?? ""))
+    .map(login => {
+      const selected = draftReviewers.includes(login);
+      return `<button class="pr-new-reviewer-picker-item${selected ? " is-selected" : ""}" data-pick-reviewer="${escHtml(login)}" type="button">
+        ${selected ? "✓ " : ""}${escHtml(login)}
+      </button>`;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <div class="pr-list-wrap pr-new-wrap" data-new-pr-card>
+      <div class="pr-row">
+        <div class="pr-row-bar"></div>
+        <div style="min-width:0">
+          <input class="pr-new-title-input" data-new-pr-title type="text"
+            value="${escHtml(draftPrInfo.suggestedTitle)}"
+            placeholder="Pull request title…" />
+          <textarea class="pr-new-title-input" data-new-pr-body
+            rows="2" placeholder="Description (optional)"
+            style="resize:vertical;margin-bottom:8px">${escHtml(draftBody)}</textarea>
+          <div class="pr-new-meta">
+            <span class="chip ghost" style="font-family:var(--font-mono);font-size:11px">${escHtml(draftPrInfo.repo)}</span>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 5h6M5 2l3 3-3 3"/></svg>
+            <span class="chip neutral" style="font-family:var(--font-mono);font-size:11px">${escHtml(draftPrInfo.branch)}</span>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 5h6M5 2l3 3-3 3"/></svg>
+            <input class="pr-new-base-input" data-new-pr-base type="text"
+              value="${escHtml(draftBaseBranch)}"
+              placeholder="${escHtml(draftPrInfo.baseBranch)}"
+              title="Base branch" />
+          </div>
+        </div>
+        <div class="pr-new-reviewers">
+          <div class="pr-new-reviewer-pills">${reviewerPillsHtml}</div>
+          ${pickerItemsHtml
+            ? `<button class="chip ghost pr-new-add-reviewer" data-toggle-reviewer-picker type="button">+ Add reviewer</button>
+               <div class="pr-new-reviewer-picker" data-reviewer-picker hidden>${pickerItemsHtml}</div>`
+            : ""}
+        </div>
+        <div>
+          <span class="pr-new-hint">New pull request</span>
+        </div>
+        <div class="pr-new-actions">
+          <button class="secondary-button" data-publish-draft type="button">Publish draft</button>
+          <button class="primary-button" data-publish-pr type="button">Publish</button>
+          <button class="pr-new-close" data-close-new-pr type="button" title="Dismiss">×</button>
+        </div>
+      </div>
+    </div>`;
+
+  // Title input
+  container.querySelector<HTMLInputElement>("[data-new-pr-title]")
+    ?.addEventListener("input", e => {
+      draftPrInfo!.suggestedTitle = (e.target as HTMLInputElement).value;
+    });
+
+  // Body textarea
+  container.querySelector<HTMLTextAreaElement>("[data-new-pr-body]")
+    ?.addEventListener("input", e => {
+      draftBody = (e.target as HTMLTextAreaElement).value;
+    });
+
+  // Base branch input
+  container.querySelector<HTMLInputElement>("[data-new-pr-base]")
+    ?.addEventListener("input", e => {
+      draftBaseBranch = (e.target as HTMLInputElement).value;
+    });
+
+  // Toggle reviewer picker
+  container.querySelector("[data-toggle-reviewer-picker]")
+    ?.addEventListener("click", () => {
+      const picker = container.querySelector<HTMLElement>("[data-reviewer-picker]");
+      if (picker) picker.hidden = !picker.hidden;
+    });
+
+  // Pick reviewer
+  container.querySelectorAll<HTMLButtonElement>("[data-pick-reviewer]")
+    .forEach(btn => btn.addEventListener("click", () => {
+      const login = btn.dataset.pickReviewer!;
+      if (draftReviewers.includes(login)) {
+        draftReviewers = draftReviewers.filter(r => r !== login);
+      } else {
+        draftReviewers = [...draftReviewers, login];
+      }
+      renderDraftPrCard();
+    }));
+
+  // Remove reviewer pill
+  container.querySelectorAll<HTMLButtonElement>("[data-remove-reviewer]")
+    .forEach(btn => btn.addEventListener("click", () => {
+      draftReviewers = draftReviewers.filter(r => r !== btn.dataset.removeReviewer);
+      renderDraftPrCard();
+    }));
+
+  // Close
+  container.querySelector("[data-close-new-pr]")
+    ?.addEventListener("click", closeDraftPrCard);
+
+  // Publish draft / publish
+  container.querySelector("[data-publish-draft]")
+    ?.addEventListener("click", () => void publishNewPr(true));
+  container.querySelector("[data-publish-pr]")
+    ?.addEventListener("click", () => void publishNewPr(false));
+
+  // Close picker when clicking outside
+  document.addEventListener("click", (e) => {
+    const picker = container.querySelector<HTMLElement>("[data-reviewer-picker]");
+    if (!picker || picker.hidden) return;
+    if (!(e.target as Element).closest("[data-toggle-reviewer-picker], [data-reviewer-picker]")) {
+      picker.hidden = true;
+    }
+  }, { capture: true, once: false });
+}
+
+function closeDraftPrCard() {
+  draftPrInfo = null;
+  draftReviewers = [];
+  draftBody = "";
+  draftBaseBranch = "";
+  const container = document.querySelector("[data-new-pr-container]");
+  if (container) container.innerHTML = "";
+}
+
+async function loadDraftPrInfo() {
+  const btn = document.querySelector<HTMLButtonElement>("[data-add-pr-button]");
+
+  // Toggle off if card already open.
+  if (draftPrInfo !== null) {
+    closeDraftPrCard();
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.classList.add("is-loading"); }
+  try {
+    const info = await invoke<DraftPrInfo | null>("get_draft_pr_info");
+    if (!info) {
+      setStatus("No unpublished branch found for your account.", "neutral");
+      return;
+    }
+    draftPrInfo = info;
+    draftReviewers = [];
+    draftBody = "";
+    draftBaseBranch = info.baseBranch;
+    setView("list");
+    renderDraftPrCard();
+    // Scroll the new card into view.
+    document.querySelector(".list-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : "Could not fetch branch info.", "danger");
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove("is-loading"); }
+  }
+}
+
+async function publishNewPr(draft: boolean) {
+  if (!draftPrInfo) return;
+  const container = document.querySelector<HTMLElement>("[data-new-pr-container]");
+  const titleInput = container?.querySelector<HTMLInputElement>("[data-new-pr-title]");
+  const title = titleInput?.value.trim() ?? draftPrInfo.suggestedTitle;
+  if (!title) {
+    titleInput?.focus();
+    return;
+  }
+
+  const publishBtn = container?.querySelector<HTMLButtonElement>(draft ? "[data-publish-draft]" : "[data-publish-pr]");
+  if (publishBtn) { publishBtn.disabled = true; publishBtn.textContent = "Publishing…"; }
+
+  try {
+    const prUrl = await invoke<string>("create_pull_request", {
+      repo: draftPrInfo.repo,
+      title,
+      body: draftBody,
+      head: draftPrInfo.branch,
+      base: draftBaseBranch || draftPrInfo.baseBranch,
+      reviewers: draftReviewers,
+      draft,
+    });
+    closeDraftPrCard();
+    setStatus(`PR created successfully.`, "neutral");
+    void refreshDashboard("auto");
+    // Open the new PR in the browser.
+    void invoke("open_external", { url: prUrl });
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : "Failed to create pull request.", "danger");
+    if (publishBtn) { publishBtn.disabled = false; publishBtn.textContent = draft ? "Publish draft" : "Publish"; }
+  }
+}
+
 async function bootstrap() {
   setStatus("Loading local settings…");
   setListLoading(true);
@@ -1567,6 +1785,9 @@ window.addEventListener("DOMContentLoaded", () => {
   document
     .querySelector<HTMLButtonElement>("[data-refresh-button]")
     ?.addEventListener("click", () => void refreshDashboard());
+  document
+    .querySelector<HTMLButtonElement>("[data-add-pr-button]")
+    ?.addEventListener("click", () => void loadDraftPrInfo());
   document
     .querySelector<HTMLButtonElement>("[data-github-token-link]")
     ?.addEventListener("click", () => void openExternal("https://github.com/settings/personal-access-tokens/new"));

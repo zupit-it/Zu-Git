@@ -52,6 +52,11 @@ Tokens are never written to disk in plain text. On save, ZuGit attempts to store
 
 ZuGit is fully local. All API calls go directly from your machine to GitHub and Jira — there is no intermediate server, no analytics, and no telemetry of any kind.
 
+## Add PR — branch detection
+
+The "Add PR" button finds your most recently pushed branch that has no open PR yet.
+Detection uses the [GitHub Activity API](docs/github-identity.md) (`GET /repos/{repo}/activity?actor={login}`) rather than git commit authorship — see [`docs/github-identity.md`](docs/github-identity.md) for why the two are not the same thing.
+
 ## Author classification
 
 Each PR author is classified as **Internal** or **Collaborator**:

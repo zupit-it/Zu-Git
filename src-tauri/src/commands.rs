@@ -1,6 +1,6 @@
 use crate::models::{
     serialize_settings_form, AppSettings, DashboardBootstrap, DashboardSnapshot,
-    ListFilterPreferences, SaveSettingsResult, SettingsFormValues, TokenStoreStatus,
+    DraftPrInfo, ListFilterPreferences, SaveSettingsResult, SettingsFormValues, TokenStoreStatus,
 };
 use serde::Serialize;
 
@@ -163,6 +163,55 @@ pub async fn save_list_filters(
 ) -> Result<ListFilterPreferences, String> {
     storage::save_list_filter_preferences(&app, &params).await?;
     Ok(params)
+}
+
+// ── Draft PR ──────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_draft_pr_info(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<DraftPrInfo>, String> {
+    let settings = storage::load_settings(&app).await?;
+    if !crate::models::settings_ready_for_github(&settings) {
+        return Ok(None);
+    }
+    let viewer_login = crate::github::fetch_viewer_login(&settings, &state.http_client)
+        .await
+        .unwrap_or_default();
+    eprintln!("[draft-pr] viewer_login={:?}", viewer_login);
+    if viewer_login.is_empty() {
+        eprintln!("[draft-pr] aborting: viewer_login is empty");
+        return Ok(None);
+    }
+    let result = crate::github::find_viewer_branch(
+        &settings.github_repos,
+        &viewer_login,
+        &settings,
+        &state.http_client,
+    )
+    .await;
+    eprintln!("[draft-pr] find_viewer_branch result: {:?}", result.as_ref().map(|r| (&r.repo, &r.branch)));
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn create_pull_request(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    title: String,
+    body: String,
+    head: String,
+    base: String,
+    reviewers: Vec<String>,
+    draft: bool,
+) -> Result<String, String> {
+    let settings = storage::load_settings(&app).await?;
+    crate::github::create_pull_request(
+        &repo, &title, &body, &head, &base, &reviewers, draft, &settings, &state.http_client,
+    )
+    .await
 }
 
 // ── Auto-update ───────────────────────────────────────────────────────────────

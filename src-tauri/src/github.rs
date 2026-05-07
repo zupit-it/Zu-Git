@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::models::{AppSettings, PipelineState};
+use crate::models::{AppSettings, DraftPrInfo, PipelineState};
 
 // ── GraphQL query ─────────────────────────────────────────────────────────────
 
@@ -379,6 +379,46 @@ async fn graphql_request(
     response.json::<GqlResponse>().await.map_err(|e| e.to_string())
 }
 
+/// Like `graphql_request` but deserialises `data` directly into any typed `T`.
+async fn graphql_request_typed<T: serde::de::DeserializeOwned>(
+    query: &str,
+    variables: serde_json::Value,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<T, String> {
+    let url = graphql_url(settings);
+    let body = serde_json::json!({ "query": query, "variables": variables });
+
+    let response = client
+        .post(&url)
+        .headers(github_headers(settings))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("GraphQL request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub GraphQL API returned {} for {}",
+            response.status(),
+            url
+        ));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+    if let Some(errors) = json["errors"].as_array() {
+        if let Some(first) = errors.first() {
+            return Err(first["message"]
+                .as_str()
+                .unwrap_or("GraphQL error")
+                .to_string());
+        }
+    }
+
+    serde_json::from_value(json["data"].clone()).map_err(|e| e.to_string())
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 pub async fn fetch_viewer_login(
@@ -741,6 +781,239 @@ fn summarize_pipeline_state(rollup: Option<&GqlStatusCheckRollup>) -> PipelineSt
     }
 
     PipelineState::Unknown
+}
+
+// ── Branch discovery & PR creation ───────────────────────────────────────────
+
+/// A push/force-push/branch-creation event from the GitHub Activity API.
+/// `actor.login` is the GitHub account that performed the push — reliable
+/// regardless of the git commit author email.
+#[derive(Deserialize)]
+struct RepoActivity {
+    #[serde(rename = "ref")]
+    git_ref: String,
+    timestamp: String,
+    activity_type: String,
+    /// SHA of the HEAD commit after the push (used for the suggested title).
+    after: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RestRepoInfo {
+    default_branch: String,
+}
+
+struct BranchCandidate {
+    repo: String,
+    branch: String,
+    base_branch: String,
+    suggested_title: String,
+    committed_at: String,
+}
+
+/// Searches all configured repos in parallel for the viewer's most recently
+/// pushed branch that has no open PR yet.
+///
+/// Uses `GET /repos/{repo}/activity?actor={login}` which tracks pushes by
+/// GitHub account identity — works regardless of git commit email config.
+pub async fn find_viewer_branch(
+    repos: &[String],
+    viewer_login: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Option<DraftPrInfo> {
+    let futures: Vec<_> = repos
+        .iter()
+        .map(|repo| find_viewer_branch_in_repo(repo, viewer_login, settings, client))
+        .collect();
+
+    futures::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+        .max_by(|a, b| a.committed_at.cmp(&b.committed_at))
+        .map(|c| DraftPrInfo {
+            repo: c.repo,
+            branch: c.branch,
+            base_branch: c.base_branch,
+            suggested_title: c.suggested_title,
+        })
+}
+
+async fn find_viewer_branch_in_repo(
+    repo: &str,
+    viewer_login: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Option<BranchCandidate> {
+    let base = settings.github_api_base_url.trim_end_matches('/');
+    let (owner, _) = repo.split_once('/')?;
+
+    // Fetch recent push activity for this viewer + repo default branch in parallel.
+    // time_period=month covers last 30 days; per_page=25 is plenty for one person.
+    let activity_url = format!(
+        "{}/repos/{}/activity?actor={}&time_period=month&per_page=25",
+        base, repo, viewer_login
+    );
+    let repo_url = format!("{}/repos/{}", base, repo);
+
+    let (activity_res, repo_res) = tokio::join!(
+        github_request::<Vec<RepoActivity>>(&activity_url, settings, client),
+        github_request::<RestRepoInfo>(&repo_url, settings, client),
+    );
+
+    let activities = match activity_res {
+        Ok(a) => a,
+        Err(e) => { eprintln!("[draft-pr] [{repo}] activity request failed: {e}"); return None; }
+    };
+    let repo_info = match repo_res {
+        Ok(r) => r,
+        Err(e) => { eprintln!("[draft-pr] [{repo}] repo info request failed: {e}"); return None; }
+    };
+
+    // Keep push-type events, deduplicate by branch (API returns newest first).
+    let mut seen = std::collections::HashSet::new();
+    let candidates: Vec<(String, String, Option<String>)> = activities
+        .iter()
+        .filter(|a| matches!(
+            a.activity_type.as_str(),
+            "push" | "force_push" | "branch_creation"
+        ))
+        .filter_map(|a| {
+            let branch = a.git_ref.strip_prefix("refs/heads/")?.to_string();
+            if branch == repo_info.default_branch { return None; }
+            if !seen.insert(branch.clone()) { return None; }
+            Some((branch, a.timestamp.clone(), a.after.clone()))
+        })
+        .collect();
+
+    eprintln!(
+        "[draft-pr] [{repo}] activity candidates: {:?}",
+        candidates.iter().map(|(b, _, _)| b.as_str()).collect::<Vec<_>>()
+    );
+
+    for (branch, timestamp, after_sha) in candidates {
+        // Skip branches that already have an open PR.
+        let check_url = format!(
+            "{}/repos/{}/pulls?head={}:{}&state=open&per_page=1",
+            base, repo, owner, branch
+        );
+        let existing: Vec<serde_json::Value> =
+            github_request(&check_url, settings, client)
+                .await
+                .unwrap_or_default();
+        if !existing.is_empty() {
+            eprintln!("[draft-pr] [{repo}] {branch:?} already has an open PR, skipping");
+            continue;
+        }
+
+        // Fetch HEAD commit message for the suggested title.
+        let suggested_title = if let Some(sha) = after_sha {
+            let commit_url = format!("{}/repos/{}/commits/{}", base, repo, sha);
+            let commit: serde_json::Value =
+                github_request(&commit_url, settings, client)
+                    .await
+                    .unwrap_or_default();
+            commit["commit"]["message"]
+                .as_str()
+                .and_then(|m| m.lines().next())
+                .unwrap_or("")
+                .to_string()
+        } else {
+            String::new()
+        };
+
+        return Some(BranchCandidate {
+            repo: repo.to_string(),
+            branch,
+            base_branch: repo_info.default_branch,
+            suggested_title,
+            committed_at: timestamp,
+        });
+    }
+
+    eprintln!("[draft-pr] [{repo}] no valid candidate found");
+    None
+}
+
+/// Creates a pull request via the GitHub REST API and optionally assigns reviewers.
+/// Returns the URL of the newly created PR.
+pub async fn create_pull_request(
+    repo: &str,
+    title: &str,
+    body: &str,
+    head: &str,
+    base: &str,
+    reviewers: &[String],
+    draft: bool,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<String, String> {
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+
+    #[derive(Serialize)]
+    struct CreatePrPayload<'a> {
+        title: &'a str,
+        body: &'a str,
+        head: &'a str,
+        base: &'a str,
+        draft: bool,
+    }
+
+    let response = client
+        .post(format!("{}/repos/{}/pulls", api_base, repo))
+        .headers(github_headers(settings))
+        .json(&CreatePrPayload { title, body, head, base, draft })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        // Surface a clean message when the branch already has an open PR.
+        let detail = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| {
+                v["errors"]
+                    .as_array()?
+                    .first()?
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| body.clone());
+        return Err(format!("GitHub API error {status}: {detail}"));
+    }
+
+    let pr: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let pr_number = pr["number"]
+        .as_u64()
+        .ok_or("Missing PR number in response")?;
+    let pr_url = pr["html_url"]
+        .as_str()
+        .ok_or("Missing PR URL in response")?
+        .to_string();
+
+    // Assign reviewers if provided.
+    if !reviewers.is_empty() {
+        #[derive(Serialize)]
+        struct ReviewersPayload<'a> {
+            reviewers: &'a [String],
+        }
+        // Best-effort: ignore errors (e.g. reviewer is the PR author).
+        let _ = client
+            .post(format!(
+                "{}/repos/{}/pulls/{}/requested_reviewers",
+                api_base, repo, pr_number
+            ))
+            .headers(github_headers(settings))
+            .json(&ReviewersPayload { reviewers })
+            .send()
+            .await;
+    }
+
+    Ok(pr_url)
 }
 
 fn keep_latest_check_runs<'a>(runs: &[&'a GqlStatusContext]) -> Vec<&'a GqlStatusContext> {

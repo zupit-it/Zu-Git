@@ -84,6 +84,8 @@ pub fn run() {
             commands::request_review,
             commands::check_for_update,
             commands::install_update,
+            commands::get_draft_pr_info,
+            commands::create_pull_request,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

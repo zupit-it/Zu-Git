@@ -46,6 +46,11 @@
           <span class="sync-status-text" data-status></span>
         </div>
 
+        <button class="secondary-button" data-add-pr-button type="button">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 1v10M1 6h10"/></svg>
+          Add PR
+        </button>
+
         <button class="update-badge" data-update-badge type="button" hidden>
           <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2v8M4 7l3 3 3-3"/><path d="M2 12h10"/></svg>
           <span data-update-badge-label>Update available</span>
@@ -149,6 +154,7 @@
 
           <!-- Scrollable content -->
           <div class="list-scroll">
+            <div data-new-pr-container></div>
             <div class="list-loading" data-list-loading hidden>
               <span class="list-loading-spinner" aria-hidden="true"></span>
               <span data-list-loading-label>Loading pull requests…</span>

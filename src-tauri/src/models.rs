@@ -364,6 +364,17 @@ pub fn settings_ready_for_jira(settings: &AppSettings) -> bool {
         && !settings.jira_token.is_empty()
 }
 
+// ── Draft PR info ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftPrInfo {
+    pub repo: String,
+    pub branch: String,
+    pub base_branch: String,
+    pub suggested_title: String,
+}
+
 // ── Mock data ─────────────────────────────────────────────────────────────────
 
 pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
