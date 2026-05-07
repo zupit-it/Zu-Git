@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import type { DashboardBootstrap, DashboardSnapshot, SaveSettingsResult, TokenStoreStatus } from "./shared/rpc";
 import type { PullRequestSummary, ReviewActor } from "./shared/pr-model";
 import {
@@ -1353,6 +1354,7 @@ async function bootstrap() {
     currentCollaborators = payload.settings.teamMemberGithubUsers
       .split("\n").map(s => s.trim()).filter(Boolean);
     configureAutoRefresh();
+    if (payload.settings.notificationsEnabled === "on") void ensureNotificationPermission();
   } catch (error) {
     stopSyncLabelTicker();
     renderSettings(serializeSettingsForm(defaultSettings));
@@ -1370,6 +1372,15 @@ async function bootstrap() {
 
   // Check for updates silently; show badge in toolbar if one is available.
   void checkForUpdate();
+}
+
+async function ensureNotificationPermission() {
+  try {
+    const granted = await isPermissionGranted();
+    if (!granted) await requestPermission();
+  } catch {
+    // Silently ignore — Windows doesn't need this and won't throw, but just in case.
+  }
 }
 
 interface UpdateInfo {
@@ -1428,6 +1439,7 @@ async function saveSettingsAndRefresh(event: SubmitEvent) {
     configureAutoRefresh();
     renderSettings(payload.settings);
     renderDashboard(payload.dashboard);
+    if (payload.settings.notificationsEnabled === "on") void ensureNotificationPermission();
     setView("list");
     settingsSaving = false;
     syncSettingsSaveButton();
