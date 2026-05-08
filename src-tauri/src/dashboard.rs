@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use crate::github::{CachedPrDetails, GithubPullRequestRecord, GithubReviewSummary};
 use crate::jira::JiraIssueSummary;
@@ -107,6 +107,7 @@ pub async fn build_dashboard_snapshot(
 
 // ── Live fetch ────────────────────────────────────────────────────────────────
 
+#[allow(clippy::ptr_arg)] // integrations.clone() requires Vec, not slice
 async fn fetch_live(
     settings: &AppSettings,
     pr_cache: &Mutex<HashMap<String, CachedPrDetails>>,

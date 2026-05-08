@@ -1,6 +1,6 @@
 use crate::models::{
     serialize_settings_form, AppSettings, DashboardBootstrap, DashboardSnapshot,
-    ListFilterPreferences, SaveSettingsResult, SettingsFormValues, TokenStoreStatus,
+    DraftPrInfo, ListFilterPreferences, SaveSettingsResult, SettingsFormValues, TokenStoreStatus,
 };
 use serde::Serialize;
 
@@ -20,8 +20,8 @@ fn build_token_store_status(
 ) -> TokenStoreStatus {
     let info = state
         .secret_store_info
-        .get_or_init(|| secret_store::get_secret_store_info());
-    let last_save_used_vault = *state.last_save_used_vault.lock().unwrap();
+        .get_or_init(secret_store::get_secret_store_info);
+    let last_save_used_vault = *state.last_save_used_vault.lock();
     let last_save_used_file_fallback = last_save_used_vault == Some(false);
     let provider = if last_save_used_file_fallback {
         "fallback-file".to_string()
@@ -56,7 +56,7 @@ pub async fn bootstrap(
     // Initialises the OnceLock (runs probe once) and returns a reference.
     let secret_store_ref = state
         .secret_store_info
-        .get_or_init(|| secret_store::get_secret_store_info());
+        .get_or_init(secret_store::get_secret_store_info);
     let secret_store = crate::models::SecretStoreInfo {
         provider: secret_store_ref.provider.clone(),
         detail: secret_store_ref.detail.clone(),
@@ -78,11 +78,11 @@ pub async fn save_settings(
     params: SettingsFormValues,
 ) -> Result<SaveSettingsResult, String> {
     let (settings, used_vault) = storage::save_settings(&app, &params).await?;
-    *state.last_save_used_vault.lock().unwrap() = Some(used_vault);
+    *state.last_save_used_vault.lock() = Some(used_vault);
 
     // Clear caches after settings change.
-    state.pr_cache.lock().unwrap().clear();
-    state.jira_cache.lock().unwrap().clear();
+    state.pr_cache.lock().clear();
+    state.jira_cache.lock().clear();
 
     let mut snap = dashboard::build_dashboard_snapshot(
         &settings,
@@ -122,6 +122,9 @@ pub async fn refresh_dashboard(
 
 #[tauri::command]
 pub async fn open_external(app: tauri::AppHandle, url: String) -> Result<bool, String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(format!("Blocked non-http URL: {url}"));
+    }
     use tauri_plugin_opener::OpenerExt;
     app.opener()
         .open_url(&url, None::<&str>)
@@ -163,6 +166,52 @@ pub async fn save_list_filters(
 ) -> Result<ListFilterPreferences, String> {
     storage::save_list_filter_preferences(&app, &params).await?;
     Ok(params)
+}
+
+// ── Draft PR ──────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_draft_pr_info(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<DraftPrInfo>, String> {
+    let settings = storage::load_settings(&app).await?;
+    if !crate::models::settings_ready_for_github(&settings) {
+        return Ok(None);
+    }
+    let viewer_login = crate::github::fetch_viewer_login(&settings, &state.http_client)
+        .await
+        .unwrap_or_default();
+    if viewer_login.is_empty() {
+        return Ok(None);
+    }
+    Ok(crate::github::find_viewer_branch(
+        &settings.github_repos,
+        &viewer_login,
+        &settings,
+        &state.http_client,
+    )
+    .await)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn create_pull_request(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    title: String,
+    body: String,
+    head: String,
+    base: String,
+    reviewers: Vec<String>,
+    draft: bool,
+) -> Result<String, String> {
+    let settings = storage::load_settings(&app).await?;
+    crate::github::create_pull_request(
+        &repo, &title, &body, &head, &base, &reviewers, draft, &settings, &state.http_client,
+    )
+    .await
 }
 
 // ── Auto-update ───────────────────────────────────────────────────────────────

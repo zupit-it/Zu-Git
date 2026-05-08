@@ -256,7 +256,7 @@ pub struct SaveSettingsResult {
 
 fn split_multiline_list(value: &str) -> Vec<String> {
     value
-        .split(|c| c == '\n' || c == ',' || c == '\r')
+        .split(['\n', ',', '\r'])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
@@ -362,6 +362,17 @@ pub fn settings_ready_for_jira(settings: &AppSettings) -> bool {
     !settings.jira_base_url.is_empty()
         && !settings.jira_email.is_empty()
         && !settings.jira_token.is_empty()
+}
+
+// ── Draft PR info ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftPrInfo {
+    pub repo: String,
+    pub branch: String,
+    pub base_branch: String,
+    pub suggested_title: String,
 }
 
 // ── Mock data ─────────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ mod secret_store;
 mod storage;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use github::CachedPrDetails;
 use jira::JiraIssueSummary;
@@ -32,8 +32,8 @@ pub fn run() {
             // On macOS the menu bar lives at the top of the screen (system-wide),
             // so we keep it. On Windows/Linux it would render as an in-window bar,
             // which we don't want.
-            #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-            let app = app;
+            #[cfg(not(target_os = "macos"))]
+            let _ = &app;
             #[cfg(target_os = "macos")]
             {
                 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
@@ -84,6 +84,8 @@ pub fn run() {
             commands::request_review,
             commands::check_for_update,
             commands::install_update,
+            commands::get_draft_pr_info,
+            commands::create_pull_request,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -185,7 +185,7 @@ pub async fn fetch_jira_issues(
 
     for key in &unique_keys {
         let ck = cache_key(&settings.jira_base_url, key);
-        if let Some(cached) = cache.lock().unwrap().get(&ck).cloned() {
+        if let Some(cached) = cache.lock().get(&ck).cloned() {
             result.insert(key.clone(), cached);
         } else {
             missing.push(key.clone());
@@ -255,7 +255,7 @@ async fn fetch_chunk(
     for issue in &payload.issues {
         let summary = map_issue(issue);
         let ck = cache_key(&settings.jira_base_url, &issue.key);
-        cache.lock().unwrap().insert(ck, Some(summary.clone()));
+        cache.lock().insert(ck, Some(summary.clone()));
         result.insert(issue.key.clone(), Some(summary));
         found.insert(issue.key.clone());
     }
@@ -264,7 +264,7 @@ async fn fetch_chunk(
     for key in keys {
         if !found.contains(key) {
             let ck = cache_key(&settings.jira_base_url, key);
-            cache.lock().unwrap().insert(ck, None);
+            cache.lock().insert(ck, None);
             result.insert(key.clone(), None);
         }
     }
@@ -292,7 +292,7 @@ async fn fetch_single_issue(
 
     if response.status() == 404 {
         let ck = cache_key(&settings.jira_base_url, key);
-        cache.lock().unwrap().insert(ck, None);
+        cache.lock().insert(ck, None);
         return None;
     }
 
@@ -303,6 +303,6 @@ async fn fetch_single_issue(
     let issue: JiraIssueResponse = response.json().await.ok()?;
     let summary = map_issue(&issue);
     let ck = cache_key(&settings.jira_base_url, key);
-    cache.lock().unwrap().insert(ck, Some(summary.clone()));
+    cache.lock().insert(ck, Some(summary.clone()));
     Some(summary)
 }
