@@ -18,6 +18,7 @@ pub struct AppSettings {
     pub jira_repo_boards: HashMap<String, String>,
     pub notifications_enabled: bool,
     pub color_blind_mode: bool,
+    pub jira_merge_transition: String,
 }
 
 impl Default for AppSettings {
@@ -35,8 +36,16 @@ impl Default for AppSettings {
             jira_repo_boards: HashMap::new(),
             notifications_enabled: true,
             color_blind_mode: false,
+            jira_merge_transition: "MERGE REQUEST".to_string(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChecklistItem {
+    pub text: String,
+    pub done: bool,
 }
 
 // Form values as sent/received from the frontend (all strings, camelCase JSON)
@@ -55,6 +64,7 @@ pub struct SettingsFormValues {
     pub jira_repo_boards: String,
     pub notifications_enabled: String, // "on" | ""
     pub color_blind_mode: String,      // "on" | ""
+    pub jira_merge_transition: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +187,13 @@ pub struct PullRequestSummary {
     pub has_failed_pipeline: bool,
     pub additions: u32,
     pub deletions: u32,
+    pub auto_merge_method: Option<String>,
+    pub unresolved_threads: u32,
+    pub merge_status: String,
+    pub node_id: String,
+    pub head_ref: String,
+    pub base_ref: String,
+    pub body: String,
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -321,6 +338,10 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         jira_repo_boards: parse_repo_boards(&values.jira_repo_boards),
         notifications_enabled: values.notifications_enabled.trim() == "on",
         color_blind_mode: values.color_blind_mode.trim() == "on",
+        jira_merge_transition: {
+            let t = values.jira_merge_transition.trim().to_string();
+            if t.is_empty() { "MERGE REQUEST".to_string() } else { t }
+        },
     }
 }
 
@@ -351,6 +372,7 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         } else {
             String::new()
         },
+        jira_merge_transition: settings.jira_merge_transition.clone(),
     }
 }
 
@@ -368,11 +390,29 @@ pub fn settings_ready_for_jira(settings: &AppSettings) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CommitSummary {
+    pub sha: String,
+    pub message: String,
+    pub committed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchStats {
+    pub additions: u32,
+    pub deletions: u32,
+    pub files: u32,
+    pub commits: Vec<CommitSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DraftPrInfo {
     pub repo: String,
     pub branch: String,
     pub base_branch: String,
     pub suggested_title: String,
+    pub stats: Option<BranchStats>,
 }
 
 // ── Mock data ─────────────────────────────────────────────────────────────────
@@ -422,6 +462,13 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             has_failed_pipeline: false,
             additions: 312,
             deletions: 47,
+            auto_merge_method: Some("SQUASH".to_string()),
+            unresolved_threads: 2,
+            merge_status: "behind".to_string(),
+            node_id: String::new(),
+            head_ref: String::new(),
+            base_ref: String::new(),
+            body: String::new(),
         },
         PullRequestSummary {
             id: 918,
@@ -463,6 +510,13 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             has_failed_pipeline: false,
             additions: 58,
             deletions: 120,
+            auto_merge_method: None,
+            unresolved_threads: 0,
+            merge_status: "clean".to_string(),
+            node_id: String::new(),
+            head_ref: String::new(),
+            base_ref: String::new(),
+            body: String::new(),
         },
         PullRequestSummary {
             id: 415,
@@ -504,6 +558,13 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             has_failed_pipeline: false,
             additions: 5,
             deletions: 3,
+            auto_merge_method: None,
+            unresolved_threads: 0,
+            merge_status: "unknown".to_string(),
+            node_id: String::new(),
+            head_ref: String::new(),
+            base_ref: String::new(),
+            body: String::new(),
         },
     ]
 }

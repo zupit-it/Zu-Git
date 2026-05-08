@@ -124,6 +124,11 @@ export const SVG = {
   priorityMedium:  `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"><path d="M2 4.5h8M2 7.5h8"/></svg>`,
   priorityLow:     `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5l4 5 4-5"/></svg>`,
   rerequest: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5A4.5 4.5 0 1 0 11 7"/><path d="M10 1v3h-3"/></svg>`,
+  autoMerge: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="3" cy="3" r="1.4"/><circle cx="9" cy="3" r="1.4"/><circle cx="6" cy="9" r="1.4"/><path d="M3 4.4v1.1a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V4.4M6 7.5v1.1"/></svg>`,
+  threads: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h8M2 6h5M2 9h3"/></svg>`,
+  behind: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v6M3 6l3 3 3-3"/><path d="M2 10h8"/></svg>`,
+  conflict: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4M6 9v1"/></svg>`,
+  promote: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2M3 5l3-3 3 3"/><path d="M2 10h8"/></svg>`,
 };
 
 // ── Search ────────────────────────────────────────────────────────────────────

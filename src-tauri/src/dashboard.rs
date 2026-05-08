@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use parking_lot::Mutex;
 
-use crate::github::{CachedPrDetails, GithubPullRequestRecord, GithubReviewSummary};
+use crate::github::{GithubPullRequestRecord, GithubReviewSummary};
 use crate::jira::JiraIssueSummary;
 use crate::models::{
     mock_pull_requests, settings_ready_for_github, settings_ready_for_jira, AppSettings,
@@ -24,7 +24,6 @@ fn placeholder_token_store() -> TokenStoreStatus {
 
 pub async fn build_dashboard_snapshot(
     settings: &AppSettings,
-    pr_cache: &Mutex<HashMap<String, CachedPrDetails>>,
     jira_cache: &Mutex<HashMap<String, Option<JiraIssueSummary>>>,
     client: &reqwest::Client,
 ) -> DashboardSnapshot {
@@ -76,7 +75,6 @@ pub async fn build_dashboard_snapshot(
 
     match fetch_live(
         settings,
-        pr_cache,
         jira_cache,
         client,
         &mut integrations,
@@ -110,7 +108,6 @@ pub async fn build_dashboard_snapshot(
 #[allow(clippy::ptr_arg)] // integrations.clone() requires Vec, not slice
 async fn fetch_live(
     settings: &AppSettings,
-    pr_cache: &Mutex<HashMap<String, CachedPrDetails>>,
     jira_cache: &Mutex<HashMap<String, Option<JiraIssueSummary>>>,
     client: &reqwest::Client,
     integrations: &mut Vec<IntegrationStatus>,
@@ -119,7 +116,7 @@ async fn fetch_live(
     let now = chrono::Utc::now().to_rfc3339();
 
     let viewer_login = crate::github::fetch_viewer_login(settings, client).await?;
-    let repo_results = crate::github::fetch_open_pull_requests(settings, pr_cache, client).await;
+    let repo_results = crate::github::fetch_open_pull_requests(settings, client).await;
 
     let mut repo_syncs = vec![];
     let mut all_prs: Vec<GithubPullRequestRecord> = vec![];
@@ -434,6 +431,13 @@ fn enrich(
         has_failed_pipeline: pr.pipeline_state == PipelineState::Failure,
         additions: pr.additions,
         deletions: pr.deletions,
+        auto_merge_method: pr.auto_merge_method.clone(),
+        unresolved_threads: pr.unresolved_threads,
+        merge_status: pr.merge_status.clone(),
+        node_id: pr.node_id.clone(),
+        head_ref: pr.head_ref.clone(),
+        base_ref: pr.base_ref.clone(),
+        body: pr.body.clone(),
     }
 }
 

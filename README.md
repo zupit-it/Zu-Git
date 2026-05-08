@@ -57,6 +57,27 @@ ZuGit is fully local. All API calls go directly from your machine to GitHub and 
 The "Add PR" button finds your most recently pushed branch that has no open PR yet.
 Detection uses the [GitHub Activity API](docs/github-identity.md) (`GET /repos/{repo}/activity?actor={login}`) rather than git commit authorship — see [`docs/github-identity.md`](docs/github-identity.md) for why the two are not the same thing.
 
+### API calls — New PR flow
+
+When the card opens, ZuGit makes **4 round trips** regardless of how many repos are configured (N):
+
+| Round trip | Call | Notes |
+|---|---|---|
+| 1 | GraphQL `{ viewer { login } r0: repository { defaultBranchRef } … }` | Viewer login + default branch for all repos batched in one query |
+| 2 | N × `GET /repos/{repo}/activity?actor={login}&time_period=month&per_page=25` | Push events per repo, all in parallel |
+| 3 | GraphQL `{ r0: repository { c0_prs: pullRequests(…) c0_ref: ref(…) … } }` | PR existence + commit headline for all candidates, batched across repos |
+| 4 | `GET /repos/{repo}/compare/{base}…{head}` | Diff stats (additions, deletions, files, commit list) |
+
+Note: the Activity API has no GraphQL equivalent, so round trip 2 stays as REST. Everything else is batched via GraphQL.
+
+### API calls — Promote flow
+
+When the Promote button is clicked on a draft PR row, all data (title, body, reviewers, branches) is already in the dashboard snapshot. ZuGit makes a single additional call:
+
+| # | Endpoint | Notes |
+|---|---|---|
+| 1 | `GET /repos/{repo}/compare/{base}…{head}` | Diff stats, fetched async after the card renders |
+
 ## Author classification
 
 Each PR author is classified as **Internal** or **Collaborator**:
@@ -75,6 +96,82 @@ ZuGit extracts the Jira key from each PR in order of preference:
 3. Branch name or PR body (fallback)
 
 If no key is found for an internal PR, a warning is shown in the Status tab.
+
+## Jira integration
+
+ZuGit integrates with Jira in two ways: **read-only enrichment** (ticket data shown in the PR list) and **write-back actions** (checklist updates and workflow transitions triggered on publish).
+
+### Ticket enrichment
+
+On each refresh ZuGit issues a single bulk JQL query (`POST /rest/api/3/search/jql`) for all Jira keys found in the current PR list, then caches the results in memory for the session. Fields fetched: `summary`, `priority`, `status`, `fixVersions`, `assignee`.
+
+If the tenant does not support the `/jql` endpoint (older Jira Server versions), ZuGit falls back to individual `GET /rest/api/3/issue/{key}` calls automatically.
+
+### Checklist (Herocoders Smart Checklist for Jira)
+
+ZuGit reads and writes acceptance-criteria checklists managed by the **Herocoders Smart Checklist for Jira** plugin.
+
+#### Field discovery
+
+The writable checklist field is discovered once per session via `GET /rest/api/3/field` and cached. Herocoders exposes several fields with "checklist" in the name; ZuGit selects the correct one in priority order:
+
+1. A field named exactly **"Checklist Text"**
+2. Any field whose name contains "text" but not "view"
+3. Any field that does not contain "view"
+
+The typical field IDs on a Herocoders installation are:
+
+| Field name | Notes |
+|---|---|
+| `Checklist Text` | **Writable** — the field ZuGit reads and writes |
+| `Checklist Text (view-only)` | Read-only computed copy, do not write to this |
+| `Checklist Progress %` | Numeric, managed by Herocoders |
+| `Checklist Progress` | `x/y` string, managed by Herocoders |
+| `Checklist Completed` | Boolean, managed by Herocoders |
+| `Checklist Template` | Template source |
+| `Checklist Content YAML` | Internal YAML, managed by Herocoders |
+
+#### Field format — ADF + Herocoders syntax
+
+The **Checklist Text** field uses Jira's Atlassian Document Format (ADF). Herocoders encodes checklists inside ADF as:
+
+- `orderedList` nodes → section headers (e.g. `# Default checklist`)
+- `bulletList` nodes → checklist items, with the status keyword embedded in the text
+
+Item status keywords:
+
+| Keyword | Meaning |
+|---|---|
+| `[open]` | Item not completed |
+| `[done]` | Item completed |
+
+Example raw text reconstructed from ADF:
+
+```
+# Default checklist
+
+* [open] acceptance criterion one
+* [done] acceptance criterion two
+```
+
+When **writing** back, ZuGit serialises the items as plain text (`* [done] …` / `* [open] …`) wrapped in an ADF paragraph node. Herocoders processes this and converts it into the proper list structure on its side.
+
+#### Workflow
+
+**Opening a draft PR** — if the branch name contains a Jira key (e.g. `PROJ-123/my-feature`), ZuGit fetches the checklist before showing the New PR card. Items can be checked/unchecked in the UI. On publish:
+
+- **Draft PR** — the current checked/unchecked state is written back to Jira (`update_jira_checklist`). No workflow transition is applied.
+- **Ready PR** — all items are marked `[done]` and written back, then ZuGit attempts the configured workflow transition (default: `MERGE REQUEST`).
+
+**Promoting a draft PR** — the Promote button on a draft PR row opens the same card pre-filled with the existing title, body, and reviewers. The checklist is fetched fresh from Jira. On publish the same ready-PR flow applies.
+
+#### Transition timing
+
+Herocoders applies a workflow validator that checks its internal checklist state before allowing the transition. Because Herocoders processes the field write asynchronously, ZuGit waits **1 second** after the write before attempting the transition, and retries once more after **5 seconds** if the validator still blocks. Any other error (non-checklist 400, network error, transition not found) is surfaced immediately without retrying.
+
+#### Configuring the transition name
+
+The target workflow transition is configurable in Settings → **Jira merge transition** (default: `MERGE REQUEST`). The name is matched case-insensitively against the transitions returned by `GET /rest/api/3/issue/{key}/transitions`.
 
 ## Requirements
 

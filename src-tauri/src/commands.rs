@@ -1,5 +1,5 @@
 use crate::models::{
-    serialize_settings_form, AppSettings, DashboardBootstrap, DashboardSnapshot,
+    serialize_settings_form, AppSettings, ChecklistItem, DashboardBootstrap, DashboardSnapshot,
     DraftPrInfo, ListFilterPreferences, SaveSettingsResult, SettingsFormValues, TokenStoreStatus,
 };
 use serde::Serialize;
@@ -81,12 +81,10 @@ pub async fn save_settings(
     *state.last_save_used_vault.lock() = Some(used_vault);
 
     // Clear caches after settings change.
-    state.pr_cache.lock().clear();
     state.jira_cache.lock().clear();
 
     let mut snap = dashboard::build_dashboard_snapshot(
         &settings,
-        &state.pr_cache,
         &state.jira_cache,
         &state.http_client,
     )
@@ -109,7 +107,6 @@ pub async fn refresh_dashboard(
     let settings = storage::load_settings(&app).await?;
     let mut snap = dashboard::build_dashboard_snapshot(
         &settings,
-        &state.pr_cache,
         &state.jira_cache,
         &state.http_client,
     )
@@ -174,24 +171,26 @@ pub async fn save_list_filters(
 pub async fn get_draft_pr_info(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
+    active_repos: Option<Vec<String>>,
 ) -> Result<Option<DraftPrInfo>, String> {
     let settings = storage::load_settings(&app).await?;
     if !crate::models::settings_ready_for_github(&settings) {
         return Ok(None);
     }
-    let viewer_login = crate::github::fetch_viewer_login(&settings, &state.http_client)
-        .await
-        .unwrap_or_default();
-    if viewer_login.is_empty() {
-        return Ok(None);
-    }
-    Ok(crate::github::find_viewer_branch(
-        &settings.github_repos,
-        &viewer_login,
-        &settings,
-        &state.http_client,
-    )
-    .await)
+    let repos = active_repos.unwrap_or_else(|| settings.github_repos.clone());
+    Ok(crate::github::find_viewer_branch(&repos, &settings, &state.http_client).await)
+}
+
+#[tauri::command]
+pub async fn fetch_branch_stats(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    base: String,
+    head: String,
+) -> Result<Option<crate::models::BranchStats>, String> {
+    let settings = storage::load_settings(&app).await?;
+    Ok(crate::github::fetch_compare(&repo, &base, &head, &settings, &state.http_client).await)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -253,6 +252,73 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 // ── Request review ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn fetch_draft_checklist(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    jira_key: String,
+) -> Result<Vec<ChecklistItem>, String> {
+    let settings = storage::load_settings(&app).await?;
+    if !crate::models::settings_ready_for_jira(&settings) {
+        return Ok(vec![]);
+    }
+    Ok(crate::jira::fetch_checklist(&jira_key, &settings, &state.http_client).await)
+}
+
+#[tauri::command]
+pub async fn update_jira_checklist(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    jira_key: String,
+    items: Vec<ChecklistItem>,
+) -> Result<(), String> {
+    let settings = storage::load_settings(&app).await?;
+    if !crate::models::settings_ready_for_jira(&settings) {
+        return Ok(());
+    }
+    crate::jira::write_checklist(&jira_key, &items, &settings, &state.http_client).await
+}
+
+#[tauri::command]
+pub async fn complete_jira_story(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    jira_key: String,
+    items: Vec<ChecklistItem>,
+) -> Result<(), String> {
+    let settings = storage::load_settings(&app).await?;
+    if !crate::models::settings_ready_for_jira(&settings) {
+        return Ok(());
+    }
+    crate::jira::complete_jira_story(&jira_key, &items, &settings, &state.http_client).await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn promote_draft_pr(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    pr_number: u64,
+    node_id: String,
+    title: String,
+    body: String,
+    reviewers: Vec<String>,
+) -> Result<String, String> {
+    let settings = storage::load_settings(&app).await?;
+    crate::github::promote_draft_pr(
+        &repo,
+        pr_number,
+        &node_id,
+        &title,
+        &body,
+        &reviewers,
+        &settings,
+        &state.http_client,
+    )
+    .await
+}
 
 #[tauri::command]
 pub async fn request_review(

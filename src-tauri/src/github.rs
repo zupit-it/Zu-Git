@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +16,7 @@ query($owner: String!, $repo: String!, $cursor: String) {
       orderBy: { field: UPDATED_AT, direction: DESC }
     ) {
       nodes {
+        id
         number
         title
         body
@@ -42,6 +42,13 @@ query($owner: String!, $repo: String!, $cursor: String) {
             author { login avatarUrl }
           }
         }
+        autoMergeRequest { mergeMethod }
+        mergeable
+        mergeStateStatus
+        reviewThreads(first: 50) {
+          nodes { isResolved }
+        }
+        baseRef { name }
         headRef {
           name
           target { oid }
@@ -120,6 +127,7 @@ struct GqlPageInfo {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GqlPr {
+    id: String,
     number: u64,
     title: String,
     body: Option<String>,
@@ -133,6 +141,11 @@ struct GqlPr {
     assignees: GqlNodes<GqlActor>,
     review_requests: GqlNodes<GqlReviewRequest>,
     reviews: GqlNodes<GqlReview>,
+    auto_merge_request: Option<GqlAutoMergeRequest>,
+    mergeable: Option<String>,
+    merge_state_status: Option<String>,
+    review_threads: GqlNodes<GqlReviewThread>,
+    base_ref: Option<GqlHeadRef>,
     head_ref: Option<GqlHeadRef>,
     commits: GqlNodes<GqlCommitNode>,
 }
@@ -200,6 +213,18 @@ struct GqlStatusCheckRollup {
     contexts: GqlNodes<GqlStatusContext>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlAutoMergeRequest {
+    merge_method: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlReviewThread {
+    is_resolved: bool,
+}
+
 /// Flat struct covering both CheckRun and StatusContext inline fragments.
 /// Discriminated at runtime via `__typename`.
 #[derive(Debug, Deserialize, Clone)]
@@ -245,23 +270,18 @@ pub struct GithubPullRequestRecord {
     pub participant_avatars: HashMap<String, String>,
     pub head_ref: String,
     pub updated_at: String,
+    pub node_id: String,
+    pub base_ref: String,
     pub draft: bool,
     pub pipeline_state: PipelineState,
     pub review_summary: GithubReviewSummary,
     pub additions: u32,
     pub deletions: u32,
+    pub auto_merge_method: Option<String>,
+    pub unresolved_threads: u32,
+    pub merge_status: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct CachedPrDetails {
-    pub updated_at: String,
-    pub head_sha: String,
-    pub participant_avatars: HashMap<String, String>,
-    pub pipeline_state: PipelineState,
-    pub review_summary: GithubReviewSummary,
-    pub additions: u32,
-    pub deletions: u32,
-}
 
 pub struct GithubRepoFetchResult {
     pub repo: String,
@@ -379,6 +399,26 @@ async fn graphql_request(
     response.json::<GqlResponse>().await.map_err(|e| e.to_string())
 }
 
+/// Like `graphql_request` but returns the raw `data` value — used for
+/// dynamically-aliased queries where the response shape isn't known at compile time.
+async fn graphql_request_raw(
+    query: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Option<serde_json::Value> {
+    let url = graphql_url(settings);
+    let body = serde_json::json!({ "query": query });
+    let resp = client
+        .post(&url)
+        .headers(github_headers(settings))
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+    let json: serde_json::Value = resp.json().await.ok()?;
+    Some(json["data"].clone())
+}
+
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -430,13 +470,12 @@ pub async fn request_review(
 
 pub async fn fetch_open_pull_requests(
     settings: &AppSettings,
-    pr_cache: &Mutex<HashMap<String, CachedPrDetails>>,
     client: &reqwest::Client,
 ) -> Vec<GithubRepoFetchResult> {
     let futures = settings
         .github_repos
         .iter()
-        .map(|repo| fetch_repo_pull_requests(repo, settings, pr_cache, client));
+        .map(|repo| fetch_repo_pull_requests(repo, settings, client));
     futures::future::join_all(futures).await
 }
 
@@ -445,10 +484,9 @@ pub async fn fetch_open_pull_requests(
 async fn fetch_repo_pull_requests(
     repo: &str,
     settings: &AppSettings,
-    pr_cache: &Mutex<HashMap<String, CachedPrDetails>>,
     client: &reqwest::Client,
 ) -> GithubRepoFetchResult {
-    match fetch_repo_pull_requests_inner(repo, settings, pr_cache, client).await {
+    match fetch_repo_pull_requests_inner(repo, settings, client).await {
         Ok(prs) => GithubRepoFetchResult {
             repo: repo.to_string(),
             ok: true,
@@ -467,7 +505,6 @@ async fn fetch_repo_pull_requests(
 async fn fetch_repo_pull_requests_inner(
     repo: &str,
     settings: &AppSettings,
-    pr_cache: &Mutex<HashMap<String, CachedPrDetails>>,
     client: &reqwest::Client,
 ) -> Result<Vec<GithubPullRequestRecord>, String> {
     let (owner, repo_name) = repo
@@ -509,14 +546,8 @@ async fn fetch_repo_pull_requests_inner(
         }
     }
 
-    let active_keys: std::collections::HashSet<String> = all_prs
-        .iter()
-        .map(|pr| format!("{}#{}", repo, pr.number))
-        .collect();
-
     let mut records = Vec::new();
     for pr in &all_prs {
-        let cache_key = format!("{}#{}", repo, pr.number);
         let head_sha = pr
             .head_ref
             .as_ref()
@@ -524,16 +555,7 @@ async fn fetch_repo_pull_requests_inner(
             .map(|t| t.oid.clone())
             .unwrap_or_default();
 
-        // Reuse processed details if the PR hasn't changed since last refresh.
-        let cached = pr_cache.lock().get(&cache_key).cloned();
-        let details = match cached {
-            Some(c) if c.updated_at == pr.updated_at && c.head_sha == head_sha => c,
-            _ => build_cached_details(pr, &head_sha),
-        };
-
-        pr_cache
-            .lock()
-            .insert(cache_key, details.clone());
+        let details = build_pr_details(pr, &head_sha);
 
         records.push(GithubPullRequestRecord {
             repo: repo.to_string(),
@@ -557,25 +579,36 @@ async fn fetch_repo_pull_requests_inner(
                 .map(|h| h.name.clone())
                 .unwrap_or_default(),
             updated_at: pr.updated_at.clone(),
+            node_id: pr.id.clone(),
+            base_ref: pr.base_ref.as_ref().map(|b| b.name.clone()).unwrap_or_default(),
             draft: pr.is_draft,
             pipeline_state: details.pipeline_state.clone(),
             review_summary: details.review_summary.clone(),
             additions: details.additions,
             deletions: details.deletions,
+            auto_merge_method: details.auto_merge_method.clone(),
+            unresolved_threads: details.unresolved_threads,
+            merge_status: details.merge_status.clone(),
         });
     }
-
-    // Evict stale cache entries (closed / merged PRs) for this repo.
-    pr_cache
-        .lock()
-        .retain(|k, _| !k.starts_with(&format!("{}#", repo)) || active_keys.contains(k));
 
     Ok(records)
 }
 
 // ── Build processed details from a GraphQL PR node ────────────────────────────
 
-fn build_cached_details(pr: &GqlPr, head_sha: &str) -> CachedPrDetails {
+struct PrDetails {
+    participant_avatars: HashMap<String, String>,
+    pipeline_state: PipelineState,
+    review_summary: GithubReviewSummary,
+    additions: u32,
+    deletions: u32,
+    auto_merge_method: Option<String>,
+    unresolved_threads: u32,
+    merge_status: String,
+}
+
+fn build_pr_details(pr: &GqlPr, _head_sha: &str) -> PrDetails {
     let mut avatars: HashMap<String, String> = HashMap::new();
 
     let mut add = |login: &str, url: Option<&str>| {
@@ -620,14 +653,36 @@ fn build_cached_details(pr: &GqlPr, head_sha: &str) -> CachedPrDetails {
         .and_then(|c| c.commit.status_check_rollup.as_ref());
     let pipeline_state = summarize_pipeline_state(rollup);
 
-    CachedPrDetails {
-        updated_at: pr.updated_at.clone(),
-        head_sha: head_sha.to_string(),
+    let auto_merge_method = pr.auto_merge_request.as_ref().map(|r| r.merge_method.clone());
+    let unresolved_threads = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved).count() as u32;
+    let merge_status = summarize_merge_status(
+        pr.mergeable.as_deref(),
+        pr.merge_state_status.as_deref(),
+    );
+
+    PrDetails {
         participant_avatars: avatars,
         pipeline_state,
         review_summary,
         additions: pr.additions,
         deletions: pr.deletions,
+        auto_merge_method,
+        unresolved_threads,
+        merge_status,
+    }
+}
+
+fn summarize_merge_status(mergeable: Option<&str>, merge_state_status: Option<&str>) -> String {
+    match merge_state_status {
+        Some("BEHIND") => "behind".to_string(),
+        Some("DIRTY") | Some("CONFLICTING") => "conflicting".to_string(),
+        Some("CLEAN") | Some("UNSTABLE") | Some("HAS_HOOKS") => "clean".to_string(),
+        Some("BLOCKED") => "blocked".to_string(),
+        _ => match mergeable {
+            Some("CONFLICTING") => "conflicting".to_string(),
+            Some("MERGEABLE") => "clean".to_string(),
+            _ => "unknown".to_string(),
+        },
     }
 }
 
@@ -743,21 +798,12 @@ fn summarize_pipeline_state(rollup: Option<&GqlStatusCheckRollup>) -> PipelineSt
 // ── Branch discovery & PR creation ───────────────────────────────────────────
 
 /// A push/force-push/branch-creation event from the GitHub Activity API.
-/// `actor.login` is the GitHub account that performed the push — reliable
-/// regardless of the git commit author email.
 #[derive(Deserialize)]
 struct RepoActivity {
     #[serde(rename = "ref")]
     git_ref: String,
     timestamp: String,
     activity_type: String,
-    /// SHA of the HEAD commit after the push (used for the suggested title).
-    after: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct RestRepoInfo {
-    default_branch: String,
 }
 
 struct BranchCandidate {
@@ -768,117 +814,251 @@ struct BranchCandidate {
     committed_at: String,
 }
 
-/// Searches all configured repos in parallel for the viewer's most recently
-/// pushed branch that has no open PR yet.
+fn build_viewer_repos_gql(repos: &[String]) -> String {
+    let mut q = String::from("{ viewer { login }");
+    for (i, repo) in repos.iter().enumerate() {
+        if let Some((owner, name)) = repo.split_once('/') {
+            q.push_str(&format!(
+                " r_{i}: repository(owner:\"{owner}\", name:\"{name}\") {{ defaultBranchRef {{ name }} }}"
+            ));
+        }
+    }
+    q.push('}');
+    q
+}
+
+fn build_candidates_check_gql(
+    candidates: &[(usize, &str, &str, &str)], // (repo_idx, owner, name, branch)
+) -> String {
+    // Group by repo_idx so each repository block has all its branch aliases.
+    use std::collections::BTreeMap;
+    let mut by_repo: BTreeMap<usize, (&str, &str, Vec<(usize, &str)>)> = BTreeMap::new();
+    for &(ri, owner, name, branch) in candidates {
+        let e = by_repo.entry(ri).or_insert_with(|| (owner, name, Vec::new()));
+        let bi = e.2.len();
+        e.2.push((bi, branch));
+    }
+    let mut q = String::from("{");
+    for (ri, (owner, name, branches)) in &by_repo {
+        q.push_str(&format!(
+            " r_{ri}: repository(owner:\"{owner}\", name:\"{name}\") {{"
+        ));
+        for (bi, branch) in branches {
+            q.push_str(&format!(
+                " c{bi}_prs: pullRequests(headRefName:\"{branch}\", states:[OPEN,CLOSED,MERGED], first:1) {{ nodes {{ state mergedAt }} }}"
+            ));
+            q.push_str(&format!(
+                " c{bi}_ref: ref(qualifiedName:\"refs/heads/{branch}\") {{ target {{ ... on Commit {{ messageHeadline }} }} }}"
+            ));
+        }
+        q.push_str(" }");
+    }
+    q.push('}');
+    q
+}
+
+/// Searches all configured repos for the viewer's most recently pushed branch
+/// that has no open PR yet.
 ///
-/// Uses `GET /repos/{repo}/activity?actor={login}` which tracks pushes by
-/// GitHub account identity — works regardless of git commit email config.
+/// Round trips:
+///   1. GraphQL batch: viewer login + default branch for every repo
+///   2. N × GET activity (parallel, needs viewer login from step 1)
+///   3. GraphQL batch: PR existence + commit headline for all candidates
+///   4. GET /compare for the chosen branch
 pub async fn find_viewer_branch(
     repos: &[String],
-    viewer_login: &str,
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Option<DraftPrInfo> {
-    let futures: Vec<_> = repos
+    // ── Round trip 1: viewer login + default branches ─────────────────────────
+    let viewer_repos_q = build_viewer_repos_gql(repos);
+    let gql_data = graphql_request_raw(&viewer_repos_q, settings, client).await?;
+
+    let viewer_login = gql_data["viewer"]["login"].as_str()?.to_string();
+
+    let default_branches: Vec<Option<String>> = repos
         .iter()
-        .map(|repo| find_viewer_branch_in_repo(repo, viewer_login, settings, client))
-        .collect();
-
-    futures::future::join_all(futures)
-        .await
-        .into_iter()
-        .flatten()
-        .max_by(|a, b| a.committed_at.cmp(&b.committed_at))
-        .map(|c| DraftPrInfo {
-            repo: c.repo,
-            branch: c.branch,
-            base_branch: c.base_branch,
-            suggested_title: c.suggested_title,
-        })
-}
-
-async fn find_viewer_branch_in_repo(
-    repo: &str,
-    viewer_login: &str,
-    settings: &AppSettings,
-    client: &reqwest::Client,
-) -> Option<BranchCandidate> {
-    let base = settings.github_api_base_url.trim_end_matches('/');
-    let (owner, _) = repo.split_once('/')?;
-
-    // Fetch recent push activity for this viewer + repo default branch in parallel.
-    // time_period=month covers last 30 days; per_page=25 is plenty for one person.
-    let activity_url = format!(
-        "{}/repos/{}/activity?actor={}&time_period=month&per_page=25",
-        base, repo, viewer_login
-    );
-    let repo_url = format!("{}/repos/{}", base, repo);
-
-    let (activity_res, repo_res) = tokio::join!(
-        github_request::<Vec<RepoActivity>>(&activity_url, settings, client),
-        github_request::<RestRepoInfo>(&repo_url, settings, client),
-    );
-
-    let activities = activity_res.ok()?;
-    let repo_info = repo_res.ok()?;
-
-    // Keep push-type events, deduplicate by branch (API returns newest first).
-    let mut seen = std::collections::HashSet::new();
-    let candidates: Vec<(String, String, Option<String>)> = activities
-        .iter()
-        .filter(|a| matches!(
-            a.activity_type.as_str(),
-            "push" | "force_push" | "branch_creation"
-        ))
-        .filter_map(|a| {
-            let branch = a.git_ref.strip_prefix("refs/heads/")?.to_string();
-            if branch == repo_info.default_branch { return None; }
-            if !seen.insert(branch.clone()) { return None; }
-            Some((branch, a.timestamp.clone(), a.after.clone()))
-        })
-        .collect();
-
-    for (branch, timestamp, after_sha) in candidates {
-        // Skip branches that already have an open PR.
-        let check_url = format!(
-            "{}/repos/{}/pulls?head={}:{}&state=open&per_page=1",
-            base, repo, owner, branch
-        );
-        let existing: Vec<serde_json::Value> =
-            github_request(&check_url, settings, client)
-                .await
-                .unwrap_or_default();
-        if !existing.is_empty() {
-            continue;
-        }
-
-        // Fetch HEAD commit message for the suggested title.
-        let suggested_title = if let Some(sha) = after_sha {
-            let commit_url = format!("{}/repos/{}/commits/{}", base, repo, sha);
-            let commit: serde_json::Value =
-                github_request(&commit_url, settings, client)
-                    .await
-                    .unwrap_or_default();
-            commit["commit"]["message"]
+        .enumerate()
+        .map(|(i, _)| {
+            gql_data[&format!("r_{i}")]["defaultBranchRef"]["name"]
                 .as_str()
-                .and_then(|m| m.lines().next())
-                .unwrap_or("")
-                .to_string()
-        } else {
-            String::new()
+                .map(|s| s.to_string())
+        })
+        .collect();
+
+    // ── Round trip 2: activity per repo (parallel) ────────────────────────────
+    let rest_base = settings.github_api_base_url.trim_end_matches('/');
+    let activity_urls: Vec<String> = repos
+        .iter()
+        .map(|repo| format!(
+            "{}/repos/{}/activity?actor={}&time_period=month&per_page=25",
+            rest_base, repo, viewer_login
+        ))
+        .collect();
+    let activity_futs: Vec<_> = activity_urls
+        .iter()
+        .map(|url| github_request::<Vec<RepoActivity>>(url, settings, client))
+        .collect();
+    let activity_results = futures::future::join_all(activity_futs).await;
+
+    // ── Build candidate list ──────────────────────────────────────────────────
+    // (repo_idx, owner, name, branch, timestamp)
+    let mut candidates_meta: Vec<(usize, String, String, String, String)> = Vec::new();
+
+    for (i, repo) in repos.iter().enumerate() {
+        let default_branch = match &default_branches[i] {
+            Some(b) => b.clone(),
+            None => continue,
+        };
+        let activities = match &activity_results[i] {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let (owner, repo_name) = match repo.split_once('/') {
+            Some(p) => (p.0.to_string(), p.1.to_string()),
+            None => continue,
         };
 
-        return Some(BranchCandidate {
-            repo: repo.to_string(),
-            branch,
-            base_branch: repo_info.default_branch,
-            suggested_title,
-            committed_at: timestamp,
-        });
+        let mut seen = std::collections::HashSet::new();
+        for a in activities {
+            if !matches!(a.activity_type.as_str(), "push" | "force_push" | "branch_creation") {
+                continue;
+            }
+            let branch = match a.git_ref.strip_prefix("refs/heads/") {
+                Some(b) => b.to_string(),
+                None => continue,
+            };
+            if branch == default_branch || !seen.insert(branch.clone()) {
+                continue;
+            }
+            candidates_meta.push((i, owner.clone(), repo_name.clone(), branch, a.timestamp.clone()));
+        }
     }
 
-    None
+    if candidates_meta.is_empty() {
+        return None;
+    }
+
+    // ── Round trip 3: PR check + commit message for all candidates ────────────
+    let gql_candidates: Vec<(usize, &str, &str, &str)> = candidates_meta
+        .iter()
+        .map(|(ri, owner, name, branch, _)| (*ri, owner.as_str(), name.as_str(), branch.as_str()))
+        .collect();
+    let check_q = build_candidates_check_gql(&gql_candidates);
+    let check_data = graphql_request_raw(&check_q, settings, client).await?;
+
+    // Per-repo branch index (to match aliases c{bi}_*)
+    let mut repo_branch_counter: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::new();
+
+    let mut best: Option<BranchCandidate> = None;
+
+    for (ri, _, _, branch, timestamp) in &candidates_meta {
+        let bi = {
+            let e = repo_branch_counter.entry(*ri).or_insert(0);
+            let idx = *e;
+            *e += 1;
+            idx
+        };
+        let repo_node = &check_data[&format!("r_{ri}")];
+        let prs = &repo_node[&format!("c{bi}_prs")]["nodes"];
+        if let Some(pr) = prs.as_array().and_then(|a| a.first()) {
+            let is_open   = pr["state"].as_str() == Some("OPEN");
+            let is_merged = pr["mergedAt"].is_string() && !pr["mergedAt"].is_null();
+            if is_open || is_merged {
+                continue;
+            }
+        }
+
+        let title = repo_node[&format!("c{bi}_ref")]["target"]["messageHeadline"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+
+        let (owner, repo_name) = repos[*ri].split_once('/').unwrap_or(("", ""));
+        let candidate = BranchCandidate {
+            repo: repos[*ri].clone(),
+            branch: branch.clone(),
+            base_branch: default_branches[*ri].clone().unwrap_or_default(),
+            suggested_title: title,
+            committed_at: timestamp.clone(),
+        };
+        let _ = (owner, repo_name);
+
+        match &best {
+            None => best = Some(candidate),
+            Some(b) if candidate.committed_at > b.committed_at => best = Some(candidate),
+            _ => {}
+        }
+    }
+
+    let best = best?;
+
+    // ── Round trip 4: diff stats ──────────────────────────────────────────────
+    let stats = fetch_compare(&best.repo, &best.base_branch, &best.branch, settings, client).await;
+
+    Some(DraftPrInfo {
+        repo: best.repo,
+        branch: best.branch,
+        base_branch: best.base_branch,
+        suggested_title: best.suggested_title,
+        stats,
+    })
 }
+
+pub async fn fetch_compare(
+    repo: &str,
+    base: &str,
+    head: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Option<crate::models::BranchStats> {
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+    let url = format!("{}/repos/{}/compare/{}...{}", api_base, repo, base, head);
+    let resp: serde_json::Value = github_request(&url, settings, client).await.ok()?;
+
+    let total_add = resp["files"]
+        .as_array()
+        .map(|f| f.iter().map(|v| v["additions"].as_u64().unwrap_or(0)).sum::<u64>())
+        .unwrap_or(0) as u32;
+    let total_del = resp["files"]
+        .as_array()
+        .map(|f| f.iter().map(|v| v["deletions"].as_u64().unwrap_or(0)).sum::<u64>())
+        .unwrap_or(0) as u32;
+    let files_count = resp["files"].as_array().map(|f| f.len() as u32).unwrap_or(0);
+
+    // compare API returns commits without per-commit file breakdown
+    let commits = resp["commits"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .rev() // oldest first
+                .map(|c| crate::models::CommitSummary {
+                    sha: c["sha"].as_str().unwrap_or("").chars().take(7).collect(),
+                    message: c["commit"]["message"]
+                        .as_str()
+                        .unwrap_or("")
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .to_string(),
+                    committed_at: c["commit"]["committer"]["date"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Some(crate::models::BranchStats {
+        additions: total_add,
+        deletions: total_del,
+        files: files_count,
+        commits,
+    })
+}
+
 
 /// Creates a pull request via the GitHub REST API and optionally assigns reviewers.
 /// Returns the URL of the newly created PR.
@@ -956,6 +1136,102 @@ pub async fn create_pull_request(
             .json(&ReviewersPayload { reviewers })
             .send()
             .await;
+    }
+
+    Ok(pr_url)
+}
+
+/// Promotes a draft PR to ready for review: patches title/body, assigns reviewers,
+/// then calls the `markPullRequestReadyForReview` GraphQL mutation.
+/// Returns the PR HTML URL on success.
+#[allow(clippy::too_many_arguments)]
+pub async fn promote_draft_pr(
+    repo: &str,
+    pr_number: u64,
+    node_id: &str,
+    title: &str,
+    body: &str,
+    reviewers: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<String, String> {
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+
+    #[derive(Serialize)]
+    struct PatchPayload<'a> {
+        title: &'a str,
+        body: &'a str,
+    }
+
+    let patch_resp = client
+        .patch(format!("{}/repos/{}/pulls/{}", api_base, repo, pr_number))
+        .headers(github_headers(settings))
+        .json(&PatchPayload { title, body })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !patch_resp.status().is_success() {
+        let status = patch_resp.status();
+        let detail = patch_resp.text().await.unwrap_or_default();
+        return Err(format!("GitHub API error {status}: {detail}"));
+    }
+
+    let pr_val: serde_json::Value = patch_resp.json().await.map_err(|e| e.to_string())?;
+    let pr_url = pr_val["html_url"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    if !reviewers.is_empty() {
+        #[derive(Serialize)]
+        struct ReviewersPayload<'a> {
+            reviewers: &'a [String],
+        }
+        let _ = client
+            .post(format!(
+                "{}/repos/{}/pulls/{}/requested_reviewers",
+                api_base, repo, pr_number
+            ))
+            .headers(github_headers(settings))
+            .json(&ReviewersPayload { reviewers })
+            .send()
+            .await;
+    }
+
+    let mutation = r#"mutation($id: ID!) {
+  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+    pullRequest { url }
+  }
+}"#;
+    let gql_body = serde_json::json!({
+        "query": mutation,
+        "variables": { "id": node_id }
+    });
+
+    let gql_resp = client
+        .post(graphql_url(settings))
+        .headers(github_headers(settings))
+        .json(&gql_body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !gql_resp.status().is_success() {
+        return Err(format!(
+            "markPullRequestReadyForReview failed ({})",
+            gql_resp.status()
+        ));
+    }
+
+    let gql_val: serde_json::Value = gql_resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = gql_val["errors"].as_array() {
+        if !errors.is_empty() {
+            let msg = errors[0]["message"]
+                .as_str()
+                .unwrap_or("Unknown GraphQL error");
+            return Err(format!("markPullRequestReadyForReview: {msg}"));
+        }
     }
 
     Ok(pr_url)

@@ -11,6 +11,7 @@ export interface AppSettings {
   jiraRepoBoards: Record<string, string>;
   notificationsEnabled: boolean;
   colorBlindMode: boolean;
+  jiraMergeTransition: string;
 }
 
 export interface ListFilterPreferences {
@@ -37,6 +38,7 @@ export interface SettingsFormValues {
   jiraRepoBoards: string;
   notificationsEnabled: string; // "on" | ""
   colorBlindMode: string;       // "on" | ""
+  jiraMergeTransition: string;
 }
 
 export const defaultSettings: AppSettings = {
@@ -52,6 +54,7 @@ export const defaultSettings: AppSettings = {
   jiraRepoBoards: {},
   notificationsEnabled: true,
   colorBlindMode: false,
+  jiraMergeTransition: "MERGE REQUEST",
 };
 
 export const defaultListFilterPreferences: ListFilterPreferences = {
@@ -111,6 +114,7 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
       .join("\n"),
     notificationsEnabled: settings.notificationsEnabled ? "on" : "",
     colorBlindMode: settings.colorBlindMode ? "on" : "",
+    jiraMergeTransition: settings.jiraMergeTransition,
   };
 }
 
@@ -135,6 +139,7 @@ export function normalizeSettings(
     jiraRepoBoards: parseRepoBoards(values.jiraRepoBoards),
     notificationsEnabled: values.notificationsEnabled === "on",
     colorBlindMode: values.colorBlindMode === "on",
+    jiraMergeTransition: values.jiraMergeTransition?.trim() || "MERGE REQUEST",
   };
 }
 
