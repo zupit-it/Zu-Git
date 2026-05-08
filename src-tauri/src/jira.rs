@@ -388,8 +388,8 @@ async fn discover_checklist_field(
 /// - a plain string (view-only field / v2 API)
 /// - an ADF paragraph wrapping our plain text (written by us)
 /// - a structured ADF document where Herocoders converted lists:
-///     orderedList  → section headers  → reconstructed as "# text"
-///     bulletList   → checklist items  → reconstructed as "* text"
+///   orderedList  → section headers  → reconstructed as "# text"
+///   bulletList   → checklist items  → reconstructed as "* text"
 fn extract_checklist_text(value: &serde_json::Value) -> String {
     if let Some(s) = value.as_str() {
         return s.to_string();
@@ -549,8 +549,7 @@ pub async fn fetch_checklist(
     };
 
     let raw = extract_checklist_text(&value["fields"][&field_id]);
-    let items = parse_checklist(&raw);
-    items
+    parse_checklist(&raw)
 }
 
 // ── Public: write checklist ───────────────────────────────────────────────────
@@ -653,7 +652,7 @@ pub async fn complete_jira_story(
     let delays_ms = [1000u64, 5000];
     let mut last_err = String::new();
 
-    for (_attempt, &delay_ms) in delays_ms.iter().enumerate() {
+    for &delay_ms in delays_ms.iter() {
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
 
         let post_resp = client

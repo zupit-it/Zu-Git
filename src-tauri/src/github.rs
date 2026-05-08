@@ -832,7 +832,8 @@ fn build_candidates_check_gql(
 ) -> String {
     // Group by repo_idx so each repository block has all its branch aliases.
     use std::collections::BTreeMap;
-    let mut by_repo: BTreeMap<usize, (&str, &str, Vec<(usize, &str)>)> = BTreeMap::new();
+    type RepoBranches<'a> = (&'a str, &'a str, Vec<(usize, &'a str)>);
+    let mut by_repo: BTreeMap<usize, RepoBranches<'_>> = BTreeMap::new();
     for &(ri, owner, name, branch) in candidates {
         let e = by_repo.entry(ri).or_insert_with(|| (owner, name, Vec::new()));
         let bi = e.2.len();
