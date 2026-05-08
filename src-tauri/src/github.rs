@@ -819,7 +819,7 @@ fn build_viewer_repos_gql(repos: &[String]) -> String {
     for (i, repo) in repos.iter().enumerate() {
         if let Some((owner, name)) = repo.split_once('/') {
             q.push_str(&format!(
-                " r_{i}: repository(owner:\"{owner}\", name:\"{name}\") {{ defaultBranchRef {{ name }} }}"
+                " r_{i}: repository(owner:\"{owner}\", name:\"{name}\") {{ defaultBranchRef {{ name }} pullRequests(states: OPEN, first: 100) {{ nodes {{ headRefName }} }} }}"
             ));
         }
     }
@@ -844,11 +844,12 @@ fn build_candidates_check_gql(
             " r_{ri}: repository(owner:\"{owner}\", name:\"{name}\") {{"
         ));
         for (bi, branch) in branches {
+            let escaped = branch.replace('\\', "\\\\").replace('"', "\\\"");
             q.push_str(&format!(
-                " c{bi}_prs: pullRequests(headRefName:\"{branch}\", states:[OPEN,CLOSED,MERGED], first:1) {{ nodes {{ state mergedAt }} }}"
+                " c{bi}_prs: pullRequests(headRefName:\"{escaped}\", states:[OPEN,CLOSED,MERGED], first:1) {{ nodes {{ state mergedAt }} }}"
             ));
             q.push_str(&format!(
-                " c{bi}_ref: ref(qualifiedName:\"refs/heads/{branch}\") {{ target {{ ... on Commit {{ messageHeadline }} }} }}"
+                " c{bi}_ref: ref(qualifiedName:\"refs/heads/{escaped}\") {{ target {{ ... on Commit {{ messageHeadline }} }} }}"
             ));
         }
         q.push_str(" }");
@@ -883,6 +884,20 @@ pub async fn find_viewer_branch(
             gql_data[&format!("r_{i}")]["defaultBranchRef"]["name"]
                 .as_str()
                 .map(|s| s.to_string())
+        })
+        .collect();
+
+    // Collect all head branches that already have an open PR — these must be excluded.
+    let open_head_refs: std::collections::HashSet<String> = repos
+        .iter()
+        .enumerate()
+        .flat_map(|(i, _)| {
+            gql_data[&format!("r_{i}")]["pullRequests"]["nodes"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|n| n["headRefName"].as_str().map(|s| s.to_string()))
         })
         .collect();
 
@@ -931,6 +946,9 @@ pub async fn find_viewer_branch(
             if branch == default_branch || !seen.insert(branch.clone()) {
                 continue;
             }
+            if open_head_refs.contains(&branch) {
+                continue;
+            }
             candidates_meta.push((i, owner.clone(), repo_name.clone(), branch, a.timestamp.clone()));
         }
     }
@@ -962,6 +980,11 @@ pub async fn find_viewer_branch(
         };
         let repo_node = &check_data[&format!("r_{ri}")];
         let prs = &repo_node[&format!("c{bi}_prs")]["nodes"];
+        // If PR data is unavailable (null), skip conservatively to avoid proposing a branch
+        // that already has an open PR (e.g. draft) when the check query returned a partial error.
+        if prs.is_null() {
+            continue;
+        }
         if let Some(pr) = prs.as_array().and_then(|a| a.first()) {
             let is_open   = pr["state"].as_str() == Some("OPEN");
             let is_merged = pr["mergedAt"].is_string() && !pr["mergedAt"].is_null();

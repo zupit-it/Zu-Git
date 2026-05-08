@@ -61,14 +61,14 @@ Detection uses the [GitHub Activity API](docs/github-identity.md) (`GET /repos/{
 
 When the card opens, ZuGit makes **4 round trips** regardless of how many repos are configured (N):
 
-| Round trip | Call | Notes |
+| Round trip | Call | Why |
 |---|---|---|
-| 1 | GraphQL `{ viewer { login } r0: repository { defaultBranchRef } … }` | Viewer login + default branch for all repos batched in one query |
-| 2 | N × `GET /repos/{repo}/activity?actor={login}&time_period=month&per_page=25` | Push events per repo, all in parallel |
-| 3 | GraphQL `{ r0: repository { c0_prs: pullRequests(…) c0_ref: ref(…) … } }` | PR existence + commit headline for all candidates, batched across repos |
-| 4 | `GET /repos/{repo}/compare/{base}…{head}` | Diff stats (additions, deletions, files, commit list) |
+| 1 | GraphQL `{ viewer { login } r0: repository { defaultBranchRef pullRequests(states:OPEN) { headRefName } } … }` | Viewer login + default branch + all open PR head refs per repo, batched. The open head refs are used immediately to exclude branches that already have a PR (including drafts) before spending round trips on them. |
+| 2 | N × `GET /repos/{repo}/activity?actor={login}&time_period=month&per_page=25` | Push events per repo, all in parallel. The Activity API has no GraphQL equivalent. Used to find branches the viewer recently pushed to — these are the candidates for a new PR. |
+| 3 | GraphQL `{ r0: repository { c0_prs: pullRequests(headRefName:…) c0_ref: ref(…) … } }` | Secondary PR existence check + latest commit headline for all remaining candidates, batched. Guards against branches not caught by round trip 1 (e.g. closed PRs on the same branch, which would make it a valid candidate again). |
+| 4 | `GET /repos/{repo}/compare/{base}…{head}` | Diff stats (additions, deletions, files, commit list) for the chosen branch. Fetched last because we only need it for the one winner. |
 
-Note: the Activity API has no GraphQL equivalent, so round trip 2 stays as REST. Everything else is batched via GraphQL.
+> **Improvement area** — round trip 2 fetches at most 25 push events per repo. If a developer has more than 25 recent pushes on the same repo all without an open PR, the correct branch could be missed. Could be improved by paginating further or by using a smarter ranking strategy.
 
 ### API calls — Promote flow
 
