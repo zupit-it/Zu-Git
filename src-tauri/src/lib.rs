@@ -9,11 +9,9 @@ mod storage;
 use std::collections::HashMap;
 use parking_lot::Mutex;
 
-use github::CachedPrDetails;
 use jira::JiraIssueSummary;
 
 pub struct AppState {
-    pub pr_cache: Mutex<HashMap<String, CachedPrDetails>>,
     pub jira_cache: Mutex<HashMap<String, Option<JiraIssueSummary>>>,
     pub http_client: reqwest::Client,
     /// Probe result cached after the first call — avoids re-running the probe on every refresh.
@@ -68,7 +66,6 @@ pub fn run() {
             Ok(())
         })
         .manage(AppState {
-            pr_cache: Mutex::new(HashMap::new()),
             jira_cache: Mutex::new(HashMap::new()),
             http_client: reqwest::Client::new(),
             secret_store_info: std::sync::OnceLock::new(),
@@ -85,7 +82,12 @@ pub fn run() {
             commands::check_for_update,
             commands::install_update,
             commands::get_draft_pr_info,
+            commands::fetch_branch_stats,
             commands::create_pull_request,
+            commands::fetch_draft_checklist,
+            commands::update_jira_checklist,
+            commands::complete_jira_story,
+            commands::promote_draft_pr,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

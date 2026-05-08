@@ -1,4 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { maybeShowChangelog } from "./changelog";
 import { state } from "./state";
 import {
   setView, setSettingsDirtyState, syncSettingsSaveButton,
@@ -9,7 +10,7 @@ import {
   bootstrap, refreshDashboard, saveSettingsAndRefresh,
   openExternal, rerequestReview, persistListFilters,
 } from "./api";
-import { loadDraftPrInfo } from "./draft-pr";
+import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 
 window.addEventListener("DOMContentLoaded", () => {
   // ── Settings form ───────────────────────────────────────────────────────────
@@ -177,6 +178,14 @@ window.addEventListener("DOMContentLoaded", () => {
     const rerequestButton = target.closest<HTMLButtonElement>(".review-badge-rerequest");
     if (rerequestButton) { void rerequestReview(rerequestButton); return; }
 
+    const promoteButton = target.closest<HTMLButtonElement>("[data-promote-draft]");
+    if (promoteButton) {
+      const prId = promoteButton.dataset.promoteDraft;
+      const pr = state.currentDashboard?.prs.find(p => `${p.repo}/${p.id}` === prId);
+      if (pr) void openExistingDraftPr(pr, promoteButton);
+      return;
+    }
+
     // Repos selector — toggle dropdown open/close
     const reposSelectorToggle = target.closest<HTMLElement>("[data-repos-selector-toggle]");
     if (reposSelectorToggle) {
@@ -237,10 +246,26 @@ window.addEventListener("DOMContentLoaded", () => {
   if (kbdHint) kbdHint.textContent = isMac ? "⌘F" : "Ctrl+F";
 
   document.addEventListener("keydown", (e) => {
-    if ((isMac ? e.metaKey : e.ctrlKey) && e.key === "f") {
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+
+    if (mod && e.key === "f") {
       e.preventDefault();
       setView("list");
       document.querySelector<HTMLInputElement>("[data-list-search]")?.focus();
+      return;
+    }
+
+    if (state.draftPrInfo !== null) {
+      if (mod && e.key === "Enter") {
+        e.preventDefault();
+        void publishNewPr(state.draftAsDraft);
+        return;
+      }
+      if (mod && e.key === "d") {
+        e.preventDefault();
+        toggleDraftState();
+        return;
+      }
     }
   });
 
@@ -253,4 +278,6 @@ window.addEventListener("DOMContentLoaded", () => {
     const el = document.querySelector("[data-app-version]");
     if (el) el.textContent = `v${v}`;
   });
+
+  void maybeShowChangelog();
 });

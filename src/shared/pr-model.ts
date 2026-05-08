@@ -50,6 +50,13 @@ export interface PullRequestSummary {
   hasFailedPipeline: boolean;
   additions: number;
   deletions: number;
+  autoMergeMethod: string | null;
+  unresolvedThreads: number;
+  mergeStatus: "clean" | "behind" | "conflicting" | "blocked" | "unknown";
+  nodeId: string;
+  headRef: string;
+  baseRef: string;
+  body: string;
 }
 
 export const mockPullRequests: PullRequestSummary[] = [
@@ -86,6 +93,13 @@ export const mockPullRequests: PullRequestSummary[] = [
     hasFailedPipeline: false,
     additions: 312,
     deletions: 47,
+    autoMergeMethod: "SQUASH",
+    unresolvedThreads: 2,
+    mergeStatus: "behind",
+    nodeId: "",
+    headRef: "",
+    baseRef: "",
+    body: "",
   },
   {
     id: 918,
@@ -119,6 +133,13 @@ export const mockPullRequests: PullRequestSummary[] = [
     hasFailedPipeline: false,
     additions: 58,
     deletions: 120,
+    autoMergeMethod: null,
+    unresolvedThreads: 0,
+    mergeStatus: "clean",
+    nodeId: "",
+    headRef: "",
+    baseRef: "",
+    body: "",
   },
   {
     id: 415,
@@ -152,5 +173,12 @@ export const mockPullRequests: PullRequestSummary[] = [
     hasFailedPipeline: false,
     additions: 5,
     deletions: 3,
+    autoMergeMethod: null,
+    unresolvedThreads: 0,
+    mergeStatus: "unknown",
+    nodeId: "",
+    headRef: "CHK-311/refactor-promo-validation",
+    baseRef: "main",
+    body: "",
   },
 ];

@@ -410,6 +410,21 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
             ? chip("action", "Action required", SVG.x)
             : "";
 
+  const autoMergeChip = pr.autoMergeMethod
+    ? chip("ok", `Auto-merge (${pr.autoMergeMethod.toLowerCase()})`, SVG.autoMerge)
+    : "";
+
+  const threadsChip = pr.unresolvedThreads > 0
+    ? chip("warn", `${pr.unresolvedThreads} unresolved`, SVG.threads)
+    : "";
+
+  const mergeStatusChip =
+    pr.mergeStatus === "behind"
+      ? chip("warn", "Needs rebase", SVG.behind)
+      : pr.mergeStatus === "conflicting"
+        ? chip("fail", "Conflicts", SVG.conflict)
+        : "";
+
   const diffChip = renderDiffStat(pr.additions, pr.deletions);
 
   const jiraBtn = pr.jiraUrl
@@ -427,6 +442,8 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:${pr.jiraSummary ? "6" : "0"}px">
           ${avatarSm(pr.author, pr.authorAvatarUrl)}
           <span style="font-size:12px;color:var(--ink-soft);font-weight:500;font-family:var(--font-mono)">${escHtml(pr.author)}</span>
+          <span style="font-size:11px;color:var(--ink-muted);font-weight:400">·</span>
+          <span style="font-size:11px;color:var(--ink-muted);font-weight:400">${escHtml(pr.updatedAt)}</span>
           ${diffChip}
           ${authorChip}${agingChip}
         </div>
@@ -436,12 +453,17 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
         ${renderReviewBadges(pr, viewerLogin)}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;padding-top:2px">
-        <div style="font-size:12px;color:var(--ink-soft);font-weight:600">${pr.updatedAt}</div>
         ${pipelineChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${pipelineChip}</div>` : ""}
+        ${autoMergeChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${autoMergeChip}</div>` : ""}
+        ${threadsChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${threadsChip}</div>` : ""}
+        ${mergeStatusChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${mergeStatusChip}</div>` : ""}
       </div>
-      <div style="display:flex;gap:6px;justify-content:flex-end;padding-top:2px">
-        <button class="icon-btn" data-pr-link="${pr.url}" type="button">${SVG.ext}<span>PR</span></button>
-        ${jiraBtn}
+      <div style="display:flex;flex-direction:column;gap:6px;padding-top:2px;width:fit-content;margin-left:auto">
+        <div style="display:flex;gap:6px">
+          <button class="icon-btn" data-pr-link="${pr.url}" type="button">${SVG.ext}<span>PR</span></button>
+          ${jiraBtn}
+        </div>
+        ${pr.isDraft && pr.nodeId ? `<button class="icon-btn" data-promote-draft="${escHtml(pr.repo)}/${pr.id}" type="button" style="width:100%;justify-content:center">${SVG.promote}<span>Promote</span></button>` : ""}
       </div>
     </div>
   `;

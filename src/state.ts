@@ -1,11 +1,30 @@
 import type { DashboardSnapshot } from "./shared/rpc";
 import { defaultListFilterPreferences, defaultSettings } from "./shared/settings";
 
+export interface CommitSummary {
+  sha: string;
+  message: string;
+  committedAt: string;
+}
+
+export interface BranchStats {
+  additions: number;
+  deletions: number;
+  files: number;
+  commits: CommitSummary[];
+}
+
 export interface DraftPrInfo {
   repo: string;
   branch: string;
   baseBranch: string;
   suggestedTitle: string;
+  stats?: BranchStats | null;
+}
+
+export interface ChecklistItem {
+  text: string;
+  done: boolean;
 }
 
 export const state = {
@@ -53,4 +72,10 @@ export const state = {
   draftBody: "",
   draftBaseBranch: "",
   draftAsDraft: false,
+  draftJiraKey: null as string | null,
+  draftChecklist: [] as ChecklistItem[],
+  draftChecklistLoading: false,
+  // promote-mode fields (non-null when promoting an existing draft PR)
+  draftPrNumber: null as number | null,
+  draftPrNodeId: null as string | null,
 };
