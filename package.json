@@ -8,8 +8,10 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "tauri": "tauri",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
   },
+  "type": "module",
   "private": true,
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -18,6 +20,9 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
+    "eslint": "^10.3.0",
     "typescript": "^5",
     "vite": "^6"
   }

@@ -20,8 +20,8 @@ fn build_token_store_status(
 ) -> TokenStoreStatus {
     let info = state
         .secret_store_info
-        .get_or_init(|| secret_store::get_secret_store_info());
-    let last_save_used_vault = *state.last_save_used_vault.lock().unwrap();
+        .get_or_init(secret_store::get_secret_store_info);
+    let last_save_used_vault = *state.last_save_used_vault.lock();
     let last_save_used_file_fallback = last_save_used_vault == Some(false);
     let provider = if last_save_used_file_fallback {
         "fallback-file".to_string()
@@ -56,7 +56,7 @@ pub async fn bootstrap(
     // Initialises the OnceLock (runs probe once) and returns a reference.
     let secret_store_ref = state
         .secret_store_info
-        .get_or_init(|| secret_store::get_secret_store_info());
+        .get_or_init(secret_store::get_secret_store_info);
     let secret_store = crate::models::SecretStoreInfo {
         provider: secret_store_ref.provider.clone(),
         detail: secret_store_ref.detail.clone(),
@@ -78,11 +78,11 @@ pub async fn save_settings(
     params: SettingsFormValues,
 ) -> Result<SaveSettingsResult, String> {
     let (settings, used_vault) = storage::save_settings(&app, &params).await?;
-    *state.last_save_used_vault.lock().unwrap() = Some(used_vault);
+    *state.last_save_used_vault.lock() = Some(used_vault);
 
     // Clear caches after settings change.
-    state.pr_cache.lock().unwrap().clear();
-    state.jira_cache.lock().unwrap().clear();
+    state.pr_cache.lock().clear();
+    state.jira_cache.lock().clear();
 
     let mut snap = dashboard::build_dashboard_snapshot(
         &settings,
@@ -122,6 +122,9 @@ pub async fn refresh_dashboard(
 
 #[tauri::command]
 pub async fn open_external(app: tauri::AppHandle, url: String) -> Result<bool, String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(format!("Blocked non-http URL: {url}"));
+    }
     use tauri_plugin_opener::OpenerExt;
     app.opener()
         .open_url(&url, None::<&str>)
@@ -179,22 +182,19 @@ pub async fn get_draft_pr_info(
     let viewer_login = crate::github::fetch_viewer_login(&settings, &state.http_client)
         .await
         .unwrap_or_default();
-    eprintln!("[draft-pr] viewer_login={:?}", viewer_login);
     if viewer_login.is_empty() {
-        eprintln!("[draft-pr] aborting: viewer_login is empty");
         return Ok(None);
     }
-    let result = crate::github::find_viewer_branch(
+    Ok(crate::github::find_viewer_branch(
         &settings.github_repos,
         &viewer_login,
         &settings,
         &state.http_client,
     )
-    .await;
-    eprintln!("[draft-pr] find_viewer_branch result: {:?}", result.as_ref().map(|r| (&r.repo, &r.branch)));
-    Ok(result)
+    .await)
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn create_pull_request(
     app: tauri::AppHandle,

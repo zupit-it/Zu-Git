@@ -1540,7 +1540,7 @@ img.avatar { object-fit: cover; }
 .review-badge-rerequest--loading { animation: spin 0.7s linear infinite; }
 .review-badge-rerequest--done { opacity: 1; }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+
 
 /* ── Icon button ──────────────────────────────────────────── */
 .icon-btn {
@@ -1668,7 +1668,7 @@ img.avatar { object-fit: cover; }
   animation: spin 0.7s linear infinite;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+
 
 /* ── Settings ─────────────────────────────────────────────── */
 .settings-shell {

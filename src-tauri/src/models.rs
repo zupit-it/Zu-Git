@@ -256,7 +256,7 @@ pub struct SaveSettingsResult {
 
 fn split_multiline_list(value: &str) -> Vec<String> {
     value
-        .split(|c| c == '\n' || c == ',' || c == '\r')
+        .split(['\n', ',', '\r'])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()

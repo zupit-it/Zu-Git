@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -379,45 +379,6 @@ async fn graphql_request(
     response.json::<GqlResponse>().await.map_err(|e| e.to_string())
 }
 
-/// Like `graphql_request` but deserialises `data` directly into any typed `T`.
-async fn graphql_request_typed<T: serde::de::DeserializeOwned>(
-    query: &str,
-    variables: serde_json::Value,
-    settings: &AppSettings,
-    client: &reqwest::Client,
-) -> Result<T, String> {
-    let url = graphql_url(settings);
-    let body = serde_json::json!({ "query": query, "variables": variables });
-
-    let response = client
-        .post(&url)
-        .headers(github_headers(settings))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("GraphQL request failed: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "GitHub GraphQL API returned {} for {}",
-            response.status(),
-            url
-        ));
-    }
-
-    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-
-    if let Some(errors) = json["errors"].as_array() {
-        if let Some(first) = errors.first() {
-            return Err(first["message"]
-                .as_str()
-                .unwrap_or("GraphQL error")
-                .to_string());
-        }
-    }
-
-    serde_json::from_value(json["data"].clone()).map_err(|e| e.to_string())
-}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -564,7 +525,7 @@ async fn fetch_repo_pull_requests_inner(
             .unwrap_or_default();
 
         // Reuse processed details if the PR hasn't changed since last refresh.
-        let cached = pr_cache.lock().unwrap().get(&cache_key).cloned();
+        let cached = pr_cache.lock().get(&cache_key).cloned();
         let details = match cached {
             Some(c) if c.updated_at == pr.updated_at && c.head_sha == head_sha => c,
             _ => build_cached_details(pr, &head_sha),
@@ -572,7 +533,6 @@ async fn fetch_repo_pull_requests_inner(
 
         pr_cache
             .lock()
-            .unwrap()
             .insert(cache_key, details.clone());
 
         records.push(GithubPullRequestRecord {
@@ -608,7 +568,6 @@ async fn fetch_repo_pull_requests_inner(
     // Evict stale cache entries (closed / merged PRs) for this repo.
     pr_cache
         .lock()
-        .unwrap()
         .retain(|k, _| !k.starts_with(&format!("{}#", repo)) || active_keys.contains(k));
 
     Ok(records)
@@ -701,10 +660,8 @@ fn summarize_reviews(reviews: &[GqlReview], requested_reviewers: &[String]) -> G
         match review.state.as_str() {
             "APPROVED" => current_approvers.push(login.clone()),
             "DISMISSED" => stale_approvers.push(login.clone()),
-            "CHANGES_REQUESTED" => {
-                if !requested_reviewers.contains(login) {
-                    blocking_reviewers.push(login.clone());
-                }
+            "CHANGES_REQUESTED" if !requested_reviewers.contains(login) => {
+                blocking_reviewers.push(login.clone());
             }
             "COMMENTED" => commented_reviewers.push(login.clone()),
             _ => {}
@@ -862,14 +819,8 @@ async fn find_viewer_branch_in_repo(
         github_request::<RestRepoInfo>(&repo_url, settings, client),
     );
 
-    let activities = match activity_res {
-        Ok(a) => a,
-        Err(e) => { eprintln!("[draft-pr] [{repo}] activity request failed: {e}"); return None; }
-    };
-    let repo_info = match repo_res {
-        Ok(r) => r,
-        Err(e) => { eprintln!("[draft-pr] [{repo}] repo info request failed: {e}"); return None; }
-    };
+    let activities = activity_res.ok()?;
+    let repo_info = repo_res.ok()?;
 
     // Keep push-type events, deduplicate by branch (API returns newest first).
     let mut seen = std::collections::HashSet::new();
@@ -887,11 +838,6 @@ async fn find_viewer_branch_in_repo(
         })
         .collect();
 
-    eprintln!(
-        "[draft-pr] [{repo}] activity candidates: {:?}",
-        candidates.iter().map(|(b, _, _)| b.as_str()).collect::<Vec<_>>()
-    );
-
     for (branch, timestamp, after_sha) in candidates {
         // Skip branches that already have an open PR.
         let check_url = format!(
@@ -903,7 +849,6 @@ async fn find_viewer_branch_in_repo(
                 .await
                 .unwrap_or_default();
         if !existing.is_empty() {
-            eprintln!("[draft-pr] [{repo}] {branch:?} already has an open PR, skipping");
             continue;
         }
 
@@ -932,12 +877,12 @@ async fn find_viewer_branch_in_repo(
         });
     }
 
-    eprintln!("[draft-pr] [{repo}] no valid candidate found");
     None
 }
 
 /// Creates a pull request via the GitHub REST API and optionally assigns reviewers.
 /// Returns the URL of the newly created PR.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_pull_request(
     repo: &str,
     title: &str,
