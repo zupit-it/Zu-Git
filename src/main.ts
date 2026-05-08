@@ -33,14 +33,6 @@ window.addEventListener("DOMContentLoaded", () => {
     .querySelector<HTMLButtonElement>("[data-add-pr-button]")
     ?.addEventListener("click", () => void loadDraftPrInfo());
 
-  // Close reviewer picker when clicking outside it (setup-once, no leak).
-  document.addEventListener("click", (e) => {
-    const picker = document.querySelector<HTMLElement>("[data-reviewer-picker]");
-    if (!picker || picker.hidden) return;
-    if (!(e.target as Element).closest("[data-toggle-reviewer-picker], [data-reviewer-picker]")) {
-      picker.hidden = true;
-    }
-  }, { capture: true });
 
   // ── Settings link buttons ───────────────────────────────────────────────────
   document
@@ -139,21 +131,27 @@ window.addEventListener("DOMContentLoaded", () => {
       if (state.currentDashboard) renderListBoard(applyListFilters(state.currentDashboard));
       void persistListFilters();
     });
+  // Repos selector — search filter (input event on the container)
   document
     .querySelector<HTMLElement>("[data-toolbar-repo-filters]")
-    ?.addEventListener("change", (event) => {
+    ?.addEventListener("input", (event) => {
       const target = event.target;
-      if (!(target instanceof HTMLInputElement) || !target.matches("[data-toolbar-repo-toggle]")) return;
-      const repo = target.value;
-      state.hiddenRepos = target.checked
-        ? state.hiddenRepos.filter((entry) => entry !== repo)
-        : Array.from(new Set([...state.hiddenRepos, repo]));
-      if (state.currentDashboard) {
-        renderListBoard(applyListFilters(state.currentDashboard));
-        renderToolbarRepoFilters(state.currentDashboard);
-      }
-      void persistListFilters();
+      if (!(target instanceof HTMLInputElement) || !target.matches("[data-repos-selector-search]")) return;
+      const query = target.value.toLowerCase();
+      document.querySelectorAll<HTMLElement>("[data-repos-selector-repo]").forEach(item => {
+        const name = (item.dataset.reposSelectorRepo ?? "").toLowerCase();
+        item.hidden = !!query && !name.includes(query);
+      });
     });
+
+  // Close repos selector dropdown on outside click (setup-once)
+  document.addEventListener("click", (e) => {
+    const dropdown = document.querySelector<HTMLElement>("[data-repos-selector-dropdown]");
+    if (!dropdown || dropdown.hidden) return;
+    if (!(e.target as Element).closest("[data-repos-selector]")) {
+      dropdown.hidden = true;
+    }
+  }, { capture: true });
 
   // ── View tabs ───────────────────────────────────────────────────────────────
   document.querySelectorAll<HTMLElement>("[data-view-tab]").forEach((tab) => {
@@ -178,6 +176,42 @@ window.addEventListener("DOMContentLoaded", () => {
 
     const rerequestButton = target.closest<HTMLButtonElement>(".review-badge-rerequest");
     if (rerequestButton) { void rerequestReview(rerequestButton); return; }
+
+    // Repos selector — toggle dropdown open/close
+    const reposSelectorToggle = target.closest<HTMLElement>("[data-repos-selector-toggle]");
+    if (reposSelectorToggle) {
+      const dropdown = document.querySelector<HTMLElement>("[data-repos-selector-dropdown]");
+      if (dropdown) {
+        dropdown.hidden = !dropdown.hidden;
+        if (!dropdown.hidden) {
+          dropdown.querySelector<HTMLInputElement>("[data-repos-selector-search]")?.focus();
+        }
+      }
+      return;
+    }
+
+    // Repos selector — toggle a single repo
+    const repoItem = target.closest<HTMLElement>("[data-repos-selector-repo]");
+    if (repoItem) {
+      const repo = repoItem.dataset.reposSelectorRepo;
+      if (!repo) return;
+      state.hiddenRepos = state.hiddenRepos.includes(repo)
+        ? state.hiddenRepos.filter(r => r !== repo)
+        : [...state.hiddenRepos, repo];
+      if (state.currentDashboard) {
+        renderListBoard(applyListFilters(state.currentDashboard));
+        renderToolbarRepoFilters(state.currentDashboard);
+      }
+      void persistListFilters();
+      return;
+    }
+
+    // Repos selector — "Add repository" → open settings
+    const reposAdd = target.closest<HTMLElement>("[data-repos-selector-add]");
+    if (reposAdd) {
+      setView("settings");
+      return;
+    }
 
     const reviewerChip = target.closest<HTMLButtonElement>("[data-reviewer-filter]");
     if (reviewerChip && state.currentDashboard) {

@@ -185,17 +185,19 @@ export function collectSettingsForm(): SettingsFormValues {
   return serializeSettingsForm(normalizeSettings(values as Partial<SettingsFormValues>));
 }
 
-// ── Toolbar repo filters ──────────────────────────────────────────────────────
+// ── Toolbar repo filters (Repos selector dropdown) ───────────────────────────
 
 export function renderToolbarRepoFilters(snapshot: DashboardSnapshot | null) {
   const container = document.querySelector<HTMLElement>("[data-toolbar-repo-filters]");
   const sep = document.querySelector<HTMLElement>("[data-repo-filter-sep]");
   if (!container) return;
 
-  if (!snapshot || state.currentView !== "list") {
+  // Separator never needed — dropdown is self-contained
+  sep?.setAttribute("hidden", "");
+
+  if (!snapshot) {
     container.innerHTML = "";
     container.setAttribute("hidden", "");
-    sep?.setAttribute("hidden", "");
     return;
   }
 
@@ -203,23 +205,70 @@ export function renderToolbarRepoFilters(snapshot: DashboardSnapshot | null) {
   if (repos.length === 0) {
     container.innerHTML = "";
     container.setAttribute("hidden", "");
-    sep?.setAttribute("hidden", "");
     return;
   }
 
-  container.innerHTML = repos
-    .map((repo) => {
-      const checked = !state.hiddenRepos.includes(repo);
-      return `
-        <label class="toolbar-repo-toggle">
-          <input data-toolbar-repo-toggle type="checkbox" value="${repo}" ${checked ? "checked" : ""} />
-          <span>${repo}</span>
-        </label>
-      `;
-    })
-    .join("");
+  // Count PRs per repo (all, not filtered)
+  const prCountByRepo = new Map<string, number>();
+  for (const pr of snapshot.prs) {
+    prCountByRepo.set(pr.repo, (prCountByRepo.get(pr.repo) ?? 0) + 1);
+  }
+
+  const activeCount = repos.filter(r => !state.hiddenRepos.includes(r)).length;
+
+  // Preserve open state and search value across re-renders
+  const existingDropdown = container.querySelector<HTMLElement>("[data-repos-selector-dropdown]");
+  const wasOpen = existingDropdown !== null && !existingDropdown.hidden;
+  const existingSearch = container.querySelector<HTMLInputElement>("[data-repos-selector-search]")?.value ?? "";
+
+  const checkSvg = `<svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.2L5 9l5-6"/></svg>`;
+  const chevDownSvg = `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 4l2.5 2.5L7.5 4"/></svg>`;
+  const searchSvg = `<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6" cy="6" r="4"/><path d="M9.2 9.2L12 12"/></svg>`;
+
+  const reposHtml = repos.map(repo => {
+    const isActive = !state.hiddenRepos.includes(repo);
+    const prCount = prCountByRepo.get(repo) ?? 0;
+    const filterHidden = existingSearch && !repo.toLowerCase().includes(existingSearch.toLowerCase());
+    return `<div class="repos-selector-repo${isActive ? " is-active" : ""}" data-repos-selector-repo="${escHtml(repo)}"${filterHidden ? " hidden" : ""}>
+      <span class="repos-selector-check">${isActive ? checkSvg : ""}</span>
+      <span class="repos-selector-name">${escHtml(repo)}</span>
+      ${prCount > 0 ? `<span class="repos-selector-pr-count">${prCount} PR</span>` : ""}
+    </div>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="repos-selector" data-repos-selector>
+      <button class="repos-selector-btn" type="button" data-repos-selector-toggle>
+        <span class="repos-selector-badge">${activeCount}</span>
+        <span>repositories selected</span>
+        ${chevDownSvg}
+      </button>
+      <div class="repos-selector-dropdown" data-repos-selector-dropdown${wasOpen ? "" : " hidden"}>
+        <div class="repos-selector-search-wrap">
+          ${searchSvg}
+          <input class="repos-selector-search-input" data-repos-selector-search type="text"
+                 placeholder="Filter repositories…" value="${escHtml(existingSearch)}" />
+        </div>
+        <div class="repos-selector-section-label">Tracked (${repos.length})</div>
+        <div class="repos-selector-list">${reposHtml}</div>
+        <div class="repos-selector-footer" data-repos-selector-add>
+          <span class="repos-selector-add-icon">+</span>
+          Add repository
+        </div>
+      </div>
+    </div>`;
+
   container.removeAttribute("hidden");
-  sep?.removeAttribute("hidden");
+
+  // Restore focus and cursor in search input when re-rendering while open
+  if (wasOpen && existingSearch) {
+    const searchEl = container.querySelector<HTMLInputElement>("[data-repos-selector-search]");
+    if (searchEl) {
+      searchEl.focus();
+      const len = searchEl.value.length;
+      searchEl.setSelectionRange(len, len);
+    }
+  }
 }
 
 // ── List filters panel ────────────────────────────────────────────────────────

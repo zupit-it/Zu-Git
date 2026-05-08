@@ -52,4 +52,5 @@ export const state = {
   draftReviewers: [] as string[],
   draftBody: "",
   draftBaseBranch: "",
+  draftAsDraft: false,
 };
