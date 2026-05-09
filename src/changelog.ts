@@ -14,7 +14,7 @@ const ENTRIES: {
   },
   {
     title: "Promote draft PR",
-    body: "Each draft PR row now has a <strong>Promote</strong> button. It opens the same card pre-filled with the existing title, body, reviewers, and fetches the Jira checklist fresh. On publish, all criteria are marked done and the configured Jira workflow transition is triggered.",
+    body: "Each draft PR row now has a <strong>Promote</strong> button. It opens the same card pre-filled with the existing title, body, reviewers, and fetches the Jira checklist fresh. On publish, all criteria are marked done and the configured Jira workflow transition is triggered (default: <strong>MERGE REQUEST</strong>).",
     imgs: ["/assets/changelog/promote-button.png"],
   },
   {
@@ -73,5 +73,11 @@ function close(version: string) {
 export async function maybeShowChangelog() {
   const version = await getVersion();
   if (localStorage.getItem(STORAGE_KEY) === version) return;
+  document.body.appendChild(buildModal(version));
+}
+
+export async function showChangelog() {
+  if (document.querySelector("[data-changelog-overlay]")) return;
+  const version = await getVersion();
   document.body.appendChild(buildModal(version));
 }

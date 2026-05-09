@@ -19,6 +19,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Bump versions
         run: |
           set -e
@@ -33,11 +38,14 @@ jobs:
           # Cargo.toml — first occurrence only (the [package] block)
           sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" src-tauri/Cargo.toml
 
+      - name: Bump changelog
+        run: node scripts/changelog.js bump "${{ inputs.version }}"
+
       - name: Commit & tag
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml CHANGELOG.md
           git commit -m "chore: release v${{ inputs.version }}"
           git tag "v${{ inputs.version }}"
           git push origin HEAD

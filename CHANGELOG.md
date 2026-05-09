@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+**Features**
+
+- **What's new modal** — shows automatically after an app update (version-gated via localStorage). Can be reopened at any time from the "What's new" entry in the nav. Entries support images, HTML, and numbered steps.
+
+- **Branch diff stats in New PR card** — additions, deletions, file count, and a collapsible commit list with relative timestamps. Fetched via `GET /repos/{repo}/compare/{base}...{head}`.
+
+- **Auto-merge chip** — inline chip on PR rows showing when auto-merge is enabled on a PR, with the configured merge method.
+
+- **Promote spinner** — the Promote button shows a loading state while diff stats are fetched; the card opens only when all data is ready.
+
+**Internal**
+
 - **Add PR — branch detection via GitHub Activity API**  
   The "Add PR" button now reliably finds your unpublished branch even when your git commit email is not verified on GitHub. The previous approach used `GET /repos/{repo}/commits?author={login}`, which matches by git commit email and silently returns nothing when the email is not associated with the GitHub account. The new approach uses `GET /repos/{repo}/activity?actor={login}&activity_type=push`, which matches by GitHub account identity regardless of the configured git email. See [`docs/github-identity.md`](docs/github-identity.md) for a detailed explanation.
 
@@ -24,6 +36,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   This blocks injection of external scripts while allowing inline styles (used throughout the HTML templates) and GitHub avatar images.
 
 ### Changed
+
+**Features**
+
+- **PR row right padding** made symmetric with left (18px both sides).
+
+**Internal**
+
+- **New PR branch detection overhauled** — reduced from 6+ round trips to 4. Round trip 1 now also fetches all open PR head refs per repo in the same batched GraphQL query, so branches that already have an open PR (including drafts) are excluded immediately without waiting for the candidate check in round trip 3.
+
+- **`pr_cache` removed** — the `Mutex<HashMap<String, CachedPrDetails>>` cache in `AppState` was serving no purpose since a single GraphQL query already fetches all PR data fresh on every refresh. Removing it eliminates a source of stale data bugs (e.g. auto-merge not showing after being enabled).
+
+- **Jira logs reduced** — removed all info/debug `eprintln!` from `jira.rs`; only errors are logged.
 
 - **Frontend split into modules** (`src/main.ts` 1800 lines → 7 focused files):
 

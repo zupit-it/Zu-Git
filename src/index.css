@@ -1772,9 +1772,9 @@ html, body {
 /* ── PR row (div grid) ────────────────────────────────────── */
 .pr-row {
   display: grid;
-  grid-template-columns: 1fr 220px 180px 100px;
+  grid-template-columns: 1fr 220px 180px auto;
   gap: 16px;
-  padding: 14px 18px 14px 16px;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   position: relative;

@@ -1,5 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
-import { maybeShowChangelog } from "./changelog";
+import { maybeShowChangelog, showChangelog } from "./changelog";
 import { state } from "./state";
 import {
   setView, setSettingsDirtyState, syncSettingsSaveButton,
@@ -30,6 +30,9 @@ window.addEventListener("DOMContentLoaded", () => {
   document
     .querySelector<HTMLButtonElement>("[data-refresh-button]")
     ?.addEventListener("click", () => void refreshDashboard());
+  document
+    .querySelector<HTMLButtonElement>("[data-changelog-button]")
+    ?.addEventListener("click", () => void showChangelog());
   document
     .querySelector<HTMLButtonElement>("[data-add-pr-button]")
     ?.addEventListener("click", () => void loadDraftPrInfo());
