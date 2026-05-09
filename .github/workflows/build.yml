@@ -46,8 +46,30 @@ jobs:
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 
+  release-notes:
+    runs-on: ubuntu-22.04
+    outputs:
+      body: ${{ steps.notes.outputs.body }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          NOTES=$(node scripts/changelog.js extract "$VERSION" 2>/dev/null || echo "")
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
   build:
-    needs: check
+    needs: [check, release-notes]
     strategy:
       fail-fast: false
       matrix:
@@ -93,16 +115,6 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Extract release notes
-        id: notes
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          NOTES=$(node scripts/changelog.js extract "$VERSION" 2>/dev/null || echo "")
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
@@ -113,7 +125,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "ZuGit ${{ github.ref_name }}"
-          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseBody: ${{ needs.release-notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
