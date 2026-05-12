@@ -19,6 +19,7 @@ pub struct AppSettings {
     pub notifications_enabled: bool,
     pub color_blind_mode: bool,
     pub jira_merge_transition: String,
+    pub jira_rejected_status: String,
 }
 
 impl Default for AppSettings {
@@ -37,6 +38,7 @@ impl Default for AppSettings {
             notifications_enabled: true,
             color_blind_mode: false,
             jira_merge_transition: "MERGE REQUEST".to_string(),
+            jira_rejected_status: "Rejected".to_string(),
         }
     }
 }
@@ -65,6 +67,7 @@ pub struct SettingsFormValues {
     pub notifications_enabled: String, // "on" | ""
     pub color_blind_mode: String,      // "on" | ""
     pub jira_merge_transition: String,
+    pub jira_rejected_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -342,6 +345,10 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
             let t = values.jira_merge_transition.trim().to_string();
             if t.is_empty() { "MERGE REQUEST".to_string() } else { t }
         },
+        jira_rejected_status: {
+            let t = values.jira_rejected_status.trim().to_string();
+            if t.is_empty() { "Rejected".to_string() } else { t }
+        },
     }
 }
 
@@ -373,6 +380,7 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
             String::new()
         },
         jira_merge_transition: settings.jira_merge_transition.clone(),
+        jira_rejected_status: settings.jira_rejected_status.clone(),
     }
 }
 
@@ -413,6 +421,39 @@ pub struct DraftPrInfo {
     pub base_branch: String,
     pub suggested_title: String,
     pub stats: Option<BranchStats>,
+}
+
+// ── Release diff ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseDiffItem {
+    pub key: String,
+    pub summary: String,
+    pub status: String,
+    pub issue_type: String,
+    pub fix_version: String,
+    pub pr_url: Option<String>,
+    pub pr_number: Option<u64>,
+    pub branch: String,
+    pub author: String,
+    pub initials: String,
+    pub avatar_color: String,
+    pub avatar_url: Option<String>,
+    pub is_preview: bool,
+    /// Typed sync divergence flag: "no-pr" | "no-jira" | None
+    pub flag: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseDiffResult {
+    pub done: Vec<ReleaseDiffItem>,
+    pub missing: Vec<ReleaseDiffItem>,
+    pub extra: Vec<ReleaseDiffItem>,
+    pub available_versions: Vec<String>,
+    pub synced_at: String,
+    pub repo: String,
 }
 
 // ── Mock data ─────────────────────────────────────────────────────────────────

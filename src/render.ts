@@ -328,7 +328,7 @@ export function renderListFilters(snapshot: DashboardSnapshot) {
 
 // ── PR row rendering ──────────────────────────────────────────────────────────
 
-export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string): string {
+export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string, isDraft = false): string {
   const seen = new Set<string>();
   const dedup = <T extends { login: string }>(arr: T[]) =>
     arr.filter(({ login }) => !seen.has(login) && seen.add(login));
@@ -344,14 +344,17 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string)
   ];
 
   if (items.length === 0) {
-    return `<span style="font-size:11.5px;color:var(--ink-faint);font-style:italic">No reviewers</span>`;
+    const noReviewColor = isDraft ? "var(--draft-ink-soft)" : "var(--ink-faint)";
+    const noReviewText  = isDraft ? "No reviewers yet" : "No reviewers";
+    return `<span style="font-size:11.5px;color:${noReviewColor};font-style:italic">${noReviewText}</span>`;
   }
 
+  const mutedClass = isDraft ? " review-badge--muted" : "";
   return items
     .map(
       (item) => `
-        <div class="review-badge review-badge-${item.tone}">
-          ${avatarSm(item.login, item.avatarUrl)}
+        <div class="review-badge review-badge-${item.tone}${mutedClass}">
+          ${avatarSm(item.login, item.avatarUrl, isDraft)}
           <span>${item.label}</span>${item.stale ? `<span class="review-badge-stale-icon">${SVG.clock}</span>` : ""}${item.canRerequest ? `<button class="review-badge-rerequest" title="Re-request review from ${item.login}" data-repo="${pr.repo}" data-pr-number="${pr.id}" data-login="${item.login}">${SVG.rerequest}</button>` : ""}
         </div>
       `,
@@ -359,12 +362,13 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string)
     .join("");
 }
 
-export function renderDiffStat(additions: number, deletions: number): string {
+export function renderDiffStat(additions: number, deletions: number, mute = false): string {
   if (additions === 0 && deletions === 0) return "";
   const total = additions + deletions;
   const bucket = diffSizeBucket(total);
   const title = `${additions.toLocaleString()} additions · ${deletions.toLocaleString()} deletions · ${total.toLocaleString()} lines (${bucket.toUpperCase()})`;
-  return `<span class="diffstat" title="${title}">` +
+  const cls = mute ? "diffstat diffstat--muted" : "diffstat";
+  return `<span class="${cls}" title="${title}">` +
     `<span class="diffstat__dot diffstat__dot--${bucket}" aria-hidden="true"></span>` +
     `<span class="diffstat__add">+${formatDiffNum(additions)}</span>` +
     `<span class="diffstat__sep">·</span>` +
@@ -373,7 +377,9 @@ export function renderDiffStat(additions: number, deletions: number): string {
 }
 
 export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin?: string): string {
+  const isDraft = !!pr.isDraft;
   const isAging = Date.now() - Date.parse(pr.createdAtIso) > 14 * 24 * 60 * 60 * 1000;
+
   const priorityIconMap: Partial<Record<PullRequestSummary["jiraPriority"], string>> = {
     Highest: SVG.priorityHighest,
     High:    SVG.priorityHigh,
@@ -384,73 +390,89 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
     ? `<span class="priority-icon" title="${pr.jiraPriority} priority">${priorityIconSvg}</span>`
     : "";
 
-  const keyChip = pr.isDraft
-    ? chip("draft", "DRAFT", SVG.draft)
+  // Key chip: draft rows get a dark solid pill with "DRAFT · KEY"
+  const keyChip = isDraft
+    ? chip("draft-solid chip-key", pr.jiraKey ? `DRAFT · ${pr.jiraKey}` : "DRAFT", SVG.draft)
     : pr.jiraKey
       ? chip("accent chip-key", pr.jiraKey, SVG.gitpr)
       : "";
 
+  // Author / identity chip
+  const dotClass = isDraft ? "chip-dot chip-dot--mute" : "chip-dot";
+  const authorKind = isDraft ? "mute" : "neutral";
   const authorChip =
     pr.authorType === "internal"
-      ? chip("neutral", "Internal", `<span class="chip-dot"></span>`)
+      ? chip(authorKind, "Internal", `<span class="${dotClass}"></span>`)
       : pr.authorType === "team"
-        ? chip("neutral", "Team", `<span class="chip-dot"></span>`)
-        : chip("ghost", "Collaborator");
+        ? chip(authorKind, "Team", `<span class="${dotClass}"></span>`)
+        : isDraft
+          ? chip("mute", "Collaborator")
+          : chip("ghost", "Collaborator");
 
-  const agingChip = isAging ? ` ${chip("warn", "Older than 2 weeks", SVG.clock)}` : "";
+  const agingChip = isAging
+    ? ` ${chip(isDraft ? "mute" : "warn", "Older than 2 weeks", SVG.clock)}`
+    : "";
 
+  // Pipeline / status chips — all go mute when draft
   const pipelineChip =
     pr.pipelineState === "success"
-      ? chip("ok", "CI OK", SVG.check)
+      ? chip(isDraft ? "mute" : "ok",   "CI OK",     SVG.check)
       : pr.pipelineState === "failure"
-        ? chip("fail", "CI Failed", SVG.x)
+        ? chip(isDraft ? "mute" : "fail", "CI Failed", SVG.x)
         : pr.pipelineState === "pending"
-          ? chip("warn", "CI Running", SVG.clock)
+          ? chip(isDraft ? "mute" : "warn", "CI Running", SVG.clock)
           : pr.pipelineState === "action-required"
             ? chip("action", "Action required", SVG.x)
             : "";
 
   const autoMergeChip = pr.autoMergeMethod
-    ? chip("ok", `Auto-merge (${pr.autoMergeMethod.toLowerCase()})`, SVG.autoMerge)
+    ? chip(isDraft ? "mute" : "ok", `Auto-merge (${pr.autoMergeMethod.toLowerCase()})`, SVG.autoMerge)
     : "";
 
   const threadsChip = pr.unresolvedThreads > 0
-    ? chip("warn", `${pr.unresolvedThreads} unresolved`, SVG.threads)
+    ? chip(isDraft ? "mute" : "warn", `${pr.unresolvedThreads} unresolved`, SVG.threads)
     : "";
 
   const mergeStatusChip =
     pr.mergeStatus === "behind"
-      ? chip("warn", "Needs rebase", SVG.behind)
+      ? chip(isDraft ? "mute" : "warn", "Needs rebase", SVG.behind)
       : pr.mergeStatus === "conflicting"
-        ? chip("fail", "Conflicts", SVG.conflict)
+        ? chip(isDraft ? "mute" : "fail", "Conflicts", SVG.conflict)
         : "";
 
-  const diffChip = renderDiffStat(pr.additions, pr.deletions);
+  const diffChip = renderDiffStat(pr.additions, pr.deletions, isDraft);
 
   const jiraBtn = pr.jiraUrl
     ? `<button class="icon-btn" data-jira-link="${pr.jiraUrl}" type="button">${SVG.jira}<span>Jira</span></button>`
     : "";
 
+  // Text color tokens — muted palette when draft
+  const titleColor  = isDraft ? "var(--draft-ink)"      : "var(--ink)";
+  const titleWeight = isDraft ? 550                      : 600;
+  const authorColor = isDraft ? "var(--draft-ink-soft)"  : "var(--ink-soft)";
+  const metaColor   = isDraft ? "var(--draft-ink-soft)"  : "var(--ink-muted)";
+  const descColor   = isDraft ? "var(--draft-ink-soft)"  : "var(--ink-muted)";
+
   return `
-    <div class="pr-row" data-pr-id="${pr.repo}/${pr.id}" style="${isLast ? "" : "border-bottom:1px solid var(--border)"}">
+    <div class="pr-row${isDraft ? " pr-row--draft" : ""}" data-pr-id="${pr.repo}/${pr.id}" style="${isLast ? "" : "border-bottom:1px solid var(--border)"}">
       <div class="pr-row-bar"></div>
       <div style="min-width:0">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
           ${keyChip}${priorityIcon}
-          <span style="font-size:13.5px;font-weight:600;color:var(--ink);letter-spacing:-0.1px;line-height:1.3">${escHtml(pr.title)}</span>
+          <span style="font-size:13.5px;font-weight:${titleWeight};color:${titleColor};letter-spacing:-0.1px;line-height:1.3">${escHtml(pr.title)}</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:${pr.jiraSummary ? "6" : "0"}px">
-          ${avatarSm(pr.author, pr.authorAvatarUrl)}
-          <span style="font-size:12px;color:var(--ink-soft);font-weight:500;font-family:var(--font-mono)">${escHtml(pr.author)}</span>
-          <span style="font-size:11px;color:var(--ink-muted);font-weight:400">·</span>
-          <span style="font-size:11px;color:var(--ink-muted);font-weight:400">${escHtml(pr.updatedAt)}</span>
+          ${avatarSm(pr.author, pr.authorAvatarUrl, isDraft)}
+          <span style="font-size:12px;color:${authorColor};font-weight:500;font-family:var(--font-mono)">${escHtml(pr.author)}</span>
+          <span style="font-size:11px;color:${metaColor};font-weight:400">·</span>
+          <span style="font-size:11px;color:${metaColor};font-weight:400">${escHtml(pr.updatedAt)}</span>
           ${diffChip}
           ${authorChip}${agingChip}
         </div>
-        ${pr.jiraSummary ? `<div style="font-size:12.5px;color:var(--ink-muted);line-height:1.45;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${pr.jiraSummary}</div>` : ""}
+        ${pr.jiraSummary ? `<div style="font-size:12.5px;color:${descColor};line-height:1.45;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${pr.jiraSummary}</div>` : ""}
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;padding-top:2px">
-        ${renderReviewBadges(pr, viewerLogin)}
+        ${renderReviewBadges(pr, viewerLogin, isDraft)}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;padding-top:2px">
         ${pipelineChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${pipelineChip}</div>` : ""}
@@ -463,7 +485,7 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
           <button class="icon-btn" data-pr-link="${pr.url}" type="button">${SVG.ext}<span>PR</span></button>
           ${jiraBtn}
         </div>
-        ${pr.isDraft && pr.nodeId ? `<button class="icon-btn" data-promote-draft="${escHtml(pr.repo)}/${pr.id}" type="button" style="width:100%;justify-content:center">${SVG.promote}<span>Promote</span></button>` : ""}
+        ${isDraft && pr.nodeId ? `<button class="icon-btn" data-promote-draft="${escHtml(pr.repo)}/${pr.id}" type="button" style="width:100%;justify-content:center">${SVG.promote}<span>Promote</span></button>` : ""}
       </div>
     </div>
   `;
@@ -517,6 +539,14 @@ export function renderListTable(prs: PullRequestSummary[]) {
       const dateHtml = group.releaseDate
         ? `<span class="release-group-sep"></span><span class="release-group-date">${group.releaseDate}</span>`
         : "";
+      const projectKeys = Array.from(new Set(group.prs.map((pr) => pr.jiraBoard).filter(Boolean)));
+      const releaseProjectAttr = projectKeys.length === 1
+        ? ` data-release-project="${escHtml(projectKeys[0]!)}"`
+        : "";
+      const releaseRepos = Array.from(new Set(group.prs.map((pr) => pr.repo).filter(Boolean)));
+      const releaseReposAttr = releaseRepos.length > 0
+        ? ` data-release-repos="${escHtml(JSON.stringify(releaseRepos))}"`
+        : "";
       return `
         <section class="release-group">
           <div class="release-group-header">
@@ -525,6 +555,7 @@ export function renderListTable(prs: PullRequestSummary[]) {
             ${dateHtml}
             <span class="release-group-count">${count} PR${count !== 1 ? "s" : ""}</span>
             <div class="release-group-line"></div>
+            ${group.label !== "No release" ? `<button class="rd-trigger" data-release-diff="${escHtml(group.label)}"${releaseProjectAttr}${releaseReposAttr} type="button"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h2l1.5-3 2 6 1.5-3h3"/></svg>Release status</button>` : ""}
           </div>
           ${renderPRListWrap(group.prs, viewerLogin)}
         </section>

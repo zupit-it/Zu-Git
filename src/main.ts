@@ -11,6 +11,7 @@ import {
   openExternal, rerequestReview, persistListFilters,
 } from "./api";
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
+import { openReleaseDiff } from "./release-diff";
 
 window.addEventListener("DOMContentLoaded", () => {
   // ── Settings form ───────────────────────────────────────────────────────────
@@ -186,6 +187,21 @@ window.addEventListener("DOMContentLoaded", () => {
       const prId = promoteButton.dataset.promoteDraft;
       const pr = state.currentDashboard?.prs.find(p => `${p.repo}/${p.id}` === prId);
       if (pr) void openExistingDraftPr(pr, promoteButton);
+      return;
+    }
+
+    const releaseDiffBtn = target.closest<HTMLButtonElement>("[data-release-diff]");
+    if (releaseDiffBtn) {
+      const releaseName = releaseDiffBtn.dataset.releaseDiff;
+      const releaseRepos = releaseDiffBtn.dataset.releaseRepos
+        ? JSON.parse(releaseDiffBtn.dataset.releaseRepos)
+        : undefined;
+      if (releaseName) void openReleaseDiff(
+        releaseName,
+        releaseDiffBtn,
+        releaseDiffBtn.dataset.releaseProject,
+        releaseRepos
+      );
       return;
     }
 

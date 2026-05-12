@@ -31,13 +31,14 @@ export function avatarColor(name: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-export function avatarSm(name: string, avatarUrl?: string): string {
+export function avatarSm(name: string, avatarUrl?: string, mute = false): string {
+  const muteClass = mute ? " avatar--muted" : "";
   if (avatarUrl) {
-    return `<img class="avatar avatar-sm" src="${avatarUrl}" alt="${name}" loading="lazy" />`;
+    return `<img class="avatar avatar-sm${muteClass}" src="${avatarUrl}" alt="${name}" loading="lazy" />`;
   }
   const initial = name.trim().charAt(0).toUpperCase() || "?";
-  const color = avatarColor(name);
-  return `<span class="avatar avatar-sm" style="background:${color}" aria-hidden="true">${initial}</span>`;
+  const color = mute ? "var(--draft-avatar-bg)" : avatarColor(name);
+  return `<span class="avatar avatar-sm${muteClass}" style="background:${color}" aria-hidden="true">${initial}</span>`;
 }
 
 // ── Reviewer load helpers ─────────────────────────────────────────────────────
@@ -113,7 +114,7 @@ export const PRIORITY_RANK: Record<string, number> = {
 
 export const SVG = {
   gitpr: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="3" cy="3" r="1.4"/><circle cx="3" cy="9" r="1.4"/><circle cx="9" cy="9" r="1.4"/><path d="M3 4.4v3.2M9 7.6V6a2 2 0 0 0-2-2H5.5"/><path d="M6.5 2.5L5 4l1.5 1.5"/></svg>`,
-  draft: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="4.5" stroke-dasharray="2 1.8"/><path d="M6 4v2.5L7.5 8"/></svg>`,
+  draft: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="3" cy="3" r="1.3"/><circle cx="3" cy="9" r="1.3"/><circle cx="9" cy="9" r="1.3" stroke-dasharray="1.5 1.2"/><path stroke-linecap="round" d="M3 4.3v3.4" stroke-dasharray="1.5 1.2"/></svg>`,
   clock: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6" cy="6" r="4.5"/><path d="M6 3.5v3L8 8"/></svg>`,
   check: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.2L5 9l5-6"/></svg>`,
   x: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg>`,

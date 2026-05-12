@@ -107,6 +107,8 @@ On each refresh ZuGit issues a single bulk JQL query (`POST /rest/api/3/search/j
 
 If the tenant does not support the `/jql` endpoint (older Jira Server versions), ZuGit falls back to individual `GET /rest/api/3/issue/{key}` calls automatically.
 
+Release diff scope and tag-window rules are documented in [docs/release-diff.md](docs/release-diff.md).
+
 ### Checklist (Herocoders Smart Checklist for Jira)
 
 ZuGit reads and writes acceptance-criteria checklists managed by the **Herocoders Smart Checklist for Jira** plugin.

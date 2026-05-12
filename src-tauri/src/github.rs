@@ -1301,3 +1301,152 @@ fn ctx_timestamp(cr: &GqlStatusContext) -> i64 {
         .map(|dt| dt.timestamp_millis())
         .unwrap_or(i64::MIN)
 }
+
+fn tag_ref_timestamp_ms(tag_ref: &serde_json::Value) -> Option<i64> {
+    let target = &tag_ref["target"];
+    target["committedDate"]
+        .as_str()
+        .or_else(|| target["tagger"]["date"].as_str())
+        .or_else(|| target["target"]["committedDate"].as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.timestamp_millis())
+}
+
+// ── Release diff: merged PRs since last release ───────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergedPrRecord {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub merged_at: String,
+    pub head_ref: String,
+    pub author: String,
+    pub author_avatar_url: Option<String>,
+    pub jira_keys: Vec<String>,
+}
+
+pub async fn fetch_merged_prs_since_last_release(
+    repos: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Vec<MergedPrRecord> {
+    if repos.is_empty() {
+        return vec![];
+    }
+
+    // Build one batched GraphQL query across all repos.
+    let mut q = String::from("{");
+    for (i, repo) in repos.iter().enumerate() {
+        if let Some((owner, name)) = repo.split_once('/') {
+            q.push_str(&format!(
+                r#" r_{i}: repository(owner:"{owner}", name:"{name}") {{
+                  refs(refPrefix:"refs/tags/", first: 20, orderBy: {{field: TAG_COMMIT_DATE, direction: DESC}}) {{
+                    nodes {{
+                      name
+                      target {{
+                        ... on Commit {{ committedDate }}
+                        ... on Tag {{
+                          tagger {{ date }}
+                          target {{ ... on Commit {{ committedDate }} }}
+                        }}
+                      }}
+                    }}
+                  }}
+                  pullRequests(states: [MERGED], first: 100, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
+                    nodes {{ number title body headRefName mergedAt url author {{ login avatarUrl }} }}
+                  }}
+                }}"#
+            ));
+        }
+    }
+    q.push('}');
+
+    let data = match graphql_request_raw(&q, settings, client).await {
+        Some(d) => d,
+        None => return vec![],
+    };
+
+    let mut result: Vec<MergedPrRecord> = vec![];
+
+    for (i, repo) in repos.iter().enumerate() {
+        let repo_node = &data[&format!("r_{i}")];
+        if repo_node.is_null() {
+            continue;
+        }
+
+        // For beta/major release diff, compare the code that landed on main
+        // after the latest Git tag. GitHub Releases are not reliable here:
+        // repos can have stale/missing Release objects while tags are current.
+        // Minor releases have branch/cherry-pick semantics and are intentionally
+        // not modeled here yet.
+        let refs = repo_node["refs"]["nodes"].as_array();
+        let latest_tag_ref = refs.and_then(|arr| arr.first());
+        let latest_tag_ms: i64 = latest_tag_ref
+            .and_then(tag_ref_timestamp_ms)
+            .unwrap_or(0); // 0 = epoch, i.e. include all PRs if no tag exists
+        let latest_tag = latest_tag_ref
+            .and_then(|r| r["name"].as_str())
+            .unwrap_or("beginning");
+
+        eprintln!(
+            "[zugit][github] release_diff repo={} range_latest_git_tag='{}'",
+            repo, latest_tag
+        );
+
+        let prs = match repo_node["pullRequests"]["nodes"].as_array() {
+            Some(a) => a,
+            None => continue,
+        };
+
+        let (owner, repo_name) = match repo.split_once('/') {
+            Some(p) => (p.0, p.1),
+            None => continue,
+        };
+        let _ = (owner, repo_name); // suppress unused warning
+
+        for pr in prs {
+            let merged_at = match pr["mergedAt"].as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            let merged_ms = chrono::DateTime::parse_from_rfc3339(merged_at)
+                .ok()
+                .map(|dt| dt.timestamp_millis())
+                .unwrap_or(0);
+            if merged_ms <= latest_tag_ms {
+                continue;
+            }
+
+            let title = pr["title"].as_str().unwrap_or("").to_string();
+            let body = pr["body"].as_str().unwrap_or("").to_string();
+            let head_ref = pr["headRefName"].as_str().unwrap_or("").to_string();
+            let url = pr["url"].as_str().unwrap_or("").to_string();
+            let number = pr["number"].as_u64().unwrap_or(0);
+            let author = pr["author"]["login"].as_str().unwrap_or("").to_string();
+            let author_avatar_url = pr["author"]["avatarUrl"].as_str().map(|s| s.to_string());
+
+            // Extract all Jira keys: scan title first, fall back to headRefName + body.
+            let mut jira_keys = crate::jira::extract_all_jira_keys(&title);
+            if jira_keys.is_empty() {
+                let fallback = format!("{}\n{}", head_ref, body);
+                jira_keys = crate::jira::extract_all_jira_keys(&fallback);
+            }
+            jira_keys.dedup();
+
+            result.push(MergedPrRecord {
+                number,
+                title,
+                url,
+                merged_at: merged_at.to_string(),
+                head_ref,
+                author,
+                author_avatar_url,
+                jira_keys,
+            });
+        }
+    }
+
+    result
+}
