@@ -656,17 +656,23 @@ pub async fn transition_issue(
         "{}/rest/api/3/issue/{}/transitions",
         settings.jira_base_url, issue_key
     );
-    let resp: JiraTransitionsResponse = client
+    let get_resp = client
         .get(&transitions_url)
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
         .map_err(|e| e.to_string())?;
 
+    let get_status = get_resp.status();
+    if !get_status.is_success() {
+        let body = get_resp.text().await.unwrap_or_default();
+        return Err(format!("Failed to fetch transitions for {} ({get_status}): {body}", issue_key));
+    }
+
+    let resp: JiraTransitionsResponse = get_resp.json().await.map_err(|e| e.to_string())?;
+
     let available: Vec<&str> = resp.transitions.iter().map(|t| t.name.as_str()).collect();
+
     let target = transition_name.to_lowercase();
     let transition_id = resp
         .transitions
@@ -674,11 +680,7 @@ pub async fn transition_issue(
         .find(|t| t.name.to_lowercase() == target)
         .map(|t| t.id.clone())
         .ok_or_else(|| {
-            eprintln!(
-                "[zugit][jira] transition_issue {issue_key}: transition '{}' not found in {available:?}",
-                transition_name
-            );
-            format!("Jira transition '{}' not found", transition_name)
+            format!("Jira transition '{}' not found in {:?}", transition_name, available)
         })?;
 
     let post_resp = client
@@ -718,13 +720,6 @@ pub async fn fetch_release_issues(
         format!("fixVersion = \"{}\" OR issueKey in ({})", escaped, keys_list)
     };
 
-    eprintln!(
-        "[zugit][jira] fetch_release_issues release='{}' merged_keys={} jql={}",
-        fix_version,
-        merged_keys.len(),
-        jql
-    );
-
     let search_jql_url = format!("{}/rest/api/3/search/jql", settings.jira_base_url);
     let max_results = 100;
     let first_body = serde_json::json!({
@@ -745,10 +740,6 @@ pub async fn fetch_release_issues(
 
     // Fall back to the older search endpoint if jql endpoint not available.
     if status == 404 || status == 405 || status == 410 {
-        eprintln!(
-            "[zugit][jira] /search/jql unavailable ({}), falling back to /search with startAt pagination",
-            status
-        );
         let mut all = Vec::new();
         let mut start_at = 0;
         loop {
@@ -769,11 +760,6 @@ pub async fn fetch_release_issues(
                 return Err(format!("Jira search failed ({})", resp2.status()));
             }
             let parsed: JiraSearchResponse = resp2.json().await.map_err(|e| e.to_string())?;
-            eprintln!(
-                "[zugit][jira] fetch_release_issues legacy_page start_at={} issues={}",
-                start_at,
-                parsed.issues.len()
-            );
             let count = parsed.issues.len();
             all.extend(parsed.issues.iter().map(map_issue));
             if count < max_results {
@@ -781,7 +767,6 @@ pub async fn fetch_release_issues(
             }
             start_at += max_results;
         }
-        log_release_issue_coverage(fix_version, merged_keys, &all);
         return Ok(all);
     }
 
@@ -791,15 +776,7 @@ pub async fn fetch_release_issues(
 
     let mut all = Vec::new();
     let mut parsed: JiraSearchResponse = resp.json().await.map_err(|e| e.to_string())?;
-    let mut page_index = 0;
     loop {
-        eprintln!(
-            "[zugit][jira] fetch_release_issues page={} issues={} next_page_token_present={} is_last={:?}",
-            page_index,
-            parsed.issues.len(),
-            parsed.next_page_token.is_some(),
-            parsed.is_last
-        );
         all.extend(parsed.issues.iter().map(map_issue));
 
         let Some(next_page_token) = parsed.next_page_token.clone() else {
@@ -809,7 +786,6 @@ pub async fn fetch_release_issues(
             break;
         }
 
-        page_index += 1;
         let body = serde_json::json!({
             "jql": jql,
             "fields": ["summary", "status", "fixVersions", "issuetype"],
@@ -829,36 +805,7 @@ pub async fn fetch_release_issues(
         parsed = resp.json().await.map_err(|e| e.to_string())?;
     }
 
-    log_release_issue_coverage(fix_version, merged_keys, &all);
     Ok(all)
-}
-
-fn log_release_issue_coverage(
-    fix_version: &str,
-    merged_keys: &[String],
-    issues: &[JiraIssueSummary],
-) {
-    let returned: std::collections::HashSet<&str> = issues.iter().map(|i| i.key.as_str()).collect();
-    let missing: Vec<&str> = merged_keys
-        .iter()
-        .map(|k| k.as_str())
-        .filter(|k| !returned.contains(k))
-        .collect();
-    eprintln!(
-        "[zugit][jira] fetch_release_issues release='{}' returned_issues={} missing_merged_keys={:?}",
-        fix_version,
-        issues.len(),
-        missing
-    );
-    for issue in issues {
-        eprintln!(
-            "[zugit][jira] issue key={} status='{}' fix_versions='{}' type='{}'",
-            issue.key,
-            issue.status,
-            issue.release,
-            issue.issue_type
-        );
-    }
 }
 
 /// Paginated response wrapper for `/rest/api/3/project/{key}/version`.
@@ -872,7 +819,6 @@ struct JiraVersionPage {
 
 #[derive(Debug, Deserialize)]
 struct JiraVersionEntry {
-    id: Option<String>,
     name: Option<String>,
     #[serde(rename = "releaseDate")]
     release_date: Option<String>,
@@ -900,10 +846,6 @@ pub async fn fetch_project_versions(
     let max_results: u32 = 50;
 
     loop {
-        eprintln!(
-            "[zugit][jira] fetch_project_versions project={} start_at={} max_results={} status=unreleased url={}",
-            project_key, start_at, max_results, base_url
-        );
         let resp = client
             .get(&base_url)
             .query(&[
@@ -916,60 +858,17 @@ pub async fn fetch_project_versions(
             .await;
 
         let resp = match resp {
-            Ok(r) if r.status().is_success() => {
-                eprintln!(
-                    "[zugit][jira] fetch_project_versions project={} http_status={}",
-                    project_key,
-                    r.status()
-                );
-                r
-            }
-            Ok(r) => {
-                eprintln!(
-                    "[zugit][jira] fetch_project_versions project={} failed http_status={}",
-                    project_key,
-                    r.status()
-                );
-                break;
-            }
-            Err(e) => {
-                eprintln!(
-                    "[zugit][jira] fetch_project_versions project={} request_error={}",
-                    project_key, e
-                );
-                break;
-            }
+            Ok(r) if r.status().is_success() => r,
+            Ok(_) => break,
+            Err(_) => break,
         };
 
         let page: JiraVersionPage = match resp.json().await {
             Ok(p) => p,
-            Err(e) => {
-                eprintln!(
-                    "[zugit][jira] fetch_project_versions project={} parse_error={}",
-                    project_key, e
-                );
-                break;
-            }
+            Err(_) => break,
         };
 
         let is_last = page.is_last || page.values.len() < max_results as usize;
-        eprintln!(
-            "[zugit][jira] fetch_project_versions project={} page_values={} is_last={}",
-            project_key,
-            page.values.len(),
-            is_last
-        );
-        for version in &page.values {
-            eprintln!(
-                "[zugit][jira] version project={} id={:?} name={:?} release_date={:?} released={} archived={}",
-                project_key,
-                version.id,
-                version.name,
-                version.release_date,
-                version.released,
-                version.archived
-            );
-        }
         all.extend(page.values);
         if is_last { break; }
         start_at += max_results;
@@ -987,11 +886,6 @@ pub async fn fetch_project_versions(
         .filter(|v| !v.released && !v.archived)
         .filter_map(|v| v.name)
         .collect();
-
-    eprintln!(
-        "[zugit][jira] fetch_project_versions project={} returned_unreleased_unarchived={:?}",
-        project_key, versions
-    );
 
     versions
 }

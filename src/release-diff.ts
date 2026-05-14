@@ -565,8 +565,6 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
   async function handleMoveSelectedToDeveloped() {
     const keys = [...st.selected];
     if (keys.length === 0) return;
-    if (!window.confirm(`Move ${keys.length} issue${keys.length !== 1 ? "s" : ""} to Developed in Jira?`)) return;
-
     showLoading();
     try {
       await Promise.all(keys.map(jiraKey => invoke("move_to_developed", { jiraKey })));
@@ -648,8 +646,6 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
     const keys = [...st.selected];
     if (keys.length === 0) return;
     const target = st.targetVersion;
-    if (!window.confirm(`Move ${keys.length} issue${keys.length !== 1 ? "s" : ""} to "${target}"?`)) return;
-
     showLoading();
     try {
       await invoke("move_jira_fix_versions", { keys, targetVersion: target });
@@ -665,8 +661,6 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
   async function handleDrop() {
     const keys = [...st.selected];
     if (keys.length === 0) return;
-    if (!window.confirm(`Drop ${keys.length} issue${keys.length !== 1 ? "s" : ""} from release "${st.releaseName}"?`)) return;
-
     showLoading();
     try {
       await invoke("drop_jira_fix_versions", { keys });

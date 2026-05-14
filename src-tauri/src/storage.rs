@@ -70,7 +70,7 @@ fn default_notifications_enabled() -> bool {
     true
 }
 fn default_merge_transition() -> String {
-    "MERGE REQUEST".to_string()
+    "Merge Request".to_string()
 }
 
 fn token_fallback_value(token: &str) -> Option<String> {

@@ -36,7 +36,7 @@ impl Default for AppSettings {
             jira_repo_boards: HashMap::new(),
             notifications_enabled: true,
             color_blind_mode: false,
-            jira_merge_transition: "MERGE REQUEST".to_string(),
+            jira_merge_transition: "Merge Request".to_string(),
         }
     }
 }
@@ -340,7 +340,7 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         color_blind_mode: values.color_blind_mode.trim() == "on",
         jira_merge_transition: {
             let t = values.jira_merge_transition.trim().to_string();
-            if t.is_empty() { "MERGE REQUEST".to_string() } else { t }
+            if t.is_empty() { "Merge Request".to_string() } else { t }
         },
     }
 }

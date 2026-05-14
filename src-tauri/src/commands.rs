@@ -380,11 +380,6 @@ pub async fn fetch_release_diff(
         .filter(|repos| !repos.is_empty())
         .unwrap_or_else(|| settings.github_repos.clone());
 
-    eprintln!(
-        "[zugit][release-diff] release='{}' github_repos={:?}",
-        release_name, release_repos
-    );
-
     // RT1 — one batched GitHub GraphQL query for tag-bounded merged PRs.
     let merged_prs = crate::github::fetch_merged_prs_since_last_release(
         &release_repos,
@@ -420,15 +415,6 @@ pub async fn fetch_release_diff(
     )
     .await?;
 
-    eprintln!(
-        "[zugit][release-diff] release='{}' requested_project={:?} merged_prs={} merged_keys={} jira_issues={}",
-        release_name,
-        project_key,
-        merged_prs.len(),
-        merged_keys.len(),
-        jira_issues.len()
-    );
-
     // Derive a project key from the first Jira key found (e.g. "PENT-123" → "PENT")
     // only when the UI cannot provide the project from the release group.
     let derived_project_key = jira_issues
@@ -442,11 +428,6 @@ pub async fn fetch_release_diff(
     let project_key = project_key
         .filter(|k| !k.trim().is_empty())
         .or(derived_project_key);
-
-    eprintln!(
-        "[zugit][release-diff] release='{}' selected_project={:?}",
-        release_name, project_key
-    );
 
     // RT3 — Jira: all unreleased versions for the move dropdown, sorted by
     // release date ascending (undated ones go last). The current release is
@@ -595,21 +576,6 @@ pub async fn fetch_release_diff(
     done.sort_by(|a, b| a.key.cmp(&b.key));
     missing.sort_by(|a, b| a.key.cmp(&b.key));
     extra.sort_by(|a, b| a.key.cmp(&b.key));
-
-    // ── Extra diagnostic log ──────────────────────────────────────────────────
-    if !extra.is_empty() {
-        eprintln!("[release-diff] {} extra item(s) for {}:", extra.len(), release_name);
-        for item in &extra {
-            let pr = merged_map.get(&item.key);
-            let branch = pr.map(|p| p.head_ref.as_str()).unwrap_or("—");
-            let merged_at = pr.map(|p| &p.merged_at[..p.merged_at.len().min(10)]).unwrap_or("—");
-            let fix_version = if item.fix_version.is_empty() { "Unscheduled" } else { &item.fix_version };
-            eprintln!(
-                "  {} | branch: {} | fix_version: {} | merged: {}",
-                item.key, branch, fix_version, merged_at
-            );
-        }
-    }
 
     let repo = release_repos.join(" · ");
     let synced_at = "just now".to_string();

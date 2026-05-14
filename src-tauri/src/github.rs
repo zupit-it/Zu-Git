@@ -1388,14 +1388,9 @@ pub async fn fetch_merged_prs_since_last_release(
         let latest_tag_ms: i64 = latest_tag_ref
             .and_then(tag_ref_timestamp_ms)
             .unwrap_or(0); // 0 = epoch, i.e. include all PRs if no tag exists
-        let latest_tag = latest_tag_ref
+        let _latest_tag = latest_tag_ref
             .and_then(|r| r["name"].as_str())
             .unwrap_or("beginning");
-
-        eprintln!(
-            "[zugit][github] release_diff repo={} range_latest_git_tag='{}'",
-            repo, latest_tag
-        );
 
         let prs = match repo_node["pullRequests"]["nodes"].as_array() {
             Some(a) => a,
