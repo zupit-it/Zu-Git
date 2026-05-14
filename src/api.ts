@@ -211,7 +211,7 @@ export async function ensureNotificationPermission() {
 // ── Daily maintenance (cache invalidation + update check) ─────────────────────
 
 const DAILY_MAINTENANCE_KEY = "zugit:lastDailyMaintenance";
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 12 * 60 * 60 * 1000;
 
 async function runDailyMaintenance() {
   await Promise.all([
