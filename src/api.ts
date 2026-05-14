@@ -186,7 +186,7 @@ export async function bootstrap() {
   }
 
   void refreshDashboard("auto");
-  void checkForUpdate();
+  startDailyMaintenance();
 }
 
 // ── Notifications permission ──────────────────────────────────────────────────
@@ -206,6 +206,25 @@ export async function ensureNotificationPermission() {
   } catch {
     // Silently ignore — some platforms (older Windows) don't implement the permission API.
   }
+}
+
+// ── Daily maintenance (cache invalidation + update check) ─────────────────────
+
+const DAILY_MAINTENANCE_KEY = "zugit:lastDailyMaintenance";
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+async function runDailyMaintenance() {
+  await Promise.all([
+    invoke("invalidate_jira_cache").catch(() => {}),
+    checkForUpdate(),
+  ]);
+  localStorage.setItem(DAILY_MAINTENANCE_KEY, Date.now().toString());
+}
+
+export function startDailyMaintenance() {
+  const last = Number(localStorage.getItem(DAILY_MAINTENANCE_KEY) ?? "0");
+  if (Date.now() - last >= ONE_DAY_MS) void runDailyMaintenance();
+  window.setInterval(() => void runDailyMaintenance(), ONE_DAY_MS);
 }
 
 // ── Update check ──────────────────────────────────────────────────────────────

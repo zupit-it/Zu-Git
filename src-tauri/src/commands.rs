@@ -217,6 +217,12 @@ pub async fn create_pull_request(
 // ── Auto-update ───────────────────────────────────────────────────────────────
 
 #[tauri::command]
+pub async fn invalidate_jira_cache(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.jira_cache.lock().clear();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
     use tauri_plugin_updater::UpdaterExt;
     let update = app
@@ -375,6 +381,9 @@ pub async fn fetch_release_diff(
     if !crate::models::settings_ready_for_jira(&settings) {
         return Err("Jira not configured".into());
     }
+
+    // Always fetch fresh Jira data — issue fields (e.g. fixVersions) may have changed since last call.
+    state.jira_cache.lock().clear();
 
     let release_repos = repos
         .filter(|repos| !repos.is_empty())

@@ -79,6 +79,7 @@ pub fn run() {
             commands::show_native_notification,
             commands::save_list_filters,
             commands::request_review,
+            commands::invalidate_jira_cache,
             commands::check_for_update,
             commands::install_update,
             commands::get_draft_pr_info,
