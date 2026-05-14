@@ -89,12 +89,18 @@ function buildReleaseNotes(done: ReleaseDiffItem[]): string {
   const lines: string[] = [];
   if (power.length > 0) {
     lines.push("⚡ *POWER*:");
-    for (const item of power) lines.push(`• \`${item.key}\` ${cleanTitle(item.summary)}`);
+    for (const item of power) {
+      const preview = item.status.toLowerCase() !== "verified" ? " `PREVIEW`" : "";
+      lines.push(`• \`${item.key}\`${preview} ${cleanTitle(item.summary)}`);
+    }
   }
   if (bugs.length > 0) {
     if (lines.length > 0) lines.push("");
     lines.push("🐛 *BUG*:");
-    for (const item of bugs) lines.push(`• \`${item.key}\` ${cleanTitle(item.summary)}`);
+    for (const item of bugs) {
+      const preview = item.status.toLowerCase() !== "verified" ? " `PREVIEW`" : "";
+      lines.push(`• \`${item.key}\`${preview} ${cleanTitle(item.summary)}`);
+    }
   }
   return lines.join("\n");
 }
