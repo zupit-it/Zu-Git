@@ -49,8 +49,6 @@ struct PersistedSettings {
     color_blind_mode: bool,
     #[serde(default = "default_merge_transition")]
     jira_merge_transition: String,
-    #[serde(default = "default_rejected_status")]
-    jira_rejected_status: String,
     // Legacy/fallback field. New fallback writes are only produced when they can
     // be protected by the platform (currently DPAPI on Windows).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,10 +71,6 @@ fn default_notifications_enabled() -> bool {
 }
 fn default_merge_transition() -> String {
     "MERGE REQUEST".to_string()
-}
-
-fn default_rejected_status() -> String {
-    "Rejected".to_string()
 }
 
 fn token_fallback_value(token: &str) -> Option<String> {
@@ -200,7 +194,6 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
             String::new()
         },
         jira_merge_transition: persisted.jira_merge_transition,
-        jira_rejected_status: persisted.jira_rejected_status,
     };
 
     Ok(normalize_settings(&form))
@@ -237,7 +230,6 @@ pub async fn save_settings(
         notifications_enabled: normalized.notifications_enabled,
         color_blind_mode: normalized.color_blind_mode,
         jira_merge_transition: normalized.jira_merge_transition.clone(),
-        jira_rejected_status: normalized.jira_rejected_status.clone(),
         github_token: github_token_fallback,
         jira_token: jira_token_fallback,
     };

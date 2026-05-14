@@ -193,10 +193,18 @@ export async function bootstrap() {
 
 export async function ensureNotificationPermission() {
   try {
-    const granted = await isPermissionGranted();
-    if (!granted) await requestPermission();
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      const result = await requestPermission();
+      granted = result === "granted";
+    }
+    if (!granted) {
+      // OS denied notifications — disable in state so we stop trying on every refresh.
+      state.notificationsEnabled = false;
+      setStatus("Notification permission denied. Enable notifications for ZuGit in system settings.", "danger");
+    }
   } catch {
-    // Silently ignore — Windows doesn't need this and won't throw, but just in case.
+    // Silently ignore — some platforms (older Windows) don't implement the permission API.
   }
 }
 

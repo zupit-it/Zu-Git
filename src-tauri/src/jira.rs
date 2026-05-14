@@ -641,6 +641,17 @@ pub async fn complete_jira_story(
     }
 
     // 2. Transition the issue.
+    transition_issue(issue_key, &settings.jira_merge_transition.clone(), settings, client).await
+}
+
+/// Transitions a Jira issue to the given workflow state by name.
+/// No checklist is touched — use `complete_jira_story` when checklist marking is needed.
+pub async fn transition_issue(
+    issue_key: &str,
+    transition_name: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<(), String> {
     let transitions_url = format!(
         "{}/rest/api/3/issue/{}/transitions",
         settings.jira_base_url, issue_key
@@ -656,7 +667,7 @@ pub async fn complete_jira_story(
         .map_err(|e| e.to_string())?;
 
     let available: Vec<&str> = resp.transitions.iter().map(|t| t.name.as_str()).collect();
-    let target = settings.jira_merge_transition.to_lowercase();
+    let target = transition_name.to_lowercase();
     let transition_id = resp
         .transitions
         .iter()
@@ -664,44 +675,26 @@ pub async fn complete_jira_story(
         .map(|t| t.id.clone())
         .ok_or_else(|| {
             eprintln!(
-                "[zugit][jira] complete_jira_story {issue_key}: transition '{}' not found in {available:?}",
-                settings.jira_merge_transition
+                "[zugit][jira] transition_issue {issue_key}: transition '{}' not found in {available:?}",
+                transition_name
             );
-            format!("Jira transition '{}' not found", settings.jira_merge_transition)
+            format!("Jira transition '{}' not found", transition_name)
         })?;
 
-    // Herocoders validates the checklist asynchronously after our PUT.
-    // Wait before the first attempt, then retry once more if still blocked.
-    let delays_ms = [1000u64, 5000];
-    let mut last_err = String::new();
+    let post_resp = client
+        .post(&transitions_url)
+        .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+        .json(&TransitionPayload { transition: TransitionId { id: transition_id } })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    for &delay_ms in delays_ms.iter() {
-        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-
-        let post_resp = client
-            .post(&transitions_url)
-            .basic_auth(&settings.jira_email, Some(&settings.jira_token))
-            .json(&TransitionPayload { transition: TransitionId { id: transition_id.clone() } })
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let status = post_resp.status();
-        let body = post_resp.text().await.unwrap_or_default();
-
-        if status.is_success() {
-            return Ok(());
-        }
-
-        // Only retry if the error is from the checklist validator.
-        let is_checklist_block = body.to_lowercase().contains("checklist");
-        last_err = format!("Jira transition '{}' failed ({status}): {body}", settings.jira_merge_transition);
-        if !is_checklist_block {
-            break;
-        }
+    let status = post_resp.status();
+    if status.is_success() {
+        return Ok(());
     }
-
-    Err(last_err)
+    let body = post_resp.text().await.unwrap_or_default();
+    Err(format!("Jira transition '{}' failed ({status}): {body}", transition_name))
 }
 
 // ── Release diff helpers ──────────────────────────────────────────────────────

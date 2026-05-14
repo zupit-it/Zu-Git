@@ -19,7 +19,6 @@ pub struct AppSettings {
     pub notifications_enabled: bool,
     pub color_blind_mode: bool,
     pub jira_merge_transition: String,
-    pub jira_rejected_status: String,
 }
 
 impl Default for AppSettings {
@@ -38,7 +37,6 @@ impl Default for AppSettings {
             notifications_enabled: true,
             color_blind_mode: false,
             jira_merge_transition: "MERGE REQUEST".to_string(),
-            jira_rejected_status: "Rejected".to_string(),
         }
     }
 }
@@ -67,7 +65,6 @@ pub struct SettingsFormValues {
     pub notifications_enabled: String, // "on" | ""
     pub color_blind_mode: String,      // "on" | ""
     pub jira_merge_transition: String,
-    pub jira_rejected_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -345,10 +342,6 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
             let t = values.jira_merge_transition.trim().to_string();
             if t.is_empty() { "MERGE REQUEST".to_string() } else { t }
         },
-        jira_rejected_status: {
-            let t = values.jira_rejected_status.trim().to_string();
-            if t.is_empty() { "Rejected".to_string() } else { t }
-        },
     }
 }
 
@@ -380,7 +373,6 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
             String::new()
         },
         jira_merge_transition: settings.jira_merge_transition.clone(),
-        jira_rejected_status: settings.jira_rejected_status.clone(),
     }
 }
 

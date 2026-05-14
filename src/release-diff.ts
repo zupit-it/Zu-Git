@@ -56,6 +56,7 @@ const I = {
   info:    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v4M8 5h.01"/></svg>`,
   arrow:   `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h8M7 3l3 3-3 3"/></svg>`,
   close:   `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>`,
+  bug:     `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5a3 3 0 0 1-3-3V5a3 3 0 0 1 6 0v1.5a3 3 0 0 1-3 3Z"/><path d="M3.5 3.5 2 2M8.5 3.5 10 2M3 6H1M9 6h2M4 9.2 2.5 10.5M8 9.2l1.5 1.3"/></svg>`,
 };
 
 // ── Status chip styling ───────────────────────────────────────────────────────
@@ -145,17 +146,18 @@ function renderFlagChip(flag: string): string {
 }
 
 function renderItem(item: ReleaseDiffItem, kind: "done" | "missing" | "extra", selected: boolean, currentVersion: string): string {
-  const selectable = kind !== "done";
+  const selectable = kind !== "done" || item.status.toLowerCase() === "merge request";
   const cbCol = selectable
     ? `<div class="rd-item-cb-col">
         <label class="rd-cb-wrap">
-          <span class="rd-cb-box ${selected ? "rd-cb-box--checked" : ""}" data-rd-cbbox="${escHtml(item.key)}">${selected ? I.check : ""}</span>
-          <input class="rd-cb-real" type="checkbox" data-rd-key="${escHtml(item.key)}" ${selected ? "checked" : ""} />
+          <span class="rd-cb-box ${selected ? "rd-cb-box--checked" : ""}" data-rd-cbbox="${escHtml(item.key)}" data-rd-kind="${kind}">${selected ? I.check : ""}</span>
+          <input class="rd-cb-real" type="checkbox" data-rd-key="${escHtml(item.key)}" data-rd-kind="${kind}" ${selected ? "checked" : ""} />
         </label>
        </div>`
     : `<div class="rd-item-cb-col"></div>`;
 
-  const keyChip = `<span class="rd-key-chip">${escHtml(item.key)}</span>`;
+  const isBug = item.issueType.toLowerCase() === "bug";
+  const keyChip = `<span class="rd-key-chip">${isBug ? `<span class="rd-bug-icon" title="Bug">${I.bug}</span>` : ""}${escHtml(item.key)}</span>`;
 
   const metaBranch = item.branch
     ? `<span class="rd-dot-sep">·</span>
@@ -200,6 +202,7 @@ function renderItem(item: ReleaseDiffItem, kind: "done" | "missing" | "extra", s
     ${divergenceCol}
     ${statusCol}
     ${prCol}
+    <div class="rd-action-col"></div>
   </div>`;
 }
 
@@ -212,12 +215,14 @@ const SECTION_CFG: Record<string, SectionCfg> = {
 
 function renderSection(kind: "done" | "missing" | "extra", items: ReleaseDiffItem[], selected: Set<string>, currentVersion: string): string {
   const cfg = SECTION_CFG[kind];
-  const selectable = kind !== "done";
-  const selectedCount = items.filter(it => selected.has(it.key)).length;
-  const allSelected = items.length > 0 && selectedCount === items.length;
+  const selectableItems = kind === "done"
+    ? items.filter(it => it.status.toLowerCase() === "merge request")
+    : items;
+  const selectedCount = selectableItems.filter(it => selected.has(it.key)).length;
+  const allSelected = selectableItems.length > 0 && selectedCount === selectableItems.length;
   const someSelected = selectedCount > 0 && !allSelected;
 
-  const selectAllBtn = selectable && items.length > 0
+  const selectAllBtn = selectableItems.length > 0
     ? `<button class="rd-select-all" data-rd-select-all="${kind}">
         <span class="rd-select-all-box ${allSelected ? "rd-select-all-box--checked" : someSelected ? "rd-select-all-box--indeterminate" : ""}">
           ${allSelected ? I.check : someSelected ? `<span style="width:6px;height:1.5px;background:#4F46E5;display:block"></span>` : ""}
@@ -308,7 +313,7 @@ function renderFooter(st: ModalState, counts: ReturnType<typeof computeCounts>):
   const { selected, result, targetVersion, verDropOpen } = st;
   const selectedIds = [...selected];
   if (selectedIds.length === 0) {
-    return `<span class="rd-footer-hint">${I.info} Select <strong>Missing</strong> or <strong>Extra</strong> items to defer, adopt, or drop them from this release.</span>
+    return `<span class="rd-footer-hint">${I.info} Select <strong>Done</strong> items to move them to Developed, or <strong>Missing</strong>/<strong>Extra</strong> items to defer, adopt, or drop them.</span>
             <div class="rd-spacer"></div>
             <button class="rd-close-btn" data-rd-close>Close</button>`;
   }
@@ -319,6 +324,17 @@ function renderFooter(st: ModalState, counts: ReturnType<typeof computeCounts>):
     result.missing.includes(it) ? "missing" : result.extra.includes(it) ? "extra" : "done"
   ));
   const onlyKind = kinds.size === 1 ? [...kinds][0] : "mixed";
+  if (onlyKind === "done") {
+    return `
+      <span class="rd-sel-count">${I.check} ${selectedIds.length} selected</span>
+      <span class="rd-sel-from">from <strong>done</strong></span>
+      <div class="rd-spacer"></div>
+      <span class="rd-action-label">Move Jira status to</span>
+      <button class="rd-apply-btn" data-rd-developed>Developed ${I.arrow}</button>
+      <button class="rd-clear-btn" title="Clear selection" data-rd-clear>${I.close}</button>
+    `;
+  }
+
   const primary = onlyKind === "missing" ? "Defer to" : onlyKind === "extra" ? "Adopt to" : "Move to";
 
   const fromLabel = onlyKind !== "mixed"
@@ -401,8 +417,25 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
 
       <!-- Footer -->
       <div class="rd-footer" data-rd-footer>${renderFooter(st, counts)}</div>
+
+      <!-- Loading overlay -->
+      <div class="rd-loading-overlay" data-rd-loading hidden>
+        <div class="rd-spinner"></div>
+      </div>
     </div>
   `;
+
+  // ── Loading overlay ───────────────────────────────────────────────────────
+
+  function showLoading() {
+    const el = overlay.querySelector<HTMLElement>("[data-rd-loading]");
+    if (el) el.hidden = false;
+  }
+
+  function hideLoading() {
+    const el = overlay.querySelector<HTMLElement>("[data-rd-loading]");
+    if (el) el.hidden = true;
+  }
 
   // ── State update helpers ──────────────────────────────────────────────────
 
@@ -460,7 +493,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
     // Checkbox toggle (item)
     const cbReal = target.closest<HTMLInputElement>("[data-rd-key]");
     if (cbReal?.dataset.rdKey) {
-      toggleSelected(cbReal.dataset.rdKey);
+      toggleSelected(cbReal.dataset.rdKey, cbReal.dataset.rdKind as "done" | "missing" | "extra" | undefined);
       return;
     }
 
@@ -468,10 +501,13 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
     const selAllBtn = target.closest<HTMLElement>("[data-rd-select-all]");
     if (selAllBtn?.dataset.rdSelectAll) {
       const sectionKind = selAllBtn.dataset.rdSelectAll as "done" | "missing" | "extra";
-      const items = getItemsByKind(sectionKind);
+      const items = getSelectableItemsByKind(sectionKind);
       const allOn = items.every(it => st.selected.has(it.key));
       if (allOn) items.forEach(it => st.selected.delete(it.key));
-      else items.forEach(it => st.selected.add(it.key));
+      else {
+        enforceSelectionMode(sectionKind);
+        items.forEach(it => st.selected.add(it.key));
+      }
       rerender(); return;
     }
 
@@ -511,6 +547,11 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
       void handleApply(); return;
     }
 
+    // Move Done selection to Developed
+    if (target.closest("[data-rd-developed]")) {
+      void handleMoveSelectedToDeveloped(); return;
+    }
+
     // PR link
     const prLink = target.closest<HTMLElement>("[data-pr-link]");
     if (prLink?.dataset.prLink) {
@@ -518,11 +559,41 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
       invoke("open_external", { url: prLink.dataset.prLink }).catch(console.error);
       return;
     }
+
   });
+
+  async function handleMoveSelectedToDeveloped() {
+    const keys = [...st.selected];
+    if (keys.length === 0) return;
+    if (!window.confirm(`Move ${keys.length} issue${keys.length !== 1 ? "s" : ""} to Developed in Jira?`)) return;
+
+    showLoading();
+    try {
+      await Promise.all(keys.map(jiraKey => invoke("move_to_developed", { jiraKey })));
+      await refreshDiff();
+    } catch (err) {
+      alert(`Error: ${String(err)}`);
+      hideLoading();
+    }
+  }
 
   // ── Toggle selected ───────────────────────────────────────────────────────
 
-  function toggleSelected(key: string) {
+  function enforceSelectionMode(kind: "done" | "missing" | "extra") {
+    const doneKeys = new Set(st.result.done.map(it => it.key));
+    if (kind === "done") {
+      [...st.selected].forEach(key => {
+        if (!doneKeys.has(key)) st.selected.delete(key);
+      });
+    } else {
+      [...st.selected].forEach(key => {
+        if (doneKeys.has(key)) st.selected.delete(key);
+      });
+    }
+  }
+
+  function toggleSelected(key: string, kind?: "done" | "missing" | "extra") {
+    if (kind) enforceSelectionMode(kind);
     if (st.selected.has(key)) st.selected.delete(key);
     else st.selected.add(key);
     rerender();
@@ -538,6 +609,13 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
       if (kind === "extra")   return flagged.filter(it => result.extra.includes(it));
     }
     return result[kind];
+  }
+
+  function getSelectableItemsByKind(kind: "done" | "missing" | "extra"): ReleaseDiffItem[] {
+    const items = getItemsByKind(kind);
+    return kind === "done"
+      ? items.filter(it => it.status.toLowerCase() === "merge request")
+      : items;
   }
 
   // ── Notes panel toggle ────────────────────────────────────────────────────
@@ -572,20 +650,13 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
     const target = st.targetVersion;
     if (!window.confirm(`Move ${keys.length} issue${keys.length !== 1 ? "s" : ""} to "${target}"?`)) return;
 
-    setApplyBtnDisabled(true);
+    showLoading();
     try {
       await invoke("move_jira_fix_versions", { keys, targetVersion: target });
-      // Remove moved items from relevant lists and selection
-      keys.forEach(k => {
-        st.result.missing = st.result.missing.filter(it => it.key !== k);
-        st.result.extra   = st.result.extra.filter(it => it.key !== k);
-        st.selected.delete(k);
-      });
-      rerender();
+      await refreshDiff();
     } catch (err) {
       alert(`Error: ${String(err)}`);
-    } finally {
-      setApplyBtnDisabled(false);
+      hideLoading();
     }
   }
 
@@ -596,27 +667,23 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
     if (keys.length === 0) return;
     if (!window.confirm(`Drop ${keys.length} issue${keys.length !== 1 ? "s" : ""} from release "${st.releaseName}"?`)) return;
 
-    setApplyBtnDisabled(true);
+    showLoading();
     try {
       await invoke("drop_jira_fix_versions", { keys });
-      keys.forEach(k => {
-        st.result.missing = st.result.missing.filter(it => it.key !== k);
-        st.result.extra   = st.result.extra.filter(it => it.key !== k);
-        st.selected.delete(k);
-      });
-      rerender();
+      await refreshDiff();
     } catch (err) {
       alert(`Error: ${String(err)}`);
-    } finally {
-      setApplyBtnDisabled(false);
+      hideLoading();
     }
   }
 
   function setApplyBtnDisabled(disabled: boolean) {
     const applyBtn = overlay.querySelector<HTMLButtonElement>("[data-rd-apply]");
-    const dropBtn  = overlay.querySelector<HTMLButtonElement>("[data-rd-drop]");
+    const dropBtn = overlay.querySelector<HTMLButtonElement>("[data-rd-drop]");
+    const developedBtn = overlay.querySelector<HTMLButtonElement>("[data-rd-developed]");
     if (applyBtn) applyBtn.disabled = disabled;
-    if (dropBtn)  dropBtn.disabled  = disabled;
+    if (dropBtn) dropBtn.disabled = disabled;
+    if (developedBtn) developedBtn.disabled = disabled;
   }
 
   // ── Refresh ───────────────────────────────────────────────────────────────
@@ -630,7 +697,6 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
       });
       st.result = fresh;
       st.selected.clear();
-      // Update synced at in header
       const syncedEl = overlay.querySelector<HTMLElement>(".rd-synced strong");
       if (syncedEl) syncedEl.textContent = fresh.syncedAt;
       const progressEl = overlay.querySelector<HTMLElement>("[data-rd-progress]");
@@ -640,6 +706,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
       console.error("Refresh error:", err);
     } finally {
       if (refreshBtn) refreshBtn.classList.remove("is-loading");
+      hideLoading();
     }
   }
 

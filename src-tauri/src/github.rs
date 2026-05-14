@@ -1336,7 +1336,9 @@ pub async fn fetch_merged_prs_since_last_release(
         return vec![];
     }
 
-    // Build one batched GraphQL query across all repos.
+    // Build one batched GraphQL query across all repos. It fetches:
+    // - latest Git tag for the lower bound
+    // - merged PRs after that tag
     let mut q = String::from("{");
     for (i, repo) in repos.iter().enumerate() {
         if let Some((owner, name)) = repo.split_once('/') {

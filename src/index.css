@@ -2816,6 +2816,7 @@ img.avatar { object-fit: cover; }
 
 /* Modal shell */
 .rd-shell {
+  position: relative;
   width: 1100px;
   max-width: 100%;
   height: min(780px, calc(100vh - 64px));
@@ -2826,6 +2827,33 @@ img.avatar { object-fit: cover; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Loading overlay — covers the entire modal shell */
+.rd-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(1.5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+}
+.rd-loading-overlay[hidden] { display: none; }
+
+.rd-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid #E5E4DF;
+  border-top-color: #4F46E5;
+  border-radius: 50%;
+  animation: rd-spin 0.65s linear infinite;
+}
+
+@keyframes rd-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Header */
@@ -3211,6 +3239,16 @@ img.avatar { object-fit: cover; }
   width: fit-content;
   letter-spacing: -0.2px;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rd-bug-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fail);
+  flex-shrink: 0;
 }
 
 .rd-summary-col {
@@ -3361,6 +3399,12 @@ img.avatar { object-fit: cover; }
 .rd-pr-col {
   display: flex;
   justify-content: flex-end;
+}
+
+.rd-action-col {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .rd-pr-link {

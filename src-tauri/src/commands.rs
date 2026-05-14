@@ -385,7 +385,7 @@ pub async fn fetch_release_diff(
         release_name, release_repos
     );
 
-    // RT1 — merged PRs since last release tag (GitHub GraphQL, batched).
+    // RT1 — one batched GitHub GraphQL query for tag-bounded merged PRs.
     let merged_prs = crate::github::fetch_merged_prs_since_last_release(
         &release_repos,
         &settings,
@@ -463,8 +463,6 @@ pub async fn fetch_release_diff(
 
     // ── Build diff ────────────────────────────────────────────────────────────
 
-    let rejected = settings.jira_rejected_status.to_lowercase();
-
     // Statuses that mean the story is complete even without a detectable PR.
     // (Verified = QA confirmed, Closed/Released/Done = obvious terminal states.)
     let terminal_statuses: &[&str] = &["verified", "closed", "released", "done"];
@@ -504,7 +502,11 @@ pub async fn fetch_release_diff(
             initials,
             avatar_color,
             avatar_url,
-            is_preview: issue.status.to_lowercase() == rejected,
+            // Flagged: merged on main but Jira status is not terminal and not
+            // "developed" — git is ahead of Jira (covers Rejected and similar).
+            is_preview: merged.is_some()
+                && !is_terminal(&issue.status)
+                && issue.status.to_lowercase() != "developed",
             flag,
         }
     };
@@ -620,6 +622,16 @@ pub async fn fetch_release_diff(
         synced_at,
         repo,
     })
+}
+
+#[tauri::command]
+pub async fn move_to_developed(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    jira_key: String,
+) -> Result<(), String> {
+    let settings = storage::load_settings(&app).await?;
+    crate::jira::transition_issue(&jira_key, "Developed", &settings, &state.http_client).await
 }
 
 #[tauri::command]

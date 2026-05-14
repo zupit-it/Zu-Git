@@ -86,6 +86,7 @@ pub fn run() {
             commands::fetch_release_diff,
             commands::move_jira_fix_versions,
             commands::drop_jira_fix_versions,
+            commands::move_to_developed,
             commands::create_pull_request,
             commands::fetch_draft_checklist,
             commands::update_jira_checklist,
