@@ -186,6 +186,7 @@ export async function bootstrap() {
   }
 
   void refreshDashboard("auto");
+  void checkForUpdate();
   startDailyMaintenance();
 }
 
