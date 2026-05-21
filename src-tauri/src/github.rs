@@ -1331,27 +1331,38 @@ pub async fn fetch_merged_prs_since_last_release(
     repos: &[String],
     settings: &AppSettings,
     client: &reqwest::Client,
-) -> Vec<MergedPrRecord> {
+) -> (Vec<MergedPrRecord>, String) {
     if repos.is_empty() {
-        return vec![];
+        return (vec![], String::new());
     }
 
     // Build one batched GraphQL query across all repos. It fetches:
-    // - latest Git tag for the lower bound
+    // - last 100 commits on the default branch (main) to locate the latest tag on that branch
+    // - all recent tags with resolved commit OIDs (for cross-referencing with main's history)
     // - merged PRs after that tag
     let mut q = String::from("{");
     for (i, repo) in repos.iter().enumerate() {
         if let Some((owner, name)) = repo.split_once('/') {
             q.push_str(&format!(
                 r#" r_{i}: repository(owner:"{owner}", name:"{name}") {{
+                  defaultBranchRef {{
+                    target {{
+                      ... on Commit {{
+                        history(first: 100) {{
+                          nodes {{ oid }}
+                        }}
+                      }}
+                    }}
+                  }}
                   refs(refPrefix:"refs/tags/", first: 20, orderBy: {{field: TAG_COMMIT_DATE, direction: DESC}}) {{
                     nodes {{
                       name
                       target {{
+                        oid
                         ... on Commit {{ committedDate }}
                         ... on Tag {{
                           tagger {{ date }}
-                          target {{ ... on Commit {{ committedDate }} }}
+                          target {{ oid ... on Commit {{ committedDate }} }}
                         }}
                       }}
                     }}
@@ -1367,10 +1378,11 @@ pub async fn fetch_merged_prs_since_last_release(
 
     let data = match graphql_request_raw(&q, settings, client).await {
         Some(d) => d,
-        None => return vec![],
+        None => return (vec![], String::new()),
     };
 
     let mut result: Vec<MergedPrRecord> = vec![];
+    let mut since_tags: Vec<String> = vec![];
 
     for (i, repo) in repos.iter().enumerate() {
         let repo_node = &data[&format!("r_{i}")];
@@ -1378,19 +1390,49 @@ pub async fn fetch_merged_prs_since_last_release(
             continue;
         }
 
-        // For beta/major release diff, compare the code that landed on main
-        // after the latest Git tag. GitHub Releases are not reliable here:
-        // repos can have stale/missing Release objects while tags are current.
-        // Minor releases have branch/cherry-pick semantics and are intentionally
-        // not modeled here yet.
-        let refs = repo_node["refs"]["nodes"].as_array();
-        let latest_tag_ref = refs.and_then(|arr| arr.first());
+        // Build a map from resolved commit OID → tag node.
+        // Lightweight tags: commit OID is in target.oid
+        // Annotated tags:   commit OID is in target.target.oid (target itself is a Tag object)
+        let tag_nodes = repo_node["refs"]["nodes"].as_array();
+        let mut oid_to_tag: std::collections::HashMap<&str, &serde_json::Value> =
+            std::collections::HashMap::new();
+        if let Some(tags) = tag_nodes {
+            for tag in tags {
+                let commit_oid = tag["target"]["target"]["oid"]
+                    .as_str()
+                    .or_else(|| tag["target"]["oid"].as_str());
+                if let Some(oid) = commit_oid {
+                    oid_to_tag.insert(oid, tag);
+                }
+            }
+        }
+
+        // Walk main's commit history and find the most recent commit that has a tag.
+        // This ensures we only consider tags reachable from the default branch.
+        let main_history = repo_node["defaultBranchRef"]["target"]["history"]["nodes"]
+            .as_array();
+        let latest_tag_ref: Option<&serde_json::Value> =
+            main_history
+                .and_then(|commits| {
+                    commits.iter().find(|c| {
+                        c["oid"]
+                            .as_str()
+                            .map(|oid| oid_to_tag.contains_key(oid))
+                            .unwrap_or(false)
+                    })
+                })
+                .and_then(|c| c["oid"].as_str())
+                .and_then(|oid| oid_to_tag.get(oid).copied());
+
         let latest_tag_ms: i64 = latest_tag_ref
             .and_then(tag_ref_timestamp_ms)
             .unwrap_or(0); // 0 = epoch, i.e. include all PRs if no tag exists
-        let _latest_tag = latest_tag_ref
+        let latest_tag = latest_tag_ref
             .and_then(|r| r["name"].as_str())
             .unwrap_or("beginning");
+        if latest_tag != "beginning" {
+            since_tags.push(latest_tag.to_string());
+        }
 
         let prs = match repo_node["pullRequests"]["nodes"].as_array() {
             Some(a) => a,
@@ -1445,5 +1487,6 @@ pub async fn fetch_merged_prs_since_last_release(
         }
     }
 
-    result
+    let since_tag = since_tags.join(" · ");
+    (result, since_tag)
 }

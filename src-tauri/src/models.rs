@@ -20,6 +20,10 @@ pub struct AppSettings {
     pub color_blind_mode: bool,
     pub jira_merge_transition: String,
     pub reaction_score_enabled: bool,
+    pub score_rule_reviews_enabled: bool,
+    pub score_rule_changes_requested_enabled: bool,
+    pub score_rule_ci_enabled: bool,
+    pub score_rule_behind_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -39,6 +43,10 @@ impl Default for AppSettings {
             color_blind_mode: false,
             jira_merge_transition: "Merge Request".to_string(),
             reaction_score_enabled: true,
+            score_rule_reviews_enabled: true,
+            score_rule_changes_requested_enabled: true,
+            score_rule_ci_enabled: true,
+            score_rule_behind_enabled: false,
         }
     }
 }
@@ -67,7 +75,11 @@ pub struct SettingsFormValues {
     pub notifications_enabled: String,  // "on" | ""
     pub color_blind_mode: String,       // "on" | ""
     pub jira_merge_transition: String,
-    pub reaction_score_enabled: String, // "on" | ""
+    pub reaction_score_enabled: String,                   // "on" | ""
+    pub score_rule_reviews_enabled: String,               // "on" | ""
+    pub score_rule_changes_requested_enabled: String,     // "on" | ""
+    pub score_rule_ci_enabled: String,                    // "on" | ""
+    pub score_rule_behind_enabled: String,                // "on" | ""
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,6 +359,10 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
             if t.is_empty() { "Merge Request".to_string() } else { t }
         },
         reaction_score_enabled: values.reaction_score_enabled.trim() == "on",
+        score_rule_reviews_enabled: values.score_rule_reviews_enabled.trim() == "on",
+        score_rule_changes_requested_enabled: values.score_rule_changes_requested_enabled.trim() == "on",
+        score_rule_ci_enabled: values.score_rule_ci_enabled.trim() == "on",
+        score_rule_behind_enabled: values.score_rule_behind_enabled.trim() == "on",
     }
 }
 
@@ -378,11 +394,11 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
             String::new()
         },
         jira_merge_transition: settings.jira_merge_transition.clone(),
-        reaction_score_enabled: if settings.reaction_score_enabled {
-            "on".to_string()
-        } else {
-            String::new()
-        },
+        reaction_score_enabled: if settings.reaction_score_enabled { "on".to_string() } else { String::new() },
+        score_rule_reviews_enabled: if settings.score_rule_reviews_enabled { "on".to_string() } else { String::new() },
+        score_rule_changes_requested_enabled: if settings.score_rule_changes_requested_enabled { "on".to_string() } else { String::new() },
+        score_rule_ci_enabled: if settings.score_rule_ci_enabled { "on".to_string() } else { String::new() },
+        score_rule_behind_enabled: if settings.score_rule_behind_enabled { "on".to_string() } else { String::new() },
     }
 }
 
@@ -456,6 +472,7 @@ pub struct ReleaseDiffResult {
     pub available_versions: Vec<String>,
     pub synced_at: String,
     pub repo: String,
+    pub since_tag: String,
 }
 
 // ── Mock data ─────────────────────────────────────────────────────────────────

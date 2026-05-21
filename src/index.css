@@ -1187,6 +1187,10 @@ html, body {
   white-space: nowrap;
 }
 
+.mys__pill--perfect .mys__tone-name {
+  font-size: 10px;
+}
+
 .mys__divider {
   width: 1px;
   height: 20px;
@@ -2788,6 +2792,68 @@ img.avatar { object-fit: cover; }
   width: 100%;
 }
 
+.settings-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.score-rules-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.score-rules-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.score-rules-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  font-size: 11px;
+}
+
+.score-rules-legend-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 1.2fr;
+  gap: 0;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.score-rules-legend-row:last-of-type {
+  border-bottom: none;
+}
+
+.score-rules-legend-header {
+  background: var(--surface-alt);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.score-rules-legend-note {
+  padding: 5px 10px;
+  font-size: 10.5px;
+  color: var(--ink-muted);
+  font-style: italic;
+  background: var(--surface-alt);
+  border-top: 1px solid var(--border);
+}
+
 .settings-form .filter-pill input[type="checkbox"] {
   width: 13px !important;
   height: 13px !important;
@@ -2833,8 +2899,8 @@ img.avatar { object-fit: cover; }
 .settings-save-bar {
   flex-shrink: 0;
   padding: 12px 20px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(8px);
+  background: var(--surface);
+  backdrop-filter: none;
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -3309,6 +3375,21 @@ img.avatar { object-fit: cover; }
   background: #FFFFFF;
   border-bottom: 1px solid #ECEAE2;
   flex-shrink: 0;
+  align-items: center;
+}
+
+.rd-since-tag {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: #85858E;
+  white-space: nowrap;
+}
+
+.rd-since-tag code {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #4A4C55;
+  font-weight: 600;
 }
 
 .rd-tab {

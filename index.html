@@ -245,19 +245,75 @@
                     </label>
                   </div>
                   <div class="settings-field">
-                    <label class="field-label">Reaction Score</label>
-                    <label class="filter-pill">
-                      <input id="reactionScoreEnabled" name="reactionScoreEnabled" type="checkbox" />
-                      <span>Show My Reaction Score in the review bar</span>
-                    </label>
-                  </div>
-                  <div class="settings-field">
                     <label class="field-label" for="internalAuthorMarker">Internal author marker</label>
                     <input id="internalAuthorMarker" name="internalAuthorMarker" type="text" placeholder="-zupit" />
                   </div>
                   <div class="settings-field settings-field-wide">
                     <label class="field-label" for="teamMemberGithubUsers">Team members GitHub usernames</label>
                     <textarea id="teamMemberGithubUsers" name="teamMemberGithubUsers" rows="2" placeholder="team-member-one&#10;team-member-two"></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <!-- My Score card -->
+              <div class="settings-card">
+                <div class="settings-card-header">
+                  <span class="settings-card-icon">
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="5.5"/><path d="M7 4v3.5l2 1.5"/></svg>
+                  </span>
+                  <div>
+                    <div class="settings-card-label">My Score</div>
+                    <div class="settings-card-title">Reaction score settings</div>
+                  </div>
+                </div>
+                <div class="settings-card-grid">
+                  <div class="settings-field">
+                    <label class="field-label">Display</label>
+                    <label class="filter-pill">
+                      <input id="reactionScoreEnabled" name="reactionScoreEnabled" type="checkbox" />
+                      <span>Show My Reaction Score in the review bar</span>
+                    </label>
+                  </div>
+                  <div class="settings-field settings-field-wide">
+                    <label class="field-label">Score rules</label>
+                    <div class="score-rules-panel">
+                      <div class="score-rules-checks">
+                        <label class="filter-pill">
+                          <input id="scoreRuleReviewsEnabled" name="scoreRuleReviewsEnabled" type="checkbox" />
+                          <span>Review requested from me</span>
+                        </label>
+                        <label class="filter-pill">
+                          <input id="scoreRuleChangesRequestedEnabled" name="scoreRuleChangesRequestedEnabled" type="checkbox" />
+                          <span>Changes requested on my PRs</span>
+                        </label>
+                        <label class="filter-pill">
+                          <input id="scoreRuleCiEnabled" name="scoreRuleCiEnabled" type="checkbox" />
+                          <span>CI failed on my PRs</span>
+                        </label>
+                        <label class="filter-pill">
+                          <input id="scoreRuleBehindEnabled" name="scoreRuleBehindEnabled" type="checkbox" />
+                          <span>Branch behind / conflicting</span>
+                        </label>
+                      </div>
+                      <div class="score-rules-legend">
+                        <div class="score-rules-legend-row score-rules-legend-header">
+                          <span>Rule</span><span>Activates</span><span>Penalty</span>
+                        </div>
+                        <div class="score-rules-legend-row">
+                          <span>Review requested</span><span>after 1h</span><span>−10 · −25 after 4h</span>
+                        </div>
+                        <div class="score-rules-legend-row">
+                          <span>Changes requested</span><span>after 2h</span><span>−20</span>
+                        </div>
+                        <div class="score-rules-legend-row">
+                          <span>CI failed</span><span>after 1h</span><span>−15</span>
+                        </div>
+                        <div class="score-rules-legend-row">
+                          <span>Branch behind</span><span>after 2h</span><span>−10</span>
+                        </div>
+                        <div class="score-rules-legend-note">× 1.5 for High / Highest priority</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

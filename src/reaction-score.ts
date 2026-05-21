@@ -20,10 +20,25 @@ function applyMultiplier(base: number, pr: PullRequestSummary): number {
   return isHigh(pr) ? Math.round(base * 1.5) : base;
 }
 
+export interface ScoreRules {
+  reviews: boolean;
+  changesRequested: boolean;
+  ci: boolean;
+  behind: boolean;
+}
+
+const DEFAULT_RULES: ScoreRules = {
+  reviews: true,
+  changesRequested: true,
+  ci: true,
+  behind: false,
+};
+
 export function computeMyScore(
   prs: PullRequestSummary[],
   viewerLogin: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  rules: ScoreRules = DEFAULT_RULES,
 ): MyScore {
   const viewer = viewerLogin.toLowerCase();
   const items: MyScoreItem[] = [];
@@ -49,7 +64,7 @@ export function computeMyScore(
     );
 
     // ── Review requested from me ────────────────────────────────
-    if (isPendingReviewer && hours > 1) {
+    if (rules.reviews && isPendingReviewer && hours > 1) {
       counters.reviews.count++;
       if (high) counters.reviews.high++;
       const base = hours > 4 ? 25 : 10;
@@ -69,7 +84,7 @@ export function computeMyScore(
     if (!isMyPr) continue;
 
     // ── My PR: changes requested ────────────────────────────────
-    if (pr.reviewState === "changes-requested" && hours > 2) {
+    if (rules.changesRequested && pr.reviewState === "changes-requested" && hours > 2) {
       counters.myPRs.count++;
       if (high) counters.myPRs.high++;
       const blocker = pr.blockingReviewers[0]?.login ?? "reviewer";
@@ -87,7 +102,7 @@ export function computeMyScore(
     }
 
     // ── My PR: CI failed ────────────────────────────────────────
-    if (pr.hasFailedPipeline && hours > 1) {
+    if (rules.ci && pr.hasFailedPipeline && hours > 1) {
       counters.ci.count++;
       if (high) counters.ci.high++;
       items.push({
@@ -104,7 +119,7 @@ export function computeMyScore(
     }
 
     // ── My PR: behind or conflicting ────────────────────────────
-    if ((pr.mergeStatus === "behind" || pr.mergeStatus === "conflicting") && hours > 2) {
+    if (rules.behind && (pr.mergeStatus === "behind" || pr.mergeStatus === "conflicting") && hours > 2) {
       counters.behind.count++;
       if (high) counters.behind.high++;
       items.push({

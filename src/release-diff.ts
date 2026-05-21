@@ -27,6 +27,7 @@ interface ReleaseDiffResult {
   availableVersions: string[];
   syncedAt: string;
   repo: string;
+  sinceTag: string;
 }
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -410,7 +411,10 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
       </div>
 
       <!-- Tabs -->
-      <div class="rd-tabs" data-rd-tabs>${renderTabs(st.tab, counts)}</div>
+      <div class="rd-tabs" data-rd-tabs>
+        ${renderTabs(st.tab, counts)}
+        ${result.sinceTag ? `<span class="rd-since-tag">Since: <code>${escHtml(result.sinceTag)}</code></span>` : ""}
+      </div>
 
       <!-- Body -->
       <div class="rd-body" data-rd-body>${renderBody(st)}</div>

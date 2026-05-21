@@ -51,6 +51,14 @@ struct PersistedSettings {
     jira_merge_transition: String,
     #[serde(default = "default_reaction_score_enabled")]
     reaction_score_enabled: bool,
+    #[serde(default = "default_true")]
+    score_rule_reviews_enabled: bool,
+    #[serde(default = "default_true")]
+    score_rule_changes_requested_enabled: bool,
+    #[serde(default = "default_true")]
+    score_rule_ci_enabled: bool,
+    #[serde(default)]
+    score_rule_behind_enabled: bool,
     // Legacy/fallback field. New fallback writes are only produced when they can
     // be protected by the platform (currently DPAPI on Windows).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -72,6 +80,9 @@ fn default_notifications_enabled() -> bool {
     true
 }
 fn default_reaction_score_enabled() -> bool {
+    true
+}
+fn default_true() -> bool {
     true
 }
 fn default_merge_transition() -> String {
@@ -199,11 +210,11 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
             String::new()
         },
         jira_merge_transition: persisted.jira_merge_transition,
-        reaction_score_enabled: if persisted.reaction_score_enabled {
-            "on".to_string()
-        } else {
-            String::new()
-        },
+        reaction_score_enabled: if persisted.reaction_score_enabled { "on".to_string() } else { String::new() },
+        score_rule_reviews_enabled: if persisted.score_rule_reviews_enabled { "on".to_string() } else { String::new() },
+        score_rule_changes_requested_enabled: if persisted.score_rule_changes_requested_enabled { "on".to_string() } else { String::new() },
+        score_rule_ci_enabled: if persisted.score_rule_ci_enabled { "on".to_string() } else { String::new() },
+        score_rule_behind_enabled: if persisted.score_rule_behind_enabled { "on".to_string() } else { String::new() },
     };
 
     Ok(normalize_settings(&form))
@@ -241,6 +252,10 @@ pub async fn save_settings(
         color_blind_mode: normalized.color_blind_mode,
         jira_merge_transition: normalized.jira_merge_transition.clone(),
         reaction_score_enabled: normalized.reaction_score_enabled,
+        score_rule_reviews_enabled: normalized.score_rule_reviews_enabled,
+        score_rule_changes_requested_enabled: normalized.score_rule_changes_requested_enabled,
+        score_rule_ci_enabled: normalized.score_rule_ci_enabled,
+        score_rule_behind_enabled: normalized.score_rule_behind_enabled,
         github_token: github_token_fallback,
         jira_token: jira_token_fallback,
     };

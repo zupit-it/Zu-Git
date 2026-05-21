@@ -13,6 +13,10 @@ export interface AppSettings {
   colorBlindMode: boolean;
   jiraMergeTransition: string;
   reactionScoreEnabled: boolean;
+  scoreRuleReviewsEnabled: boolean;
+  scoreRuleChangesRequestedEnabled: boolean;
+  scoreRuleCiEnabled: boolean;
+  scoreRuleBehindEnabled: boolean;
 }
 
 export interface ListFilterPreferences {
@@ -40,7 +44,11 @@ export interface SettingsFormValues {
   notificationsEnabled: string;   // "on" | ""
   colorBlindMode: string;         // "on" | ""
   jiraMergeTransition: string;
-  reactionScoreEnabled: string;   // "on" | ""
+  reactionScoreEnabled: string;          // "on" | ""
+  scoreRuleReviewsEnabled: string;       // "on" | ""
+  scoreRuleChangesRequestedEnabled: string; // "on" | ""
+  scoreRuleCiEnabled: string;            // "on" | ""
+  scoreRuleBehindEnabled: string;        // "on" | ""
 }
 
 export const defaultSettings: AppSettings = {
@@ -58,6 +66,10 @@ export const defaultSettings: AppSettings = {
   colorBlindMode: false,
   jiraMergeTransition: "MERGE REQUEST",
   reactionScoreEnabled: true,
+  scoreRuleReviewsEnabled: true,
+  scoreRuleChangesRequestedEnabled: true,
+  scoreRuleCiEnabled: true,
+  scoreRuleBehindEnabled: false,
 };
 
 export const defaultListFilterPreferences: ListFilterPreferences = {
@@ -119,6 +131,10 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
     colorBlindMode: settings.colorBlindMode ? "on" : "",
     jiraMergeTransition: settings.jiraMergeTransition,
     reactionScoreEnabled: settings.reactionScoreEnabled ? "on" : "",
+    scoreRuleReviewsEnabled: settings.scoreRuleReviewsEnabled ? "on" : "",
+    scoreRuleChangesRequestedEnabled: settings.scoreRuleChangesRequestedEnabled ? "on" : "",
+    scoreRuleCiEnabled: settings.scoreRuleCiEnabled ? "on" : "",
+    scoreRuleBehindEnabled: settings.scoreRuleBehindEnabled ? "on" : "",
   };
 }
 
@@ -145,6 +161,10 @@ export function normalizeSettings(
     colorBlindMode: values.colorBlindMode === "on",
     jiraMergeTransition: values.jiraMergeTransition?.trim() || "MERGE REQUEST",
     reactionScoreEnabled: values.reactionScoreEnabled === "on",
+    scoreRuleReviewsEnabled: values.scoreRuleReviewsEnabled === "on",
+    scoreRuleChangesRequestedEnabled: values.scoreRuleChangesRequestedEnabled === "on",
+    scoreRuleCiEnabled: values.scoreRuleCiEnabled === "on",
+    scoreRuleBehindEnabled: values.scoreRuleBehindEnabled === "on",
   };
 }
 

@@ -390,7 +390,7 @@ pub async fn fetch_release_diff(
         .unwrap_or_else(|| settings.github_repos.clone());
 
     // RT1 — one batched GitHub GraphQL query for tag-bounded merged PRs.
-    let merged_prs = crate::github::fetch_merged_prs_since_last_release(
+    let (merged_prs, since_tag) = crate::github::fetch_merged_prs_since_last_release(
         &release_repos,
         &settings,
         &state.http_client,
@@ -596,6 +596,7 @@ pub async fn fetch_release_diff(
         available_versions,
         synced_at,
         repo,
+        since_tag,
     })
 }
 

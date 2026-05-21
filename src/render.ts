@@ -177,6 +177,10 @@ export function renderSettings(values: SettingsFormValues) {
 
   state.notificationsEnabled = values.notificationsEnabled === "on";
   state.reactionScoreEnabled = values.reactionScoreEnabled === "on";
+  state.scoreRuleReviewsEnabled = values.scoreRuleReviewsEnabled === "on";
+  state.scoreRuleChangesRequestedEnabled = values.scoreRuleChangesRequestedEnabled === "on";
+  state.scoreRuleCiEnabled = values.scoreRuleCiEnabled === "on";
+  state.scoreRuleBehindEnabled = values.scoreRuleBehindEnabled === "on";
   document.documentElement.toggleAttribute("data-colorblind", values.colorBlindMode === "on");
   setSettingsDirtyState(false);
 }
@@ -666,6 +670,13 @@ export function renderReviewerLoad(snapshot: DashboardSnapshot) {
     ? computeMyScore(
         snapshot.prs.filter(pr => !state.hiddenRepos.includes(pr.repo)),
         snapshot.viewerLogin,
+        new Date(),
+        {
+          reviews: state.scoreRuleReviewsEnabled,
+          changesRequested: state.scoreRuleChangesRequestedEnabled,
+          ci: state.scoreRuleCiEnabled,
+          behind: state.scoreRuleBehindEnabled,
+        },
       )
     : null;
 
@@ -710,7 +721,7 @@ function scoreGaugeSvg(value: number, toneKey: ToneKey, size: number): string {
   const cx = size / 2;
   const C = 2 * Math.PI * r;
   const dash = (Math.max(0, Math.min(100, value)) / 100) * C;
-  const fontSize = size <= 22 ? 9.5 : 11;
+  const fontSize = value >= 100 ? 8.5 : size <= 22 ? 9.5 : 11;
   return `<svg class="mys__gauge-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg)">` +
     `<circle cx="${cx}" cy="${cx}" r="${r}" fill="white" stroke="${t.bd}" stroke-width="2"/>` +
     `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${t.dot}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${dash} ${C}"/>` +
@@ -733,7 +744,7 @@ function renderMyScoreCompact(score: MyScore): string {
   const pillStyle = `background:${t.soft};color:${t.ink};border:1px solid ${t.bd}`;
 
   const pill = perfect
-    ? `<button class="mys__pill" style="${pillStyle}" tabindex="0">` +
+    ? `<button class="mys__pill mys__pill--perfect" style="${pillStyle}" tabindex="0">` +
         `<span class="mys__gauge">${scoreGaugeSvg(score.value, "clear", 22)}</span>` +
         `<span class="mys__tone-name">All clear</span>` +
       `</button>`

@@ -54,6 +54,10 @@ export const state = {
   currentCollaborators: [] as string[],
   notificationsEnabled: defaultSettings.notificationsEnabled,
   reactionScoreEnabled: defaultSettings.reactionScoreEnabled,
+  scoreRuleReviewsEnabled: defaultSettings.scoreRuleReviewsEnabled,
+  scoreRuleChangesRequestedEnabled: defaultSettings.scoreRuleChangesRequestedEnabled,
+  scoreRuleCiEnabled: defaultSettings.scoreRuleCiEnabled,
+  scoreRuleBehindEnabled: defaultSettings.scoreRuleBehindEnabled,
 
   // ── Settings form ──────────────────────────────────────────────────────────
   settingsDirty: false,
