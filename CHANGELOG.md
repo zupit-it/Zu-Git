@@ -13,6 +13,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and changes-requested on their PRs. Hover the pill for a breakdown of active penalties.
   See `docs/reaction-score.md` for the full scoring model.
 
+- **My Score settings card** — dedicated Settings card to enable/disable the score widget and
+  toggle each scoring rule independently (review requests, changes requested, CI failures,
+  branch behind/conflicting). Includes a legend with activation thresholds and penalty weights.
+  *Branch behind / conflicting* is disabled by default.
+
+- **Release diff — last tag on default branch** — the release diff now resolves the last tag
+  strictly on `defaultBranchRef` (main), so hotfix or side-branch tags no longer skew the
+  "merged since last release" boundary. The resolved tag is displayed in the tab bar as
+  **Since: vX.Y.Z**.
+
+- **Release notes PREVIEW badge** — stories in the Done tab that are not yet in *Verified*
+  status on Jira are marked with a `` `PREVIEW` `` badge in the generated release notes.
+
+- **Daily maintenance** — on startup (if >12 h since last run) and every 12 h while the app
+  is open, ZuGit automatically invalidates the Jira cache and checks for a new app version.
+
 ---
 
 ## [0.8.4] - 2026-05-14
