@@ -53,6 +53,7 @@ export const state = {
   currentInternalMarker: defaultSettings.internalAuthorMarker,
   currentCollaborators: [] as string[],
   notificationsEnabled: defaultSettings.notificationsEnabled,
+  reactionScoreEnabled: defaultSettings.reactionScoreEnabled,
 
   // ── Settings form ──────────────────────────────────────────────────────────
   settingsDirty: false,

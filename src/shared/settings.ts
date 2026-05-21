@@ -12,6 +12,7 @@ export interface AppSettings {
   notificationsEnabled: boolean;
   colorBlindMode: boolean;
   jiraMergeTransition: string;
+  reactionScoreEnabled: boolean;
 }
 
 export interface ListFilterPreferences {
@@ -36,9 +37,10 @@ export interface SettingsFormValues {
   jiraEmail: string;
   jiraToken: string;
   jiraRepoBoards: string;
-  notificationsEnabled: string; // "on" | ""
-  colorBlindMode: string;       // "on" | ""
+  notificationsEnabled: string;   // "on" | ""
+  colorBlindMode: string;         // "on" | ""
   jiraMergeTransition: string;
+  reactionScoreEnabled: string;   // "on" | ""
 }
 
 export const defaultSettings: AppSettings = {
@@ -55,6 +57,7 @@ export const defaultSettings: AppSettings = {
   notificationsEnabled: true,
   colorBlindMode: false,
   jiraMergeTransition: "MERGE REQUEST",
+  reactionScoreEnabled: true,
 };
 
 export const defaultListFilterPreferences: ListFilterPreferences = {
@@ -115,6 +118,7 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
     notificationsEnabled: settings.notificationsEnabled ? "on" : "",
     colorBlindMode: settings.colorBlindMode ? "on" : "",
     jiraMergeTransition: settings.jiraMergeTransition,
+    reactionScoreEnabled: settings.reactionScoreEnabled ? "on" : "",
   };
 }
 
@@ -140,6 +144,7 @@ export function normalizeSettings(
     notificationsEnabled: values.notificationsEnabled === "on",
     colorBlindMode: values.colorBlindMode === "on",
     jiraMergeTransition: values.jiraMergeTransition?.trim() || "MERGE REQUEST",
+    reactionScoreEnabled: values.reactionScoreEnabled === "on",
   };
 }
 

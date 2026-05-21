@@ -427,6 +427,7 @@ fn enrich(
         review_state: choose_review_state(rs),
         has_stale_approval: !rs.stale_approvers.is_empty(),
         updated_at: relative_date(&pr.updated_at),
+        updated_at_iso: pr.updated_at.clone(),
         pipeline_state: pr.pipeline_state.clone(),
         has_failed_pipeline: pr.pipeline_state == PipelineState::Failure,
         additions: pr.additions,

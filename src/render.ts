@@ -15,6 +15,8 @@ import {
   getMyPendingReviewIds, getMyChangesRequestedIds,
   getAvailableRepos,
 } from "./filters";
+import { computeMyScore } from "./reaction-score";
+import type { MyScore, MyScoreItem } from "./shared/pr-model";
 
 // ── Status bar ────────────────────────────────────────────────────────────────
 
@@ -174,6 +176,7 @@ export function renderSettings(values: SettingsFormValues) {
   }
 
   state.notificationsEnabled = values.notificationsEnabled === "on";
+  state.reactionScoreEnabled = values.reactionScoreEnabled === "on";
   document.documentElement.toggleAttribute("data-colorblind", values.colorBlindMode === "on");
   setSettingsDirtyState(false);
 }
@@ -659,8 +662,16 @@ export function renderReviewerLoad(snapshot: DashboardSnapshot) {
     renderChip(login)
   ).join("");
 
+  const myScore = snapshot.viewerLogin && state.reactionScoreEnabled
+    ? computeMyScore(
+        snapshot.prs.filter(pr => !state.hiddenRepos.includes(pr.repo)),
+        snapshot.viewerLogin,
+      )
+    : null;
+
   target.hidden = false;
   target.innerHTML =
+    (myScore ? renderMyScoreCompact(myScore) : "") +
     `<div class="rlb__tag">` +
       `<span class="rlb__tag-dot"></span>` +
       `<span class="rlb__tag-label">Review load</span>` +
@@ -671,6 +682,160 @@ export function renderReviewerLoad(snapshot: DashboardSnapshot) {
       `<span class="rlb__team-actionable rlb__team-actionable--load-${teamLoadLevel(teamPending)}">${teamPending}</span>` +
       `<span class="rlb__team-total">/ ${teamTotal}</span>` +
     `</div>`;
+
+  if (myScore) attachMyScoreHover(target, myScore);
+}
+
+// ── My Reaction Score — compact widget ───────────────────────────────────────
+
+const SCORE_TONES = {
+  clear:   { name: "Clear",           ink: "#0F7A4F", soft: "#E6F4EC", bd: "#C7E5D2", dot: "#22B47A" },
+  healthy: { name: "Healthy",         ink: "#1E5BD0", soft: "#E4ECFE", bd: "#C5D6FB", dot: "#4F8BF7" },
+  warn:    { name: "Needs attention", ink: "#9A6B0F", soft: "#FBF2DC", bd: "#F0DDA0", dot: "#D8A129" },
+  stale:   { name: "Stale",           ink: "#A82A22", soft: "#FCE9E7", bd: "#F2C9C5", dot: "#E5493A" },
+} as const;
+
+type ToneKey = keyof typeof SCORE_TONES;
+
+function scoreToTone(value: number): ToneKey {
+  if (value >= 90) return "clear";
+  if (value >= 70) return "healthy";
+  if (value >= 40) return "warn";
+  return "stale";
+}
+
+function scoreGaugeSvg(value: number, toneKey: ToneKey, size: number): string {
+  const t = SCORE_TONES[toneKey];
+  const r = (size - 4) / 2;
+  const cx = size / 2;
+  const C = 2 * Math.PI * r;
+  const dash = (Math.max(0, Math.min(100, value)) / 100) * C;
+  const fontSize = size <= 22 ? 9.5 : 11;
+  return `<svg class="mys__gauge-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg)">` +
+    `<circle cx="${cx}" cy="${cx}" r="${r}" fill="white" stroke="${t.bd}" stroke-width="2"/>` +
+    `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${t.dot}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${dash} ${C}"/>` +
+    `</svg>` +
+    `<span class="mys__gauge-num" style="font-size:${fontSize}px;color:${t.ink}">${value}</span>`;
+}
+
+const SCORE_ICONS: Record<MyScoreItem["icon"], string> = {
+  review:  `<svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="2.5"/><path d="M2.5 12c.7-1.7 2.4-2.8 4.5-2.8s3.8 1.1 4.5 2.8"/></svg>`,
+  changes: `<svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h6M2 7h8M2 10h5"/><path d="M11 9l2 2-2 2"/></svg>`,
+  ci:      `<svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="5.5"/><path d="M4.5 4.5l5 5M9.5 4.5l-5 5"/></svg>`,
+  behind:  `<svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="7" r="1.4"/><circle cx="10" cy="3.5" r="1.4"/><circle cx="10" cy="10.5" r="1.4"/><path d="M4 5.7c0-1.5 1.5-2.2 6-2.2M4 8.3c0 1.5 1.5 2.2 6 2.2"/></svg>`,
+};
+
+function renderMyScoreCompact(score: MyScore): string {
+  const toneKey = scoreToTone(score.value);
+  const t = SCORE_TONES[toneKey];
+  const perfect = score.value >= 100 || score.items.length === 0;
+
+  const pillStyle = `background:${t.soft};color:${t.ink};border:1px solid ${t.bd}`;
+
+  const pill = perfect
+    ? `<button class="mys__pill" style="${pillStyle}" tabindex="0">` +
+        `<span class="mys__gauge">${scoreGaugeSvg(score.value, "clear", 22)}</span>` +
+        `<span class="mys__tone-name">All clear</span>` +
+      `</button>`
+    : `<button class="mys__pill mys__pill--hoverable" style="${pillStyle}" aria-haspopup="dialog" aria-expanded="false" tabindex="0">` +
+        `<span class="mys__gauge">${scoreGaugeSvg(score.value, toneKey, 22)}</span>` +
+        `<span class="mys__tone-name">${escHtml(t.name)}</span>` +
+      `</button>`;
+
+  return `<div class="mys__wrap" data-my-score>` +
+    `<span class="mys__label">My score</span>` +
+    pill +
+    `<div class="mys__divider"></div>` +
+  `</div>`;
+}
+
+function renderMyScoreTooltip(score: MyScore): string {
+  const toneKey = scoreToTone(score.value);
+  const t = SCORE_TONES[toneKey];
+  const totalPenalty = score.items.reduce((s, it) => s + it.penalty, 0);
+
+  const itemRows = score.items.map((it) => {
+    const highFlag = it.priority === "high"
+      ? `<span class="mys__tt-high-flag">▲ HIGH</span>`
+      : "";
+    return `<a class="mys__tt-item" href="${escHtml(it.prUrl)}" target="_blank" rel="noopener">` +
+      `<span class="mys__tt-icon">${SCORE_ICONS[it.icon]}</span>` +
+      `<span class="mys__tt-body">` +
+        `<span class="mys__tt-meta">` +
+          `<span class="mys__tt-jira">${escHtml(it.jira)}</span>` +
+          highFlag +
+          `<span class="mys__tt-waited">· ${escHtml(it.waited)}</span>` +
+        `</span>` +
+        `<span class="mys__tt-reason">${escHtml(it.reason)}</span>` +
+      `</span>` +
+      `<span class="mys__tt-penalty">−${it.penalty}</span>` +
+    `</a>`;
+  }).join("");
+
+  return `<div class="mys__tooltip" role="dialog">` +
+    `<div class="mys__tt-header">` +
+      `<span class="mys__gauge mys__gauge--lg">${scoreGaugeSvg(score.value, toneKey, 34)}</span>` +
+      `<div class="mys__tt-header-body">` +
+        `<span class="mys__tt-eyebrow">Reaction score</span>` +
+        `<span class="mys__tt-title">` +
+          `<span class="mys__tt-dot" style="background:${t.dot}"></span>` +
+          `${escHtml(t.name)}&nbsp;` +
+          `<span class="mys__tt-value">${score.value} / 100</span>` +
+        `</span>` +
+      `</div>` +
+    `</div>` +
+    `<div class="mys__tt-why">` +
+      `<span>Why you're losing points</span>` +
+      `<span class="mys__tt-total-penalty">−${totalPenalty} total</span>` +
+    `</div>` +
+    itemRows +
+    `<div class="mys__tt-footer">Score recovers as you act on these items. Base 100 − penalties = current.</div>` +
+  `</div>`;
+}
+
+function attachMyScoreHover(strip: HTMLElement, score: MyScore): void {
+  if (score.value >= 100 || score.items.length === 0) return;
+
+  const wrap = strip.querySelector<HTMLElement>("[data-my-score]");
+  const pill = wrap?.querySelector<HTMLButtonElement>(".mys__pill--hoverable");
+  if (!wrap || !pill) return;
+
+  let showTimer: ReturnType<typeof setTimeout> | null = null;
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+  let tooltip: HTMLElement | null = null;
+
+  const showTooltip = () => {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    if (tooltip) return;
+    showTimer = setTimeout(() => {
+      tooltip = document.createElement("div");
+      tooltip.innerHTML = renderMyScoreTooltip(score);
+      const inner = tooltip.firstElementChild as HTMLElement;
+      wrap.appendChild(inner);
+      tooltip = inner;
+      pill.setAttribute("aria-expanded", "true");
+    }, 120);
+  };
+
+  const hideTooltip = () => {
+    if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+    hideTimer = setTimeout(() => {
+      tooltip?.remove();
+      tooltip = null;
+      pill.setAttribute("aria-expanded", "false");
+    }, 220);
+  };
+
+  wrap.addEventListener("mouseenter", showTooltip);
+  wrap.addEventListener("mouseleave", hideTooltip);
+
+  pill.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      tooltip ? hideTooltip() : showTooltip();
+    }
+    if (e.key === "Escape" && tooltip) hideTooltip();
+  });
 }
 
 // ── Status panel ──────────────────────────────────────────────────────────────

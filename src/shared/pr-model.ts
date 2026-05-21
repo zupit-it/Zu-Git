@@ -46,6 +46,7 @@ export interface PullRequestSummary {
   reviewState: ReviewState;
   hasStaleApproval: boolean;
   updatedAt: string;
+  updatedAtIso: string;
   pipelineState: "success" | "pending" | "failure" | "action-required" | "unknown";
   hasFailedPipeline: boolean;
   additions: number;
@@ -57,6 +58,29 @@ export interface PullRequestSummary {
   headRef: string;
   baseRef: string;
   body: string;
+}
+
+export interface MyScoreItem {
+  kind: "review-requested" | "my-changes-requested" | "ci-failed" | "behind";
+  icon: "review" | "changes" | "ci" | "behind";
+  jira: string;
+  priority: "high" | "normal";
+  title: string;
+  reason: string;
+  waited: string;
+  penalty: number;
+  prUrl: string;
+}
+
+export interface MyScore {
+  value: number;
+  counters: {
+    reviews: { count: number; high: number; label: string };
+    myPRs:   { count: number; high: number; label: string };
+    ci:      { count: number; high: number; label: string };
+    behind:  { count: number; high: number; label: string };
+  };
+  items: MyScoreItem[];
 }
 
 export const mockPullRequests: PullRequestSummary[] = [
@@ -89,6 +113,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     reviewState: "approved-stale",
     hasStaleApproval: true,
     updatedAt: "14 min ago",
+    updatedAtIso: "2026-05-17T07:46:00Z",
     pipelineState: "success",
     hasFailedPipeline: false,
     additions: 312,
@@ -129,6 +154,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     reviewState: "approved",
     hasStaleApproval: false,
     updatedAt: "1 h ago",
+    updatedAtIso: "2026-05-17T06:00:00Z",
     pipelineState: "success",
     hasFailedPipeline: false,
     additions: 58,
@@ -169,6 +195,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     reviewState: "needs-review",
     hasStaleApproval: false,
     updatedAt: "8 min ago",
+    updatedAtIso: "2026-05-17T07:52:00Z",
     pipelineState: "pending",
     hasFailedPipeline: false,
     additions: 5,

@@ -49,6 +49,8 @@ struct PersistedSettings {
     color_blind_mode: bool,
     #[serde(default = "default_merge_transition")]
     jira_merge_transition: String,
+    #[serde(default = "default_reaction_score_enabled")]
+    reaction_score_enabled: bool,
     // Legacy/fallback field. New fallback writes are only produced when they can
     // be protected by the platform (currently DPAPI on Windows).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -67,6 +69,9 @@ fn default_author_marker() -> String {
     "-zupit".to_string()
 }
 fn default_notifications_enabled() -> bool {
+    true
+}
+fn default_reaction_score_enabled() -> bool {
     true
 }
 fn default_merge_transition() -> String {
@@ -194,6 +199,11 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
             String::new()
         },
         jira_merge_transition: persisted.jira_merge_transition,
+        reaction_score_enabled: if persisted.reaction_score_enabled {
+            "on".to_string()
+        } else {
+            String::new()
+        },
     };
 
     Ok(normalize_settings(&form))
@@ -230,6 +240,7 @@ pub async fn save_settings(
         notifications_enabled: normalized.notifications_enabled,
         color_blind_mode: normalized.color_blind_mode,
         jira_merge_transition: normalized.jira_merge_transition.clone(),
+        reaction_score_enabled: normalized.reaction_score_enabled,
         github_token: github_token_fallback,
         jira_token: jira_token_fallback,
     };

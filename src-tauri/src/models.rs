@@ -19,6 +19,7 @@ pub struct AppSettings {
     pub notifications_enabled: bool,
     pub color_blind_mode: bool,
     pub jira_merge_transition: String,
+    pub reaction_score_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -37,6 +38,7 @@ impl Default for AppSettings {
             notifications_enabled: true,
             color_blind_mode: false,
             jira_merge_transition: "Merge Request".to_string(),
+            reaction_score_enabled: true,
         }
     }
 }
@@ -62,9 +64,10 @@ pub struct SettingsFormValues {
     pub jira_email: String,
     pub jira_token: String,
     pub jira_repo_boards: String,
-    pub notifications_enabled: String, // "on" | ""
-    pub color_blind_mode: String,      // "on" | ""
+    pub notifications_enabled: String,  // "on" | ""
+    pub color_blind_mode: String,       // "on" | ""
     pub jira_merge_transition: String,
+    pub reaction_score_enabled: String, // "on" | ""
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,6 +186,7 @@ pub struct PullRequestSummary {
     pub review_state: ReviewState,
     pub has_stale_approval: bool,
     pub updated_at: String,
+    pub updated_at_iso: String,
     pub pipeline_state: PipelineState,
     pub has_failed_pipeline: bool,
     pub additions: u32,
@@ -342,6 +346,7 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
             let t = values.jira_merge_transition.trim().to_string();
             if t.is_empty() { "Merge Request".to_string() } else { t }
         },
+        reaction_score_enabled: values.reaction_score_enabled.trim() == "on",
     }
 }
 
@@ -373,6 +378,11 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
             String::new()
         },
         jira_merge_transition: settings.jira_merge_transition.clone(),
+        reaction_score_enabled: if settings.reaction_score_enabled {
+            "on".to_string()
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -491,6 +501,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             review_state: ReviewState::ApprovedStale,
             has_stale_approval: true,
             updated_at: "14 min ago".to_string(),
+            updated_at_iso: "2026-05-17T07:46:00Z".to_string(),
             pipeline_state: PipelineState::Success,
             has_failed_pipeline: false,
             additions: 312,
@@ -539,6 +550,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             review_state: ReviewState::Approved,
             has_stale_approval: false,
             updated_at: "1 h ago".to_string(),
+            updated_at_iso: "2026-05-17T06:00:00Z".to_string(),
             pipeline_state: PipelineState::Success,
             has_failed_pipeline: false,
             additions: 58,
@@ -587,6 +599,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             review_state: ReviewState::NeedsReview,
             has_stale_approval: false,
             updated_at: "8 min ago".to_string(),
+            updated_at_iso: "2026-05-17T07:52:00Z".to_string(),
             pipeline_state: PipelineState::Pending,
             has_failed_pipeline: false,
             additions: 5,
