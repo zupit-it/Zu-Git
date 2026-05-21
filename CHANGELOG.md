@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.9.0] - 2026-05-21
+
 ### Added
 - **My Reaction Score** — personal-only score widget (0–100) in the Review Load bar strip.
   Shows how quickly the current user is reacting to pending reviews, CI failures, merge conflicts,
