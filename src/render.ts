@@ -487,10 +487,10 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
         ${threadsChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${threadsChip}</div>` : ""}
         ${mergeStatusChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${mergeStatusChip}</div>` : ""}
       </div>
-      <div style="display:flex;flex-direction:column;gap:6px;padding-top:2px;width:fit-content;margin-left:auto">
+      <div style="display:flex;flex-direction:column;gap:6px;padding-top:2px;margin-left:auto">
         <div style="display:flex;gap:6px">
-          <button class="icon-btn" data-pr-link="${pr.url}" type="button">${SVG.ext}<span>PR</span></button>
           ${jiraBtn}
+          <button class="icon-btn" data-pr-link="${pr.url}" type="button">${SVG.ext}<span>PR</span></button>
         </div>
         ${isDraft && pr.nodeId ? `<button class="icon-btn" data-promote-draft="${escHtml(pr.repo)}/${pr.id}" type="button" style="width:100%;justify-content:center">${SVG.promote}<span>Promote</span></button>` : ""}
       </div>
