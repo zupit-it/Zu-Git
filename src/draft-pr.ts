@@ -545,10 +545,11 @@ export async function publishNewPr(draft: boolean) {
     setStatus(wasPromotion ? "PR promoted successfully." : "PR created successfully.", "neutral");
     void refreshDashboard("auto");
     void invoke("open_external", { url: prUrl });
-    if (jiraKey && checklist.length > 0) {
+    if (jiraKey) {
       if (draft) {
-        // Draft publish: save the actual checked/unchecked state, no transition
-        void invoke("update_jira_checklist", { jiraKey, items: checklist });
+        if (checklist.length > 0) {
+          void invoke("update_jira_checklist", { jiraKey, items: checklist });
+        }
       } else {
         // Non-draft publish: mark all done + transition to merge state
         void invoke("complete_jira_story", { jiraKey, items: checklist });
