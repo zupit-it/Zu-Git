@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.9.4] - 2026-05-28
+
 ### Added
 - **Add reviewer from the dashboard** — each PR row now has a **+** button next to the reviewer
   badges. Click it to pick any team member not already reviewing; they get added instantly without
