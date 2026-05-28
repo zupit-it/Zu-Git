@@ -638,6 +638,8 @@ pub async fn complete_jira_story(
             .map(|i| ChecklistItem { text: i.text.clone(), done: true })
             .collect();
         write_checklist(issue_key, &all_done, settings, client).await?;
+        // Give Jira a moment to settle the checklist write before transitioning.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
 
     // 2. Transition the issue.
