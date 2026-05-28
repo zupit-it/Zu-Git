@@ -117,6 +117,8 @@ interface ModalState {
   verDropOpen: boolean;
   notesOpen: boolean;
   applyStatus: string;
+  repos: string[];
+  projectKey: string | undefined;
 }
 
 function isFlagged(item: ReleaseDiffItem, currentVersion: string): boolean {
@@ -383,7 +385,7 @@ function renderVersionSelect(current: string, available: string[]): string {
 
 // ── Modal construction ────────────────────────────────────────────────────────
 
-function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement {
+function buildModal(releaseName: string, result: ReleaseDiffResult, repos: string[] = [], projectKey?: string): HTMLElement {
   const st: ModalState = {
     releaseName,
     result,
@@ -393,6 +395,8 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
     verDropOpen: false,
     notesOpen: false,
     applyStatus: "",
+    repos,
+    projectKey,
   };
 
   const counts = computeCounts(result, releaseName);
@@ -488,6 +492,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
     const select = (e.target as Element).closest<HTMLSelectElement>("[data-rd-version-select]");
     if (!select) return;
     st.releaseName = select.value;
+    st.targetVersion = select.value;
     void refreshDiff();
   });
 
@@ -716,6 +721,8 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
     try {
       const fresh = await invoke<ReleaseDiffResult>("fetch_release_diff", {
         releaseName: st.releaseName,
+        ...(st.projectKey ? { projectKey: st.projectKey } : {}),
+        ...(st.repos.length > 0 ? { repos: st.repos } : {}),
       });
       st.result = fresh;
       st.selected.clear();
@@ -761,7 +768,7 @@ export async function openReleaseDiff(
       extra: result.extra.length,
     });
     document.querySelector("[data-release-diff-overlay]")?.remove();
-    document.body.appendChild(buildModal(releaseName, result));
+    document.body.appendChild(buildModal(releaseName, result, repos ?? [], projectKey));
   } catch (err) {
     console.error("Release diff error:", err);
   } finally {
