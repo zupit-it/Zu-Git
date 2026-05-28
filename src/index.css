@@ -3226,6 +3226,20 @@ img.avatar { object-fit: cover; }
   letter-spacing: -0.3px;
 }
 
+.rd-version-select {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: #15161A;
+  letter-spacing: -0.3px;
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  padding: 0;
+  appearance: auto;
+}
+
 .rd-repo {
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -4017,4 +4031,191 @@ img.avatar { object-fit: cover; }
 .rd-notes-copy:hover {
   background: #FBFBF8;
   color: #15161A;
+}
+
+/* ── Add-reviewer button (inline with last reviewer badge) ───────────────── */
+.review-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity .15s, border-color .12s, background .12s, color .12s;
+}
+.pr-row:hover .review-add-btn {
+  opacity: 1;
+}
+.review-add-btn:hover {
+  border-color: var(--ink-soft);
+  background: var(--surface-alt);
+  color: var(--ink);
+}
+
+/* ── Add-reviewer popover ─────────────────────────────────────────────────── */
+.arv-popover {
+  position: fixed;
+  z-index: 8888;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.14);
+  padding: 8px;
+  min-width: 180px;
+  max-width: 260px;
+}
+.arv-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 2px 4px 8px;
+}
+.arv-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.arv-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+  transition: background .1s;
+}
+.arv-chip:hover { background: var(--surface-alt); }
+.arv-chip:disabled { opacity: 0.5; cursor: default; }
+.arv-chip--loading { opacity: 0.6; }
+.arv-chip-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.arv-chip-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Demo mode ───────────────────────────────────────────────────────────── */
+
+/* Always hidden in any demo stage */
+[data-demo-stage] [data-update-badge],
+[data-demo-stage] [data-add-pr-button],
+[data-demo-stage] [data-promote-draft],
+[data-demo-stage] .rd-trigger { display: none !important; }
+
+/* Stage 1: de-color review badges (neutral palette, keep text visible) */
+[data-demo-stage="1"] .review-badge-ok,
+[data-demo-stage="1"] .review-badge-warn,
+[data-demo-stage="1"] .review-badge-fail {
+  background: var(--surface-alt);
+  color: var(--ink-soft);
+  border-color: var(--border);
+}
+
+/* Stages 1-2: hide filter action hint */
+:is([data-demo-stage="1"],
+    [data-demo-stage="2"]) .filter-pill-action-hint { display: none !important; }
+
+/* Stages 1-3: hide diff stats */
+:is([data-demo-stage="1"],
+    [data-demo-stage="2"],
+    [data-demo-stage="3"]) .diffstat { display: none !important; }
+
+/* Stages 1-4: collapse CI column, keep reviewer column in place */
+:is([data-demo-stage="1"],
+    [data-demo-stage="2"],
+    [data-demo-stage="3"],
+    [data-demo-stage="4"]) .pr-row {
+  grid-template-columns: 1fr 220px 120px;
+}
+:is([data-demo-stage="1"],
+    [data-demo-stage="2"],
+    [data-demo-stage="3"],
+    [data-demo-stage="4"]) .pr-row-status { display: none !important; }
+
+/* Stages 1-5: hide Group by release filter */
+:is([data-demo-stage="1"],
+    [data-demo-stage="2"],
+    [data-demo-stage="3"],
+    [data-demo-stage="4"],
+    [data-demo-stage="5"]) label:has([data-filter-group-by-release]) { display: none !important; }
+
+/* Stages 1-6: hide reviewer load bar */
+:is([data-demo-stage="1"],
+    [data-demo-stage="2"],
+    [data-demo-stage="3"],
+    [data-demo-stage="4"],
+    [data-demo-stage="5"],
+    [data-demo-stage="6"]) .rlb { display: none !important; }
+
+/* Stage 7: load bar visible but My Score hidden */
+[data-demo-stage="7"] [data-my-score] { display: none !important; }
+
+/* Stages 9-11: show New PR button */
+:is([data-demo-stage="9"],
+    [data-demo-stage="10"],
+    [data-demo-stage="11"]) [data-add-pr-button] { display: inline-flex !important; }
+
+/* Stages 10-11: show Promote button */
+:is([data-demo-stage="10"],
+    [data-demo-stage="11"]) [data-promote-draft] { display: flex !important; }
+
+/* Stage 11: show Release status trigger */
+[data-demo-stage="11"] .rd-trigger { display: inline-flex !important; }
+
+/* Demo toast pill */
+.demo-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font: 600 12px/1 var(--font);
+  letter-spacing: 0.1px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
+.demo-toast.demo-toast--fade { opacity: 0; }
+.demo-toast-step {
+  font-weight: 400;
+  opacity: 0.6;
+  font-size: 11px;
 }

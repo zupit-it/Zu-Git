@@ -1,9 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { maybeShowChangelog, showChangelog } from "./changelog";
 import { state } from "./state";
 import {
   setView, setSettingsDirtyState, syncSettingsSaveButton,
-  renderListBoard, renderListFilters, renderToolbarRepoFilters,
+  renderListBoard, renderListFilters, renderToolbarRepoFilters, setStatus,
 } from "./render";
 import { applyListFilters } from "./filters";
 import {
@@ -12,6 +13,7 @@ import {
 } from "./api";
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
+import { escHtml, avatarColor, loginInitials } from "./utils";
 
 window.addEventListener("DOMContentLoaded", () => {
   // ── Settings form ───────────────────────────────────────────────────────────
@@ -182,6 +184,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const rerequestButton = target.closest<HTMLButtonElement>(".review-badge-rerequest");
     if (rerequestButton) { void rerequestReview(rerequestButton); return; }
 
+    const addReviewerBtn = target.closest<HTMLButtonElement>("[data-add-reviewer]");
+    if (addReviewerBtn) { showAddReviewerPopover(addReviewerBtn); return; }
+
     const promoteButton = target.closest<HTMLButtonElement>("[data-promote-draft]");
     if (promoteButton) {
       const prId = promoteButton.dataset.promoteDraft;
@@ -286,6 +291,22 @@ window.addEventListener("DOMContentLoaded", () => {
         return;
       }
     }
+
+    // ── Demo mode navigation (Alt + ← / →) ─────────────────────────────────
+    if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+      e.preventDefault();
+      const cur = parseInt(document.body.dataset.demoStage ?? "0");
+      if (e.key === "ArrowRight") {
+        if (cur >= 11) return;
+        document.body.dataset.demoStage = String(cur + 1);
+        showDemoToast(cur + 1);
+      } else {
+        if (cur <= 0) return;
+        if (cur === 1) delete document.body.dataset.demoStage;
+        else document.body.dataset.demoStage = String(cur - 1);
+        showDemoToast(cur <= 1 ? 0 : cur - 1);
+      }
+    }
   });
 
   // ── Init ────────────────────────────────────────────────────────────────────
@@ -300,3 +321,156 @@ window.addEventListener("DOMContentLoaded", () => {
 
   void maybeShowChangelog();
 });
+
+// ── Demo mode toast ───────────────────────────────────────────────────────────
+
+const DEMO_STAGE_LABELS: Record<number, string> = {
+  0:  "Normal",
+  1:  "Base list",
+  2:  "+ Review status",
+  3:  "+ Need action",
+  4:  "+ Diff stats",
+  5:  "+ CI & merge",
+  6:  "+ Group by release",
+  7:  "+ Reviewer load",
+  8:  "+ My Score",
+  9:  "+ New PR",
+  10: "+ Promote",
+  11: "+ Release status",
+};
+
+let _demoToastTimer: number | null = null;
+let _demoToastEl: HTMLElement | null = null;
+
+function showDemoToast(stage: number) {
+  if (_demoToastEl) {
+    _demoToastEl.remove();
+    _demoToastEl = null;
+  }
+  if (_demoToastTimer !== null) {
+    clearTimeout(_demoToastTimer);
+    _demoToastTimer = null;
+  }
+  const label = DEMO_STAGE_LABELS[stage] ?? "";
+  const el = document.createElement("div");
+  el.className = "demo-toast";
+  el.innerHTML = `<span class="demo-toast-step">${stage}/11</span>${escHtml(label)}`;
+  document.body.appendChild(el);
+  _demoToastEl = el;
+  _demoToastTimer = window.setTimeout(() => {
+    el.classList.add("demo-toast--fade");
+    _demoToastTimer = window.setTimeout(() => {
+      el.remove();
+      if (_demoToastEl === el) _demoToastEl = null;
+    }, 420);
+  }, 1500);
+}
+
+// ── Add-reviewer popover ──────────────────────────────────────────────────────
+
+let _arvPopover: HTMLElement | null = null;
+let _arvOutsideListener: ((e: MouseEvent) => void) | null = null;
+
+function closeAddReviewerPopover() {
+  if (_arvPopover) { _arvPopover.remove(); _arvPopover = null; }
+  if (_arvOutsideListener) {
+    document.removeEventListener("click", _arvOutsideListener, { capture: true });
+    _arvOutsideListener = null;
+  }
+}
+
+function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
+  closeAddReviewerPopover();
+
+  const prKey = triggerBtn.dataset.addReviewer ?? "";
+  const slashIdx = prKey.lastIndexOf("/");
+  if (slashIdx < 0) return;
+  const repo = prKey.slice(0, slashIdx);
+  const prNumber = Number(prKey.slice(slashIdx + 1));
+  if (!repo || !prNumber) return;
+
+  // Find the PR to get its current reviewers
+  const pr = state.currentDashboard?.prs.find(p => p.repo === repo && p.id === prNumber);
+  const existingLower = new Set(
+    [
+      ...(pr?.pendingReviewers ?? []),
+      ...(pr?.currentApprovers ?? []),
+      ...(pr?.blockingReviewers ?? []),
+      ...(pr?.staleApprovers ?? []),
+      ...(pr?.commentedReviewers ?? []),
+    ].map(a => a.login.toLowerCase()),
+  );
+
+  const dashboard = state.currentDashboard;
+  const avatarUrls = dashboard?.reviewerAvatars ?? {};
+  const stripMarker = (login: string) =>
+    state.currentInternalMarker ? login.replace(state.currentInternalMarker, "") : login;
+
+  const authorLower = (pr?.author ?? "").toLowerCase();
+  const candidates = state.currentCollaborators.filter(l => {
+    const ll = l.toLowerCase();
+    return !existingLower.has(ll) && ll !== authorLower;
+  });
+
+  if (candidates.length === 0) {
+    setStatus("All team members are already reviewing this PR.", "neutral");
+    return;
+  }
+
+  const chipsHtml = candidates.map(login => {
+    const displayName = stripMarker(login);
+    const avatarUrl = avatarUrls[login];
+    const avatarHtml = avatarUrl
+      ? `<img class="arv-chip-avatar" src="${escHtml(avatarUrl)}" alt="" loading="lazy" />`
+      : `<span class="arv-chip-avatar" style="background:${avatarColor(login)}">${escHtml(loginInitials(displayName))}</span>`;
+    return `<button class="arv-chip" data-arv-login="${escHtml(login)}" type="button">
+      ${avatarHtml}<span class="arv-chip-name">${escHtml(displayName)}</span>
+    </button>`;
+  }).join("");
+
+  const popover = document.createElement("div");
+  popover.className = "arv-popover";
+  popover.innerHTML = `<div class="arv-header">Add reviewer</div><div class="arv-chips">${chipsHtml}</div>`;
+  document.body.appendChild(popover);
+  _arvPopover = popover;
+
+  // Position below/above the trigger
+  const rect = triggerBtn.getBoundingClientRect();
+  const pw = popover.offsetWidth || 220;
+  const ph = popover.offsetHeight || 160;
+  let top = rect.bottom + 6;
+  let left = rect.left;
+  if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+  if (top + ph > window.innerHeight - 8) top = rect.top - ph - 6;
+  popover.style.top = `${Math.max(8, top)}px`;
+  popover.style.left = `${Math.max(8, left)}px`;
+
+  // Chip click — call backend
+  popover.querySelectorAll<HTMLButtonElement>("[data-arv-login]").forEach(chip => {
+    chip.addEventListener("click", async () => {
+      const login = chip.dataset.arvLogin;
+      if (!login) return;
+      chip.disabled = true;
+      chip.classList.add("arv-chip--loading");
+      try {
+        await invoke("request_review", { repo, prNumber, login });
+        closeAddReviewerPopover();
+        void refreshDashboard("auto");
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : "Failed to add reviewer.", "danger");
+        chip.disabled = false;
+        chip.classList.remove("arv-chip--loading");
+      }
+    });
+  });
+
+  // Close on outside click (deferred so the triggering click doesn't immediately close it)
+  setTimeout(() => {
+    _arvOutsideListener = (e: MouseEvent) => {
+      if (!_arvPopover?.contains(e.target as Node) && e.target !== triggerBtn) {
+        closeAddReviewerPopover();
+      }
+    };
+    document.addEventListener("click", _arvOutsideListener, { capture: true });
+  }, 0);
+}

@@ -335,7 +335,7 @@ export function renderListFilters(snapshot: DashboardSnapshot) {
 
 // ── PR row rendering ──────────────────────────────────────────────────────────
 
-export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string, isDraft = false): string {
+export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string, isDraft = false, addBtn = ""): string {
   const seen = new Set<string>();
   const dedup = <T extends { login: string }>(arr: T[]) =>
     arr.filter(({ login }) => !seen.has(login) && seen.add(login));
@@ -350,21 +350,30 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string,
     ...dedup(pr.commentedReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "neutral", label: "Commented" })),
   ];
 
+  const mutedClass = isDraft ? " review-badge--muted" : "";
+
   if (items.length === 0) {
     const noReviewColor = isDraft ? "var(--draft-ink-soft)" : "var(--ink-faint)";
     const noReviewText  = isDraft ? "No reviewers yet" : "No reviewers";
-    return `<span style="font-size:11.5px;color:${noReviewColor};font-style:italic">${noReviewText}</span>`;
+    return `<div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11.5px;color:${noReviewColor};font-style:italic">${noReviewText}</span>
+      ${addBtn}
+    </div>`;
   }
 
-  const mutedClass = isDraft ? " review-badge--muted" : "";
   return items
     .map(
-      (item) => `
-        <div class="review-badge review-badge-${item.tone}${mutedClass}">
+      (item, i) => {
+        const badge = `<div class="review-badge review-badge-${item.tone}${mutedClass}">
           ${avatarSm(item.login, item.avatarUrl, isDraft)}
-          <span>${item.label}</span>${item.stale ? `<span class="review-badge-stale-icon">${SVG.clock}</span>` : ""}${item.canRerequest ? `<button class="review-badge-rerequest" title="Re-request review from ${item.login}" data-repo="${pr.repo}" data-pr-number="${pr.id}" data-login="${item.login}">${SVG.rerequest}</button>` : ""}
-        </div>
-      `,
+          <span class="review-badge-label">${item.label}</span>${item.stale ? `<span class="review-badge-stale-icon">${SVG.clock}</span>` : ""}${item.canRerequest ? `<button class="review-badge-rerequest" title="Re-request review from ${item.login}" data-repo="${pr.repo}" data-pr-number="${pr.id}" data-login="${item.login}">${SVG.rerequest}</button>` : ""}
+        </div>`;
+        // Wrap the last badge in a flex row so the "+" sits inline to its right
+        if (addBtn && i === items.length - 1) {
+          return `<div style="display:flex;align-items:center;gap:8px">${badge}${addBtn}</div>`;
+        }
+        return badge;
+      },
     )
     .join("");
 }
@@ -478,10 +487,10 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
         </div>
         ${pr.jiraSummary ? `<div style="font-size:12.5px;color:${descColor};line-height:1.45;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${pr.jiraSummary}</div>` : ""}
       </div>
-      <div style="display:flex;flex-direction:column;gap:5px;padding-top:2px">
-        ${renderReviewBadges(pr, viewerLogin, isDraft)}
+      <div class="pr-row-reviewers" style="display:flex;flex-direction:column;gap:5px;padding-top:2px">
+        ${renderReviewBadges(pr, viewerLogin, isDraft, `<button class="review-add-btn" data-add-reviewer="${escHtml(pr.repo)}/${pr.id}" type="button" title="Add reviewer">+</button>`)}
       </div>
-      <div style="display:flex;flex-direction:column;gap:6px;padding-top:2px">
+      <div class="pr-row-status" style="display:flex;flex-direction:column;gap:6px;padding-top:2px">
         ${pipelineChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${pipelineChip}</div>` : ""}
         ${autoMergeChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${autoMergeChip}</div>` : ""}
         ${threadsChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${threadsChip}</div>` : ""}

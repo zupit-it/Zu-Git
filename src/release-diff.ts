@@ -371,6 +371,16 @@ function renderFooter(st: ModalState, counts: ReturnType<typeof computeCounts>):
   `;
 }
 
+// ── Version select ────────────────────────────────────────────────────────────
+
+function renderVersionSelect(current: string, available: string[]): string {
+  const versions = available.includes(current) ? available : [current, ...available];
+  const options = versions.map(v =>
+    `<option value="${escHtml(v)}" ${v === current ? "selected" : ""}>${escHtml(v)}</option>`
+  ).join("");
+  return `<select class="rd-version-select" data-rd-version-select>${options}</select>`;
+}
+
 // ── Modal construction ────────────────────────────────────────────────────────
 
 function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement {
@@ -397,7 +407,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
       <div class="rd-header">
         <div class="rd-header-row1">
           <span class="rd-badge">Release status</span>
-          <span class="rd-version">${escHtml(releaseName)}</span>
+          ${renderVersionSelect(st.releaseName, result.availableVersions)}
           <span class="rd-sep">·</span>
           <span class="rd-repo">${escHtml(result.repo)}</span>
           <span class="rd-sep">·</span>
@@ -472,6 +482,13 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
 
   document.addEventListener("keydown", function onKey(e: KeyboardEvent) {
     if (e.key === "Escape") { closeModal(); document.removeEventListener("keydown", onKey); }
+  });
+
+  overlay.addEventListener("change", (e) => {
+    const select = (e.target as Element).closest<HTMLSelectElement>("[data-rd-version-select]");
+    if (!select) return;
+    st.releaseName = select.value;
+    void refreshDiff();
   });
 
   // ── Event delegation ──────────────────────────────────────────────────────

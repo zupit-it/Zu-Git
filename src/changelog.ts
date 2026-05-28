@@ -17,14 +17,19 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
-        title: "Jira transition on PR open — always triggered",
-        body: "Opening a non-draft PR now always triggers the configured Jira workflow transition (default: <strong>MERGE REQUEST</strong>), even when the ticket has no acceptance criteria checklist. Previously the transition was silently skipped if the checklist was empty.",
+        title: "Add reviewer from the dashboard",
+        body: "Each PR row now has a <strong>+</strong> button next to the reviewer badges. Click it to pick any team member not already reviewing — they get added instantly without leaving the dashboard.",
+        imgs: ["/assets/changelog/add-reviewer.png"],
       },
     ],
   },
   {
     label: "Older news",
     entries: [
+      {
+        title: "Jira transition on PR open — always triggered",
+        body: "Opening a non-draft PR now always triggers the configured Jira workflow transition (default: <strong>MERGE REQUEST</strong>), even when the ticket has no acceptance criteria checklist. Previously the transition was silently skipped if the checklist was empty.",
+      },
       {
         title: "Release status — smarter tag detection & last tag reference",
         body: "The release diff now finds the last tag strictly on the default branch, so hotfix or side-branch tags no longer skew what counts as 'merged since last release'. The tag itself is also shown in the tab bar as <strong>Since: vX.Y.Z</strong> so you always know the exact cutoff. Release notes also gained a <strong>PREVIEW</strong> badge on stories not yet Verified by QA.",
