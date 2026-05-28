@@ -712,6 +712,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult): HTMLElement
   async function refreshDiff() {
     const refreshBtn = overlay.querySelector<HTMLButtonElement>("[data-rd-refresh]");
     if (refreshBtn) refreshBtn.classList.add("is-loading");
+    showLoading();
     try {
       const fresh = await invoke<ReleaseDiffResult>("fetch_release_diff", {
         releaseName: st.releaseName,
