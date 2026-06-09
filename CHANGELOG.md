@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
----
+- **Warning about expired tokens** 
 
 ## [0.9.5] - 2026-05-28
 

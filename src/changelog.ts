@@ -17,15 +17,19 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
-        title: "Add reviewer from the dashboard",
-        body: "Each PR row now has a <strong>+</strong> button next to the reviewer badges. Click it to pick any team member not already reviewing — they get added instantly without leaving the dashboard.",
-        imgs: ["/assets/changelog/add-reviewer.png"],
+        title: "Add graphic warning for expired tokens",
+        body: "Removed mock data",
       },
     ],
   },
   {
     label: "Older news",
     entries: [
+      {
+        title: "Add reviewer from the dashboard",
+        body: "Each PR row now has a <strong>+</strong> button next to the reviewer badges. Click it to pick any team member not already reviewing — they get added instantly without leaving the dashboard.",
+        imgs: ["/assets/changelog/add-reviewer.png"],
+      },
       {
         title: "Jira transition on PR open — always triggered",
         body: "Opening a non-draft PR now always triggers the configured Jira workflow transition (default: <strong>MERGE REQUEST</strong>), even when the ticket has no acceptance criteria checklist. Previously the transition was silently skipped if the checklist was empty.",
