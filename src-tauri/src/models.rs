@@ -214,13 +214,78 @@ pub struct PullRequestSummary {
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
+/// Machine-readable health of an integration, so the frontend can tell an
+/// expired/invalid token (the user must re-authenticate) apart from a transient
+/// outage or a missing configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IntegrationState {
+    /// Not enough settings to attempt a live call yet.
+    NotConfigured,
+    /// Configured, but a refresh hasn't completed yet.
+    Pending,
+    /// Live data loaded successfully.
+    Ok,
+    /// Token expired, revoked or invalid (HTTP 401) — needs re-authentication.
+    AuthExpired,
+    /// Reachable and authenticated, but some sub-requests failed (e.g. one repo).
+    Degraded,
+    /// Could not reach the service or it returned a non-auth error.
+    Unreachable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IntegrationStatus {
     pub name: String,
     pub configured: bool,
     pub ok: bool,
+    pub state: IntegrationState,
     pub detail: String,
+}
+
+/// Classified outcome of an integration HTTP call. Lets callers distinguish an
+/// authentication failure (expired/invalid token) from any other error while
+/// still degrading gracefully via `From<ApiError> for String`.
+#[derive(Debug, Clone)]
+pub enum ApiError {
+    /// HTTP 401 — the token is expired, revoked or otherwise invalid.
+    Auth(String),
+    /// Any other failure: network error, 5xx, parse error, non-401 status, etc.
+    Other(String),
+}
+
+impl ApiError {
+    pub fn is_auth(&self) -> bool {
+        matches!(self, ApiError::Auth(_))
+    }
+
+    /// Builds an error from an HTTP status code, classifying 401 as an auth failure.
+    ///
+    /// Note: 403 is intentionally *not* treated as auth, since GitHub also uses it
+    /// for rate limiting and Jira for permission errors — both produce false
+    /// "re-authenticate" prompts. Only 401 reliably means "bad credentials".
+    pub fn from_status(status: u16, message: String) -> Self {
+        if status == 401 {
+            ApiError::Auth(message)
+        } else {
+            ApiError::Other(message)
+        }
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApiError::Auth(m) | ApiError::Other(m) => write!(f, "{m}"),
+        }
+    }
+}
+
+impl From<ApiError> for String {
+    fn from(e: ApiError) -> String {
+        e.to_string()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

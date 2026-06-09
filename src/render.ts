@@ -895,19 +895,55 @@ export function renderIntegrations(snapshot: DashboardSnapshot) {
   if (!target) return;
 
   target.innerHTML = snapshot.integrations
-    .map(
-      (integration) => `
-        <article class="integration-card integration-${integration.ok ? "ok" : "warn"}">
+    .map((integration) => {
+      const expired = integration.state === "auth-expired";
+      const cardClass = integration.ok ? "ok" : expired ? "expired" : "warn";
+      const pill = integration.ok
+        ? "Connected"
+        : expired
+          ? "Token expired"
+          : integration.configured
+            ? "Attention"
+            : "Not configured";
+      const heading = integration.ok
+        ? "Ready"
+        : expired
+          ? "Re-authentication needed"
+          : integration.configured
+            ? "Needs attention"
+            : "Setup needed";
+      return `
+        <article class="integration-card integration-${cardClass}">
           <div class="integration-header">
             <span class="metric-label">${integration.name}</span>
-            <span class="integration-pill">${integration.ok ? "Connected" : integration.configured ? "Attention" : "Not configured"}</span>
+            <span class="integration-pill">${pill}</span>
           </div>
-          <strong>${integration.ok ? "Ready" : integration.configured ? "Needs attention" : "Setup needed"}</strong>
+          <strong>${heading}</strong>
           <p>${integration.detail}</p>
         </article>
-      `,
-    )
+      `;
+    })
     .join("");
+}
+
+export function renderAuthBanner(snapshot: DashboardSnapshot) {
+  const banner = document.querySelector<HTMLElement>("[data-auth-banner]");
+  const textEl = document.querySelector<HTMLElement>("[data-auth-banner-text]");
+  if (!banner || !textEl) return;
+
+  const expired = (snapshot.integrations ?? [])
+    .filter((integration) => integration.state === "auth-expired")
+    .map((integration) => (integration.name === "github" ? "GitHub" : "Jira"));
+
+  if (expired.length === 0) {
+    banner.toggleAttribute("hidden", true);
+    return;
+  }
+
+  const services = expired.join(" and ");
+  const verb = expired.length > 1 ? "tokens have" : "token has";
+  textEl.textContent = `Your ${services} ${verb} expired or become invalid. Update it to restore live data.`;
+  banner.toggleAttribute("hidden", false);
 }
 
 export function renderRepoSyncs(snapshot: DashboardSnapshot) {
@@ -1063,6 +1099,7 @@ export function renderDashboard(snapshot: DashboardSnapshot) {
   const filteredPrs = applyListFilters(snapshot);
   renderSummary(snapshot.prs);
   renderIntegrations(snapshot);
+  renderAuthBanner(snapshot);
   renderRepoSyncs(snapshot);
   renderTokenStore(snapshot.tokenStore);
   renderListFilters(snapshot);

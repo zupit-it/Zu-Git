@@ -490,6 +490,59 @@ html, body {
   color: var(--warn);
 }
 
+.integration-expired {
+  border-color: var(--fail);
+}
+
+.integration-expired .integration-pill {
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
+/* ── Auth banner ───────────────────────────────────────────── */
+.auth-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  background: var(--fail-soft);
+  color: var(--fail);
+  border-bottom: 1px solid var(--fail);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-banner[hidden] {
+  display: none;
+}
+
+.auth-banner-icon {
+  flex: none;
+}
+
+.auth-banner-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.auth-banner-action {
+  flex: none;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-banner-action:hover {
+  background: var(--fail);
+  color: #fff;
+}
+
 .integration-card strong {
   display: block;
   font-size: 15px;

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{AppSettings, DraftPrInfo, PipelineState};
+use crate::models::{ApiError, AppSettings, DraftPrInfo, PipelineState};
 
 // ── GraphQL query ─────────────────────────────────────────────────────────────
 
@@ -288,6 +288,9 @@ pub struct GithubRepoFetchResult {
     pub ok: bool,
     pub pull_requests: Vec<GithubPullRequestRecord>,
     pub error: Option<String>,
+    /// True when the failure was an authentication error (HTTP 401) rather than
+    /// a transient/other error — used to surface a re-authenticate prompt.
+    pub auth_failed: bool,
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -308,23 +311,26 @@ async fn github_request<T: serde::de::DeserializeOwned>(
     url: &str,
     settings: &AppSettings,
     client: &reqwest::Client,
-) -> Result<T, String> {
+) -> Result<T, ApiError> {
     let response = client
         .get(url)
         .headers(github_headers(settings))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| ApiError::Other(e.to_string()))?;
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "GitHub request failed ({}) for {}",
-            response.status(),
-            url
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ApiError::from_status(
+            status.as_u16(),
+            format!("GitHub request failed ({status}) for {url}"),
         ));
     }
 
-    response.json::<T>().await.map_err(|e| e.to_string())
+    response
+        .json::<T>()
+        .await
+        .map_err(|e| ApiError::Other(e.to_string()))
 }
 
 /// Fetches avatar URLs for a list of GitHub logins via `GET /users/{login}` in parallel.
@@ -376,7 +382,7 @@ async fn graphql_request(
     variables: serde_json::Value,
     settings: &AppSettings,
     client: &reqwest::Client,
-) -> Result<GqlResponse, String> {
+) -> Result<GqlResponse, ApiError> {
     let url = graphql_url(settings);
     let body = serde_json::json!({ "query": query, "variables": variables });
 
@@ -386,17 +392,20 @@ async fn graphql_request(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("GraphQL request failed: {e}"))?;
+        .map_err(|e| ApiError::Other(format!("GraphQL request failed: {e}")))?;
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "GitHub GraphQL API returned {} for {}",
-            response.status(),
-            url
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ApiError::from_status(
+            status.as_u16(),
+            format!("GitHub GraphQL API returned {status} for {url}"),
         ));
     }
 
-    response.json::<GqlResponse>().await.map_err(|e| e.to_string())
+    response
+        .json::<GqlResponse>()
+        .await
+        .map_err(|e| ApiError::Other(e.to_string()))
 }
 
 /// Like `graphql_request` but returns the raw `data` value — used for
@@ -425,7 +434,7 @@ async fn graphql_request_raw(
 pub async fn fetch_viewer_login(
     settings: &AppSettings,
     client: &reqwest::Client,
-) -> Result<String, String> {
+) -> Result<String, ApiError> {
     #[derive(Debug, Deserialize)]
     struct GithubViewer {
         login: String,
@@ -492,12 +501,14 @@ async fn fetch_repo_pull_requests(
             ok: true,
             pull_requests: prs,
             error: None,
+            auth_failed: false,
         },
         Err(e) => GithubRepoFetchResult {
             repo: repo.to_string(),
             ok: false,
             pull_requests: vec![],
-            error: Some(e),
+            auth_failed: e.is_auth(),
+            error: Some(e.to_string()),
         },
     }
 }
@@ -506,10 +517,10 @@ async fn fetch_repo_pull_requests_inner(
     repo: &str,
     settings: &AppSettings,
     client: &reqwest::Client,
-) -> Result<Vec<GithubPullRequestRecord>, String> {
+) -> Result<Vec<GithubPullRequestRecord>, ApiError> {
     let (owner, repo_name) = repo
         .split_once('/')
-        .ok_or_else(|| format!("Invalid repo format: {repo}"))?;
+        .ok_or_else(|| ApiError::Other(format!("Invalid repo format: {repo}")))?;
 
     // Fetch all pages (typically one for most repos).
     let mut all_prs: Vec<GqlPr> = vec![];
@@ -526,13 +537,13 @@ async fn fetch_repo_pull_requests_inner(
 
         if let Some(errors) = &resp.errors {
             let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
-            return Err(format!("GraphQL error: {}", msgs.join("; ")));
+            return Err(ApiError::Other(format!("GraphQL error: {}", msgs.join("; "))));
         }
 
         let connection = resp
             .data
             .and_then(|d| d.repository)
-            .ok_or_else(|| format!("Repository {repo} not found or inaccessible"))?
+            .ok_or_else(|| ApiError::Other(format!("Repository {repo} not found or inaccessible")))?
             .pull_requests;
 
         let has_next = connection.page_info.has_next_page;

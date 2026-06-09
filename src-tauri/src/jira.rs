@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::models::{AppSettings, ChecklistItem, MatchStrategy};
+use crate::models::{ApiError, AppSettings, ChecklistItem, MatchStrategy};
 
 static JIRA_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b[A-Z][A-Z0-9]+-\d+\b").unwrap());
 
@@ -188,6 +188,32 @@ fn cache_key(base_url: &str, issue_key: &str) -> String {
 }
 
 // ── Public fetch ──────────────────────────────────────────────────────────────
+
+/// Lightweight credential probe: `GET /rest/api/3/myself` validates the email +
+/// token pair without depending on any particular issue existing. Used by the
+/// dashboard to detect an expired/invalid Jira token (HTTP 401) up front, so the
+/// user gets a clear re-authenticate prompt instead of silently-missing enrichment.
+pub async fn verify_credentials(
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<(), ApiError> {
+    let url = format!("{}/rest/api/3/myself", settings.jira_base_url);
+    let response = client
+        .get(&url)
+        .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+        .send()
+        .await
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    Err(ApiError::from_status(
+        status.as_u16(),
+        format!("Jira authentication failed ({status})"),
+    ))
+}
 
 pub async fn fetch_jira_issues(
     keys: &[String],

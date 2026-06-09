@@ -5,10 +5,19 @@ import type {
   SettingsFormValues,
 } from "./settings";
 
+export type IntegrationState =
+  | "not-configured"
+  | "pending"
+  | "ok"
+  | "auth-expired"
+  | "degraded"
+  | "unreachable";
+
 export interface IntegrationStatus {
   name: "github" | "jira";
   configured: boolean;
   ok: boolean;
+  state: IntegrationState;
   detail: string;
 }
 

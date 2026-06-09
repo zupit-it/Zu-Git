@@ -5,8 +5,9 @@ use crate::github::{GithubPullRequestRecord, GithubReviewSummary};
 use crate::jira::JiraIssueSummary;
 use crate::models::{
     mock_pull_requests, settings_ready_for_github, settings_ready_for_jira, AppSettings,
-    AuthorType, DashboardSnapshot, IntegrationStatus, MatchStrategy, PipelineState, Priority,
-    PullRequestSummary, RepoSyncStatus, ReviewActor, ReviewState, TokenStoreStatus,
+    AuthorType, DashboardSnapshot, IntegrationState, IntegrationStatus, MatchStrategy,
+    PipelineState, Priority, PullRequestSummary, RepoSyncStatus, ReviewActor, ReviewState,
+    TokenStoreStatus,
 };
 
 fn placeholder_token_store() -> TokenStoreStatus {
@@ -31,12 +32,19 @@ pub async fn build_dashboard_snapshot(
     let mut warnings: Vec<String> = vec![];
     let repo_syncs: Vec<RepoSyncStatus> = vec![];
 
+    let github_ready = settings_ready_for_github(settings);
+    let jira_ready = settings_ready_for_jira(settings);
     let mut integrations = vec![
         IntegrationStatus {
             name: "github".to_string(),
-            configured: settings_ready_for_github(settings),
+            configured: github_ready,
             ok: false,
-            detail: if settings_ready_for_github(settings) {
+            state: if github_ready {
+                IntegrationState::Pending
+            } else {
+                IntegrationState::NotConfigured
+            },
+            detail: if github_ready {
                 "Waiting for GitHub sync.".to_string()
             } else {
                 "Missing token or repositories.".to_string()
@@ -44,9 +52,14 @@ pub async fn build_dashboard_snapshot(
         },
         IntegrationStatus {
             name: "jira".to_string(),
-            configured: settings_ready_for_jira(settings),
+            configured: jira_ready,
             ok: false,
-            detail: if settings_ready_for_jira(settings) {
+            state: if jira_ready {
+                IntegrationState::Pending
+            } else {
+                IntegrationState::NotConfigured
+            },
+            detail: if jira_ready {
                 "Waiting for Jira enrichment.".to_string()
             } else {
                 "Not configured yet.".to_string()
@@ -115,7 +128,25 @@ async fn fetch_live(
 ) -> Result<DashboardSnapshot, String> {
     let now = chrono::Utc::now().to_rfc3339();
 
-    let viewer_login = crate::github::fetch_viewer_login(settings, client).await?;
+    let viewer_login = match crate::github::fetch_viewer_login(settings, client).await {
+        Ok(login) => login,
+        Err(e) if e.is_auth() => {
+            integrations[0].ok = false;
+            integrations[0].state = IntegrationState::AuthExpired;
+            integrations[0].detail =
+                "GitHub token expired or invalid — update it in Settings to restore live data."
+                    .to_string();
+            return Err(
+                "GitHub token expired or invalid. Re-authenticate in Settings.".to_string(),
+            );
+        }
+        Err(e) => {
+            integrations[0].ok = false;
+            integrations[0].state = IntegrationState::Unreachable;
+            integrations[0].detail = format!("Could not reach GitHub: {e}");
+            return Err(e.to_string());
+        }
+    };
     let repo_results = crate::github::fetch_open_pull_requests(settings, client).await;
 
     let mut repo_syncs = vec![];
@@ -173,8 +204,33 @@ async fn fetch_live(
         .filter_map(|n| n.jira_key.clone())
         .collect();
 
+    // Probe Jira credentials up front so an expired/invalid token surfaces a clear
+    // re-authenticate prompt instead of silently-missing enrichment.
+    let mut jira_failed = false;
     let jira_issues = if jira_enabled {
-        crate::jira::fetch_jira_issues(&jira_keys, settings, jira_cache, client).await
+        match crate::jira::verify_credentials(settings, client).await {
+            Ok(()) => {
+                crate::jira::fetch_jira_issues(&jira_keys, settings, jira_cache, client).await
+            }
+            Err(e) => {
+                jira_failed = true;
+                integrations[1].ok = false;
+                if e.is_auth() {
+                    integrations[1].state = IntegrationState::AuthExpired;
+                    integrations[1].detail =
+                        "Jira token expired or invalid — update it in Settings to restore enrichment."
+                            .to_string();
+                    warnings.push(
+                        "Jira token expired or invalid. Re-authenticate in Settings.".to_string(),
+                    );
+                } else {
+                    integrations[1].state = IntegrationState::Unreachable;
+                    integrations[1].detail = format!("Could not reach Jira: {e}");
+                    warnings.push(format!("Jira is unavailable: {e}"));
+                }
+                HashMap::new()
+            }
+        }
     } else {
         HashMap::new()
     };
@@ -210,12 +266,13 @@ async fn fetch_live(
         );
         integrations[1].detail =
             "GitHub data is live, Jira enrichment is using placeholders.".to_string();
-    } else {
+    } else if !jira_failed {
         let linked = enriched
             .iter()
             .filter(|pr| pr.jira_key != "No ticket")
             .count();
         integrations[1].ok = true;
+        integrations[1].state = IntegrationState::Ok;
         integrations[1].detail = format!(
             "Jira enrichment active for linked tickets. {} PRs include a Jira key. {} repo-to-board mappings configured.",
             linked,
@@ -223,8 +280,18 @@ async fn fetch_live(
         );
     }
 
+    let github_auth_failed = repo_results.iter().any(|r| r.auth_failed);
     integrations[0].ok = failed_count == 0;
-    integrations[0].detail = if failed_count == 0 {
+    integrations[0].state = if github_auth_failed {
+        IntegrationState::AuthExpired
+    } else if failed_count == 0 {
+        IntegrationState::Ok
+    } else {
+        IntegrationState::Degraded
+    };
+    integrations[0].detail = if github_auth_failed {
+        "GitHub token expired or invalid — update it in Settings to restore live data.".to_string()
+    } else if failed_count == 0 {
         format!(
             "GitHub sync completed. {} open PRs loaded from {} repos.",
             all_prs.len(),
