@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.9.7] - 2026-06-30
+
+---
+
 ## [0.9.6] - 2026-06-09
 
 - **Warning about expired tokens** 

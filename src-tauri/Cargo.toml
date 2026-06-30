@@ -1,6 +1,6 @@
 [package]
 name = "zugit"
-version = "0.9.6"
+version = "0.9.7"
 description = "ZuGit – PR dashboard"
 authors = []
 edition = "2021"
