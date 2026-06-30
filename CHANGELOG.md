@@ -12,6 +12,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.9.6] - 2026-06-09
 
 - **Warning about expired tokens** 
+- **Multi-release stories** — a story/PR can now belong to several Jira fix versions at once.
+  The dashboard groups it under its primary (most imminent) release with a `+N release` badge
+  listing the others, the release-diff classifies it correctly (Done/Missing instead of Extra)
+  when any of its versions matches the release, and Move/Defer/Adopt/Drop act only on the current
+  release — preserving the story's other version assignments instead of overwriting them.
 
 ## [0.9.5] - 2026-05-28
 

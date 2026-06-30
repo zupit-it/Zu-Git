@@ -463,10 +463,11 @@ pub async fn fetch_release_diff(
     let available_set: std::collections::HashSet<&str> =
         available_versions.iter().map(|v| v.as_str()).collect();
 
-    // Separate planned (fixVersion == release_name) from all fetched issues.
+    // Separate planned (release_name is one of the issue's fixVersions) from all
+    // fetched issues. A story can carry several fixVersions at once.
     let planned_keys: std::collections::HashSet<String> = jira_issues
         .iter()
-        .filter(|i| i.release == release_name)
+        .filter(|i| i.has_release(&release_name))
         .map(|i| i.key.clone())
         .collect();
 
@@ -484,7 +485,7 @@ pub async fn fetch_release_diff(
             summary: issue.summary.clone(),
             status: issue.status.clone(),
             issue_type: issue.issue_type.clone(),
-            fix_version: issue.release.clone(),
+            fix_versions: issue.release_names(),
             pr_url: merged.map(|m| m.url.clone()),
             pr_number: merged.map(|m| m.number),
             branch: merged.map(|m| m.head_ref.clone()).unwrap_or_default(),
@@ -541,11 +542,16 @@ pub async fn fetch_release_diff(
             continue; // already counted as done
         }
         if let Some(issue) = jira_map.get(key) {
-            let fv = issue.release.as_str();
-            // Keep only: unscheduled or a known unreleased version.
-            let is_unscheduled = fv.is_empty() || fv == "Unscheduled";
-            if !is_unscheduled && fv != release_name && !available_set.contains(fv) {
-                continue; // belongs to a past release — skip
+            // Keep only: unscheduled, or at least one fixVersion that is the
+            // current release or a known unreleased one. Skip only when *every*
+            // version belongs to an already-released (historical) version.
+            let is_unscheduled = issue.releases.is_empty();
+            let touches_relevant = issue
+                .releases
+                .iter()
+                .any(|v| v.name == release_name || available_set.contains(v.name.as_str()));
+            if !is_unscheduled && !touches_relevant {
+                continue; // all versions belong to past releases — skip
             }
             let merged = merged_map.get(key).copied();
             // Flag when the story is merged but Jira status is still open — git ahead of Jira.
@@ -567,7 +573,7 @@ pub async fn fetch_release_diff(
                 summary: merged.map(|m| m.title.clone()).unwrap_or_default(),
                 status: String::new(),
                 issue_type: String::new(),
-                fix_version: String::new(),
+                fix_versions: vec![],
                 pr_url: merged.map(|m| m.url.clone()),
                 pr_number: merged.map(|m| m.number),
                 branch: merged.map(|m| m.head_ref.clone()).unwrap_or_default(),
@@ -616,15 +622,17 @@ pub async fn move_jira_fix_versions(
     state: tauri::State<'_, AppState>,
     keys: Vec<String>,
     target_version: String,
+    current_version: Option<String>,
 ) -> Result<(), String> {
     let settings = storage::load_settings(&app).await?;
     if !crate::models::settings_ready_for_jira(&settings) {
         return Err("Jira not configured".into());
     }
 
+    let from = current_version.as_deref();
     let futs: Vec<_> = keys
         .iter()
-        .map(|key| crate::jira::move_fix_version(key, &target_version, &settings, &state.http_client))
+        .map(|key| crate::jira::move_fix_version(key, from, &target_version, &settings, &state.http_client))
         .collect();
 
     let results = futures::future::join_all(futs).await;
@@ -642,15 +650,17 @@ pub async fn drop_jira_fix_versions(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     keys: Vec<String>,
+    current_version: Option<String>,
 ) -> Result<(), String> {
     let settings = storage::load_settings(&app).await?;
     if !crate::models::settings_ready_for_jira(&settings) {
         return Err("Jira not configured".into());
     }
 
+    let version = current_version.as_deref();
     let futs: Vec<_> = keys
         .iter()
-        .map(|key| crate::jira::drop_fix_version(key, &settings, &state.http_client))
+        .map(|key| crate::jira::drop_fix_version(key, version, &settings, &state.http_client))
         .collect();
 
     let results = futures::future::join_all(futs).await;

@@ -8,7 +8,7 @@ interface ReleaseDiffItem {
   summary: string;
   status: string;
   issueType: string;
-  fixVersion: string;
+  fixVersions: string[];
   prUrl?: string;
   prNumber?: number;
   branch: string;
@@ -121,8 +121,16 @@ interface ModalState {
   projectKey: string | undefined;
 }
 
+/** Fix versions other than the current release / Unscheduled — the divergent ones. */
+function divergentVersions(item: ReleaseDiffItem, currentVersion: string): string[] {
+  return item.fixVersions.filter(v => v && v !== currentVersion && v !== "Unscheduled");
+}
+
 function isFlagged(item: ReleaseDiffItem, currentVersion: string): boolean {
-  return !!item.flag || (!!item.fixVersion && item.fixVersion !== currentVersion && item.fixVersion !== "" && item.fixVersion !== "Unscheduled");
+  // Diverges when none of the issue's fix versions is the current release
+  // (and it carries at least one real version).
+  const hasCurrent = item.fixVersions.includes(currentVersion);
+  return !!item.flag || (!hasCurrent && divergentVersions(item, currentVersion).length > 0);
 }
 
 function computeCounts(result: ReleaseDiffResult, releaseName: string): { all: number; done: number; missing: number; extra: number; flagged: number } {
@@ -189,8 +197,10 @@ function renderItem(item: ReleaseDiffItem, kind: "done" | "missing" | "extra", s
   // Divergence column — flag chip and/or jira-version chip and/or preview
   let divergence = "";
   if (item.flag) divergence += renderFlagChip(item.flag);
-  if (item.fixVersion && item.fixVersion !== currentVersion && item.fixVersion !== "" && item.fixVersion !== "Unscheduled" && kind === "extra") {
-    divergence += `<span class="rd-jira-ver-chip" title="Jira target version: ${escHtml(item.fixVersion)}">Jira: ${escHtml(item.fixVersion)}</span>`;
+  const divergent = divergentVersions(item, currentVersion);
+  if (divergent.length > 0 && kind === "extra") {
+    const label = divergent.join(", ");
+    divergence += `<span class="rd-jira-ver-chip" title="Jira target version${divergent.length !== 1 ? "s" : ""}: ${escHtml(label)}">Jira: ${escHtml(label)}</span>`;
   }
   if (item.isPreview) {
     divergence += `<span class="rd-preview-chip">preview</span>`;
@@ -674,13 +684,37 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
 
   // ── Apply (move fixVersion) ───────────────────────────────────────────────
 
+  // Splits the current selection by membership in the current release. Items that
+  // already carry the current release (e.g. Missing/planned) are moved *from* it
+  // so their other versions survive; items that don't (e.g. Extra) are only added
+  // to the target / fully unscheduled.
+  function partitionSelection(): { inRelease: string[]; notInRelease: string[] } {
+    const all = [...st.result.done, ...st.result.missing, ...st.result.extra];
+    const byKey = new Map(all.map(it => [it.key, it]));
+    const inRelease: string[] = [];
+    const notInRelease: string[] = [];
+    for (const key of st.selected) {
+      const item = byKey.get(key);
+      if (item && item.fixVersions.includes(st.releaseName)) inRelease.push(key);
+      else notInRelease.push(key);
+    }
+    return { inRelease, notInRelease };
+  }
+
   async function handleApply() {
-    const keys = [...st.selected];
-    if (keys.length === 0) return;
+    if (st.selected.size === 0) return;
     const target = st.targetVersion;
+    const { inRelease, notInRelease } = partitionSelection();
     showLoading();
     try {
-      await invoke("move_jira_fix_versions", { keys, targetVersion: target });
+      // `from` = current release for items that have it (preserve other versions);
+      // omit `from` for items that don't (Adopt = pure add).
+      if (inRelease.length > 0) {
+        await invoke("move_jira_fix_versions", { keys: inRelease, targetVersion: target, currentVersion: st.releaseName });
+      }
+      if (notInRelease.length > 0) {
+        await invoke("move_jira_fix_versions", { keys: notInRelease, targetVersion: target, currentVersion: null });
+      }
       await refreshDiff();
     } catch (err) {
       alert(`Error: ${String(err)}`);
@@ -691,11 +725,18 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
   // ── Drop from release ─────────────────────────────────────────────────────
 
   async function handleDrop() {
-    const keys = [...st.selected];
-    if (keys.length === 0) return;
+    if (st.selected.size === 0) return;
+    const { inRelease, notInRelease } = partitionSelection();
     showLoading();
     try {
-      await invoke("drop_jira_fix_versions", { keys });
+      // Items in the current release: remove only that version (keep the others).
+      // Items not in it (Extra noise): fully unschedule.
+      if (inRelease.length > 0) {
+        await invoke("drop_jira_fix_versions", { keys: inRelease, currentVersion: st.releaseName });
+      }
+      if (notInRelease.length > 0) {
+        await invoke("drop_jira_fix_versions", { keys: notInRelease, currentVersion: null });
+      }
       await refreshDiff();
     } catch (err) {
       alert(`Error: ${String(err)}`);

@@ -11,6 +11,14 @@ static JIRA_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b[A-Z][A-Z0-9]+-\d+
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+/// A single Jira fix version (name + optional release date). A Jira issue can
+/// carry several of these — `JiraIssueSummary::releases` preserves the whole set.
+#[derive(Debug, Clone)]
+pub struct FixVersion {
+    pub name: String,
+    pub release_date: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct JiraIssueSummary {
     pub key: String,
@@ -18,9 +26,27 @@ pub struct JiraIssueSummary {
     pub priority: String,
     pub status: String,
     pub issue_type: String,
-    pub release: String,
-    pub release_date: Option<String>,
+    /// All fix versions assigned to the issue, sorted "primary first" (the
+    /// version with the most imminent release date; undated ones go last).
+    pub releases: Vec<FixVersion>,
     pub assignee: Option<String>,
+}
+
+impl JiraIssueSummary {
+    /// The primary fix version — the first entry, i.e. the most imminent release.
+    pub fn primary(&self) -> Option<&FixVersion> {
+        self.releases.first()
+    }
+
+    /// True when one of the issue's fix versions matches `name`.
+    pub fn has_release(&self, name: &str) -> bool {
+        self.releases.iter().any(|v| v.name == name)
+    }
+
+    /// Names of all fix versions, primary first.
+    pub fn release_names(&self) -> Vec<String> {
+        self.releases.iter().map(|v| v.name.clone()).collect()
+    }
 }
 
 pub struct JiraKeyMatch {
@@ -126,23 +152,27 @@ struct JiraFixVersion {
 }
 
 fn map_issue(issue: &JiraIssueResponse) -> JiraIssueSummary {
-    let release = issue
+    // Keep every fix version, sorted "primary first": dated versions ascending
+    // (most imminent release first), undated ones last. Mirrors the ordering
+    // used by `fetch_project_versions`.
+    let mut releases: Vec<FixVersion> = issue
         .fields
         .fix_versions
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter_map(|v| v.name.as_deref())
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let release_date = issue
-        .fields
-        .fix_versions
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .find_map(|v| v.release_date.clone());
+        .filter_map(|v| {
+            v.name.as_ref().map(|name| FixVersion {
+                name: name.clone(),
+                release_date: v.release_date.clone(),
+            })
+        })
+        .collect();
+    releases.sort_by(|a, b| {
+        let ad = a.release_date.as_deref().unwrap_or("9999");
+        let bd = b.release_date.as_deref().unwrap_or("9999");
+        ad.cmp(bd)
+    });
 
     JiraIssueSummary {
         key: issue.key.clone(),
@@ -169,12 +199,7 @@ fn map_issue(issue: &JiraIssueResponse) -> JiraIssueSummary {
             .as_ref()
             .and_then(|t| t.name.clone())
             .unwrap_or_default(),
-        release: if release.is_empty() {
-            "Unscheduled".to_string()
-        } else {
-            release
-        },
-        release_date,
+        releases,
         assignee: issue
             .fields
             .assignee
@@ -918,17 +943,31 @@ pub async fn fetch_project_versions(
     versions
 }
 
-/// Updates the fixVersion of a Jira issue to exactly the given target version.
+/// Moves a Jira issue from `from` to `to`, preserving any other fix versions.
+///
+/// When `from` is given (and differs from `to`) the issue's other versions are
+/// kept: only `from` is removed and `to` is added. When `from` is `None` (e.g.
+/// adopting an Extra story into a release) `to` is simply added alongside the
+/// existing versions. A `remove` for a version the issue doesn't have is a
+/// harmless no-op on Jira's side.
 pub async fn move_fix_version(
     key: &str,
-    target_version: &str,
+    from: Option<&str>,
+    to: &str,
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Result<(), String> {
     let url = format!("{}/rest/api/3/issue/{}", settings.jira_base_url, key);
+    let mut ops = Vec::new();
+    if let Some(from) = from {
+        if from != to {
+            ops.push(serde_json::json!({ "remove": { "name": from } }));
+        }
+    }
+    ops.push(serde_json::json!({ "add": { "name": to } }));
     let body = serde_json::json!({
         "update": {
-            "fixVersions": [{ "set": [{ "name": target_version }] }]
+            "fixVersions": ops
         }
     });
 
@@ -945,20 +984,27 @@ pub async fn move_fix_version(
     } else {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        Err(format!("Failed to move {key} to {target_version} ({status}): {text}"))
+        Err(format!("Failed to move {key} to {to} ({status}): {text}"))
     }
 }
 
-/// Removes all fixVersions from the given Jira issue (drop from any release).
+/// Drops a Jira issue from a release. With `version = Some(v)` only that single
+/// version is removed (other fixVersions are preserved); with `version = None`
+/// every fixVersion is cleared (full unschedule).
 pub async fn drop_fix_version(
     key: &str,
+    version: Option<&str>,
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Result<(), String> {
     let url = format!("{}/rest/api/3/issue/{}", settings.jira_base_url, key);
+    let ops = match version {
+        Some(v) => serde_json::json!([{ "remove": { "name": v } }]),
+        None => serde_json::json!([{ "set": [] }]),
+    };
     let body = serde_json::json!({
         "update": {
-            "fixVersions": [{ "set": [] }]
+            "fixVersions": ops
         }
     });
 

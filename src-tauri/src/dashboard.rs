@@ -458,11 +458,14 @@ fn enrich(
             .unwrap_or_else(|| "No linked Jira issue found".to_string()),
         jira_priority: map_priority(issue.map(|i| i.priority.as_str()).unwrap_or("Medium")),
         jira_release: issue
-            .map(|i| i.release.clone())
+            .and_then(|i| i.primary())
+            .map(|v| v.name.clone())
             .unwrap_or_else(|| "Unscheduled".to_string()),
         jira_release_date: issue
-            .and_then(|i| i.release_date.clone())
+            .and_then(|i| i.primary())
+            .and_then(|v| v.release_date.clone())
             .and_then(|d| format_release_date(&d)),
+        jira_releases: issue.map(|i| i.release_names()).unwrap_or_default(),
         jira_status: issue
             .map(|i| i.status.clone())
             .unwrap_or_else(|| "Unknown".to_string()),

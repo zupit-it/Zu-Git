@@ -406,6 +406,12 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
     ? `<span class="priority-icon" title="${pr.jiraPriority} priority">${priorityIconSvg}</span>`
     : "";
 
+  // Multi-release badge: the story is planned for more than one fix version.
+  const extraReleaseCount = (pr.jiraReleases?.length ?? 0) - 1;
+  const multiReleaseBadge = extraReleaseCount > 0
+    ? `<span class="release-extra-badge" title="${escHtml(`Releases: ${pr.jiraReleases.join(", ")}`)}">+${extraReleaseCount} release${extraReleaseCount !== 1 ? "s" : ""}</span>`
+    : "";
+
   // Key chip: draft rows get a dark solid pill with "DRAFT · KEY"
   const keyChip = isDraft
     ? chip("draft-solid chip-key", pr.jiraKey ? `DRAFT · ${pr.jiraKey}` : "DRAFT", SVG.draft)
@@ -474,7 +480,7 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
       <div class="pr-row-bar"></div>
       <div style="min-width:0">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-          ${keyChip}${priorityIcon}
+          ${keyChip}${priorityIcon}${multiReleaseBadge}
           <span style="font-size:13.5px;font-weight:${titleWeight};color:${titleColor};letter-spacing:-0.1px;line-height:1.3">${escHtml(pr.title)}</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:${pr.jiraSummary ? "6" : "0"}px">

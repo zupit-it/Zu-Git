@@ -1522,6 +1522,19 @@ html, body {
   font-feature-settings: "tnum";
 }
 
+.release-extra-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  cursor: default;
+}
+
 .release-group-line {
   flex: 1;
   height: 1px;

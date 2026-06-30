@@ -179,8 +179,13 @@ pub struct PullRequestSummary {
     pub jira_key: String,
     pub jira_summary: String,
     pub jira_priority: Priority,
+    /// Primary fix version (most imminent release); derived from `jira_releases`
+    /// for backward-compatible single-value reads.
     pub jira_release: String,
     pub jira_release_date: Option<String>,
+    /// All fix versions assigned to the issue, primary first. A story can be
+    /// planned for several releases at once.
+    pub jira_releases: Vec<String>,
     pub jira_status: String,
     pub author: String,
     pub author_avatar_url: Option<String>,
@@ -515,7 +520,8 @@ pub struct ReleaseDiffItem {
     pub summary: String,
     pub status: String,
     pub issue_type: String,
-    pub fix_version: String,
+    /// All fix versions assigned to the issue (empty when unscheduled).
+    pub fix_versions: Vec<String>,
     pub pr_url: Option<String>,
     pub pr_number: Option<u64>,
     pub branch: String,
@@ -560,6 +566,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             jira_priority: Priority::Highest,
             jira_release: "2026.05".to_string(),
             jira_release_date: Some("May 15, 2026".to_string()),
+            jira_releases: vec!["2026.05".to_string(), "2026.06".to_string()],
             jira_status: "Ready for release".to_string(),
             author: "marta".to_string(),
             author_avatar_url: None,
@@ -612,6 +619,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             jira_priority: Priority::High,
             jira_release: "2026.04-hotfix".to_string(),
             jira_release_date: Some("Apr 25, 2026".to_string()),
+            jira_releases: vec!["2026.04-hotfix".to_string()],
             jira_status: "In validation".to_string(),
             author: "sara".to_string(),
             author_avatar_url: None,
@@ -661,6 +669,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             jira_priority: Priority::Medium,
             jira_release: "2026.06".to_string(),
             jira_release_date: Some("Jun 10, 2026".to_string()),
+            jira_releases: vec!["2026.06".to_string()],
             jira_status: "In progress".to_string(),
             author: "giulia".to_string(),
             author_avatar_url: None,

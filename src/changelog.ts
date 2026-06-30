@@ -17,6 +17,10 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Stories across multiple releases",
+        body: "A story/PR can now belong to several Jira fix versions at once. The dashboard groups it under its <strong>primary</strong> (most imminent) release with a <strong>+N release</strong> badge listing the others, and the release diff finally classifies it correctly — <strong>Done/Missing instead of Extra</strong> — whenever any of its versions matches. <strong>Move, Defer, Adopt and Drop</strong> now act only on the current release, preserving the story's other version assignments instead of overwriting them.",
+      },
+      {
         title: "Add graphic warning for expired tokens",
         body: "Removed mock data",
       },

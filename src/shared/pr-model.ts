@@ -27,8 +27,11 @@ export interface PullRequestSummary {
   jiraKey: string;
   jiraSummary: string;
   jiraPriority: Priority;
+  /** Primary fix version (most imminent release); derived from `jiraReleases`. */
   jiraRelease: string;
   jiraReleaseDate?: string;
+  /** All fix versions assigned to the issue, primary first. */
+  jiraReleases: string[];
   jiraStatus: string;
   author: string;
   authorAvatarUrl?: string;
@@ -100,6 +103,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     jiraPriority: "Highest",
     jiraRelease: "2026.05",
     jiraReleaseDate: "May 15, 2026",
+    jiraReleases: ["2026.05", "2026.06"],
     jiraStatus: "Ready for release",
     author: "marta",
     assignee: "luca",
@@ -142,6 +146,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     jiraPriority: "High",
     jiraRelease: "2026.04-hotfix",
     jiraReleaseDate: "Apr 25, 2026",
+    jiraReleases: ["2026.04-hotfix"],
     jiraStatus: "In validation",
     author: "sara",
     assignee: "federico",
@@ -183,6 +188,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     jiraPriority: "Medium",
     jiraRelease: "2026.06",
     jiraReleaseDate: "Jun 10, 2026",
+    jiraReleases: ["2026.06"],
     jiraStatus: "In progress",
     author: "giulia",
     assignee: "davide",
