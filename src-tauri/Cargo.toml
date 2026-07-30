@@ -27,7 +27,16 @@ chrono = "0.4"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 regex = "1"
 once_cell = "1"
+# Google OAuth (PKCE + loopback redirect)
+base64 = "0.22"
+sha2 = "0.10"
+rand = "0.8"
+url = "2"
 parking_lot = "0.12"
+
+# setsid(2) when handing secrets to the `security` CLI over stdin.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 
 [profile.dev]
 incremental = true

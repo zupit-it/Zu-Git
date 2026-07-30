@@ -24,6 +24,23 @@ pub struct AppSettings {
     pub score_rule_changes_requested_enabled: bool,
     pub score_rule_ci_enabled: bool,
     pub score_rule_behind_enabled: bool,
+    pub merge_queue_enabled: bool,
+    pub toggl_enabled: bool,
+    pub toggl_token: String,
+    /// Empty = use the account's default workspace.
+    pub toggl_workspace_id: String,
+    /// Local "HH:MM" bounds of the working day the planner fills.
+    pub toggl_day_start: String,
+    pub toggl_day_end: String,
+    /// Rounding granularity, in minutes, for generated entries.
+    pub toggl_slot_minutes: u32,
+    /// How far back the project/tag mapping is learned from.
+    pub toggl_history_days: u32,
+    pub google_calendar_enabled: bool,
+    pub google_client_id: String,
+    pub google_client_secret: String,
+    /// Calendar to read; empty means the account's primary one.
+    pub google_calendar_id: String,
 }
 
 impl Default for AppSettings {
@@ -47,6 +64,18 @@ impl Default for AppSettings {
             score_rule_changes_requested_enabled: true,
             score_rule_ci_enabled: true,
             score_rule_behind_enabled: false,
+            merge_queue_enabled: false,
+            toggl_enabled: false,
+            toggl_token: String::new(),
+            toggl_workspace_id: String::new(),
+            toggl_day_start: "08:00".to_string(),
+            toggl_day_end: "14:00".to_string(),
+            toggl_slot_minutes: 15,
+            toggl_history_days: 60,
+            google_calendar_enabled: false,
+            google_client_id: String::new(),
+            google_client_secret: String::new(),
+            google_calendar_id: String::new(),
         }
     }
 }
@@ -80,6 +109,18 @@ pub struct SettingsFormValues {
     pub score_rule_changes_requested_enabled: String,     // "on" | ""
     pub score_rule_ci_enabled: String,                    // "on" | ""
     pub score_rule_behind_enabled: String,                // "on" | ""
+    pub merge_queue_enabled: String,                      // "on" | ""
+    pub toggl_enabled: String,                            // "on" | ""
+    pub toggl_token: String,
+    pub toggl_workspace_id: String,
+    pub toggl_day_start: String,                          // "HH:MM"
+    pub toggl_day_end: String,                            // "HH:MM"
+    pub toggl_slot_minutes: String,
+    pub toggl_history_days: String,
+    pub google_calendar_enabled: String,                  // "on" | ""
+    pub google_client_id: String,
+    pub google_client_secret: String,
+    pub google_calendar_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +254,9 @@ pub struct PullRequestSummary {
     pub merge_status: String,
     pub node_id: String,
     pub head_ref: String,
+    /// Head commit SHA at fetch time — sent as `expectedHeadOid` when triggering a
+    /// rebase, so a concurrent push causes a clean rejection instead of a race.
+    pub head_sha: String,
     pub base_ref: String,
     pub body: String,
 }
@@ -433,6 +477,38 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         score_rule_changes_requested_enabled: values.score_rule_changes_requested_enabled.trim() == "on",
         score_rule_ci_enabled: values.score_rule_ci_enabled.trim() == "on",
         score_rule_behind_enabled: values.score_rule_behind_enabled.trim() == "on",
+        merge_queue_enabled: values.merge_queue_enabled.trim() == "on",
+        toggl_enabled: values.toggl_enabled.trim() == "on",
+        toggl_token: values.toggl_token.trim().to_string(),
+        toggl_workspace_id: values.toggl_workspace_id.trim().to_string(),
+        toggl_day_start: normalize_clock(&values.toggl_day_start, "08:00"),
+        toggl_day_end: normalize_clock(&values.toggl_day_end, "14:00"),
+        toggl_slot_minutes: match values.toggl_slot_minutes.trim().parse::<u32>() {
+            Ok(minutes) if (5..=120).contains(&minutes) => minutes,
+            _ => 15,
+        },
+        // Capped at 90: the Toggl time-entries endpoint refuses wider windows.
+        toggl_history_days: match values.toggl_history_days.trim().parse::<u32>() {
+            Ok(days) if (7..=90).contains(&days) => days,
+            _ => 60,
+        },
+        google_calendar_enabled: values.google_calendar_enabled.trim() == "on",
+        google_client_id: values.google_client_id.trim().to_string(),
+        google_client_secret: values.google_client_secret.trim().to_string(),
+        google_calendar_id: values.google_calendar_id.trim().to_string(),
+    }
+}
+
+/// Accepts "8:00", "08:00" or "08:00:00" and returns a canonical "HH:MM";
+/// anything unparseable falls back to `fallback`.
+fn normalize_clock(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    let mut parts = trimmed.split(':');
+    let hour = parts.next().and_then(|h| h.trim().parse::<u32>().ok());
+    let minute = parts.next().and_then(|m| m.trim().parse::<u32>().ok());
+    match (hour, minute) {
+        (Some(h), Some(m)) if h < 24 && m < 60 => format!("{h:02}:{m:02}"),
+        _ => fallback.to_string(),
     }
 }
 
@@ -469,6 +545,18 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         score_rule_changes_requested_enabled: if settings.score_rule_changes_requested_enabled { "on".to_string() } else { String::new() },
         score_rule_ci_enabled: if settings.score_rule_ci_enabled { "on".to_string() } else { String::new() },
         score_rule_behind_enabled: if settings.score_rule_behind_enabled { "on".to_string() } else { String::new() },
+        merge_queue_enabled: if settings.merge_queue_enabled { "on".to_string() } else { String::new() },
+        toggl_enabled: if settings.toggl_enabled { "on".to_string() } else { String::new() },
+        toggl_token: settings.toggl_token.clone(),
+        toggl_workspace_id: settings.toggl_workspace_id.clone(),
+        toggl_day_start: settings.toggl_day_start.clone(),
+        toggl_day_end: settings.toggl_day_end.clone(),
+        toggl_slot_minutes: settings.toggl_slot_minutes.to_string(),
+        toggl_history_days: settings.toggl_history_days.to_string(),
+        google_calendar_enabled: if settings.google_calendar_enabled { "on".to_string() } else { String::new() },
+        google_client_id: settings.google_client_id.clone(),
+        google_client_secret: settings.google_client_secret.clone(),
+        google_calendar_id: settings.google_calendar_id.clone(),
     }
 }
 
@@ -600,6 +688,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             merge_status: "behind".to_string(),
             node_id: String::new(),
             head_ref: String::new(),
+            head_sha: String::new(),
             base_ref: String::new(),
             body: String::new(),
         },
@@ -650,6 +739,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             merge_status: "clean".to_string(),
             node_id: String::new(),
             head_ref: String::new(),
+            head_sha: String::new(),
             base_ref: String::new(),
             body: String::new(),
         },
@@ -700,6 +790,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             merge_status: "unknown".to_string(),
             node_id: String::new(),
             head_ref: String::new(),
+            head_sha: String::new(),
             base_ref: String::new(),
             body: String::new(),
         },

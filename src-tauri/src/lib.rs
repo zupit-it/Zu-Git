@@ -1,10 +1,12 @@
 mod commands;
 mod dashboard;
 mod github;
+mod google;
 mod jira;
 mod models;
 mod secret_store;
 mod storage;
+mod toggl;
 
 use std::collections::HashMap;
 use parking_lot::Mutex;
@@ -19,6 +21,11 @@ pub struct AppState {
     /// Whether the last `save_settings` successfully stored tokens in the system vault.
     /// None = settings never saved in this session.
     pub last_save_used_vault: Mutex<Option<bool>>,
+    /// Toggl `/me` payload cached per token — that endpoint is rate-limited to
+    /// 30 calls/hour on Free plans.
+    pub toggl_account: Mutex<Option<(String, toggl::TogglAccount)>>,
+    /// Google access token with its expiry — refreshed from the stored refresh token.
+    pub google_access: Mutex<Option<(String, std::time::Instant)>>,
 }
 
 pub fn run() {
@@ -70,6 +77,8 @@ pub fn run() {
             http_client: reqwest::Client::new(),
             secret_store_info: std::sync::OnceLock::new(),
             last_save_used_vault: Mutex::new(None),
+            toggl_account: Mutex::new(None),
+            google_access: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
@@ -93,6 +102,13 @@ pub fn run() {
             commands::update_jira_checklist,
             commands::complete_jira_story,
             commands::promote_draft_pr,
+            commands::rebase_pull_request,
+            commands::toggl_check_connection,
+            commands::toggl_prepare_day,
+            commands::toggl_submit_entries,
+            commands::google_connect,
+            commands::google_disconnect,
+            commands::google_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

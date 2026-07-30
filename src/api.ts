@@ -11,6 +11,7 @@ import {
   renderPRRow, collectSettingsForm,
 } from "./render";
 import { SVG } from "./utils";
+import { processMergeQueue } from "./merge-queue";
 
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
 
@@ -86,6 +87,7 @@ export async function refreshDashboard(mode: "manual" | "auto" = "manual") {
     if (myId !== state.refreshRequestId) return;
     renderDashboard(payload);
     setListLoading(false);
+    if (state.mergeQueueEnabled) void processMergeQueue(payload);
   } catch (error) {
     if (myId !== state.refreshRequestId) return;
     stopSyncLabelTicker();
@@ -121,6 +123,7 @@ export async function saveSettingsAndRefresh(event: SubmitEvent) {
     configureAutoRefresh();
     renderSettings(payload.settings);
     renderDashboard(payload.dashboard);
+    if (state.mergeQueueEnabled) void processMergeQueue(payload.dashboard);
     if (payload.settings.notificationsEnabled === "on") void ensureNotificationPermission();
     setView("list");
     state.settingsSaving = false;

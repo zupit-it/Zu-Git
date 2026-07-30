@@ -2149,6 +2149,10 @@ html, body {
 
 .pr-row:hover .pr-row-bar { background: var(--accent); }
 
+/* Merge-queue automation: permanent (not just hover) accent on the left bar
+   when a PR is blocking its queue with a real conflict. */
+.pr-row--queue-blocked .pr-row-bar { background: var(--fail); }
+
 .pr-row-draft { opacity: 0.55; }
 
 /* Column 1 — PR info */
@@ -4284,4 +4288,365 @@ img.avatar { object-fit: cover; }
   font-weight: 400;
   opacity: 0.6;
   font-size: 11px;
+}
+
+/* ── Toggl day planner ─────────────────────────────────────────────────────── */
+
+.tg-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(15, 17, 25, .42);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.tg-shell {
+  position: relative;
+  width: 1080px;
+  max-width: 100%;
+  height: min(720px, calc(100vh - 64px));
+  background: #FFFFFF;
+  border: 1px solid #DEDAD0;
+  border-radius: 14px;
+  box-shadow: 0 32px 80px rgba(15,17,25,.32), 0 4px 16px rgba(15,17,25,.16);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tg-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #ECEAE2;
+  flex-shrink: 0;
+}
+
+.tg-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #EEF0FF;
+  color: #3730A3;
+  font: 700 11px/1.4 var(--font);
+  letter-spacing: .2px;
+}
+
+.tg-date {
+  border: 1px solid #E5E4DF;
+  border-radius: 7px;
+  padding: 4px 8px;
+  font: 600 12px/1.3 var(--font);
+  color: #15161A;
+  background: #FFFFFF;
+}
+
+.tg-range { font: 600 12px/1.3 var(--font); color: #4A4C55; }
+.tg-account { font: 500 12px/1.3 var(--font); color: #85858E; }
+.tg-sep { color: #C9C7BF; }
+.tg-spacer { flex: 1; }
+
+.tg-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #E5E4DF;
+  border-radius: 7px;
+  background: #FFFFFF;
+  color: #4A4C55;
+  cursor: pointer;
+}
+.tg-icon-btn:hover { background: #F6F5F1; color: #15161A; }
+.tg-icon-btn--ghost { border-color: transparent; background: transparent; }
+.tg-icon-btn--ghost:hover { background: #F1F0EC; }
+
+.tg-notice {
+  padding: 8px 18px;
+  font: 500 12px/1.45 var(--font);
+  border-bottom: 1px solid #ECEAE2;
+}
+.tg-notice--info { background: #F7F7F4; color: #4A4C55; }
+.tg-notice--danger { background: #FCE9E7; color: #D0352B; }
+.tg-notice--success { background: #E6F4EC; color: #10965F; }
+
+.tg-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px;
+}
+
+.tg-issues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.tg-issues--empty { font: 500 12px/1.4 var(--font); color: #85858E; }
+
+.tg-issue-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid #E5E4DF;
+  background: #FBFBF8;
+  font: 600 11px/1.4 var(--font);
+  color: #4A4C55;
+}
+.tg-issue-chip--in-progress { background: #DEECFE; border-color: #BDD7FC; color: #2563EB; }
+.tg-issue-chip--merge-request { background: #EEF0FF; border-color: #C9CDFB; color: #3730A3; }
+
+.tg-table {
+  border: 1px solid #ECEAE2;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tg-table-head,
+.tg-row {
+  display: grid;
+  grid-template-columns: 250px minmax(200px, 1fr) 175px 175px 46px 30px;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+}
+
+.tg-table-head {
+  background: #FBFBF8;
+  border-bottom: 1px solid #ECEAE2;
+  font: 600 11px/1.4 var(--font);
+  color: #85858E;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+
+.tg-row + .tg-row { border-top: 1px solid #F2F1EC; }
+.tg-row--ambiguous { background: #FBF2DC66; }
+.tg-row--clash { background: #FCE9E7; }
+.tg-row--done { opacity: .55; }
+.tg-row--error { background: #FCE9E7; }
+
+.tg-cell { min-width: 0; }
+.tg-cell--time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tg-cell--actions { display: flex; justify-content: flex-end; }
+
+/* Plain text, not input[type=time]: the native control renders 12h or 24h
+   depending on the browser locale, and this planner is always 24h. */
+.tg-time {
+  width: 58px;
+  height: 30px;
+  box-sizing: border-box;
+  border: 1px solid #E5E4DF;
+  border-radius: 6px;
+  padding: 0 8px;
+  font: 500 12px/1.3 var(--font);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #15161A;
+  background: #FFFFFF;
+}
+.tg-dash { color: #C9C7BF; }
+.tg-duration {
+  margin-left: 4px;
+  font: 600 11px/1.3 var(--font);
+  color: #85858E;
+  white-space: nowrap;
+}
+
+.tg-input,
+.tg-select {
+  width: 100%;
+  height: 30px;
+  box-sizing: border-box;
+  border: 1px solid #E5E4DF;
+  border-radius: 6px;
+  padding: 0 7px;
+  font: 500 12px/1.35 var(--font);
+  color: #15161A;
+  background: #FFFFFF;
+  appearance: auto;
+}
+.tg-input:focus,
+.tg-select:focus { outline: 2px solid #C9CDFB; outline-offset: -1px; }
+.tg-select--empty { border-color: #F0DDA0; background: #FBF2DC; }
+.tg-select--issue { margin-top: 4px; }
+
+.tg-ambiguous {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font: 600 11px/1.4 var(--font);
+  color: #B88217;
+}
+.tg-ambiguous .tg-select { flex: 1 1 100%; }
+
+.tg-row-error {
+  margin-top: 4px;
+  font: 500 11px/1.4 var(--font);
+  color: #D0352B;
+}
+
+.tg-done-mark { color: #10965F; }
+
+.tg-existing {
+  margin-top: 14px;
+  border: 1px dashed #E5E4DF;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #FBFBF8;
+}
+.tg-existing-title {
+  font: 600 11px/1.4 var(--font);
+  color: #85858E;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  margin-bottom: 6px;
+}
+.tg-existing-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 160px;
+  gap: 10px;
+  padding: 3px 0;
+  font: 500 12px/1.4 var(--font);
+  color: #4A4C55;
+}
+.tg-existing-time { color: #85858E; font-variant-numeric: tabular-nums; }
+.tg-existing-project { color: #85858E; text-align: right; }
+
+.tg-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 0;
+  font: 500 13px/1.4 var(--font);
+  color: #85858E;
+}
+
+.tg-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid #E5E4DF;
+  border-top-color: #4F46E5;
+  border-radius: 50%;
+  animation: rd-spin 0.65s linear infinite;
+}
+
+.tg-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid #ECEAE2;
+  background: #FBFBF8;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.tg-footer-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tg-footer-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+
+.tg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid #E5E4DF;
+  border-radius: 999px;
+  background: #FFFFFF;
+  font: 600 11px/1.4 var(--font);
+  color: #4A4C55;
+  cursor: pointer;
+}
+.tg-chip:hover { background: #F1F0EC; color: #15161A; }
+
+.tg-total { font: 600 12px/1.3 var(--font); color: #15161A; }
+.tg-learned { font: 500 11px/1.3 var(--font); color: #85858E; }
+
+.tg-submit {
+  padding: 7px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #4F46E5;
+  color: #FFFFFF;
+  font: 600 12px/1.3 var(--font);
+  cursor: pointer;
+}
+.tg-submit:hover:not(:disabled) { background: #4338CA; }
+.tg-submit:disabled { background: #C9C7BF; cursor: not-allowed; }
+
+.field-hint--danger { color: #D0352B; }
+
+.tg-split {
+  padding: 2px 8px;
+  border: 1px solid #F0DDA0;
+  border-radius: 999px;
+  background: #FFFFFF;
+  font: 600 11px/1.4 var(--font);
+  color: #B88217;
+  cursor: pointer;
+}
+.tg-split:hover { background: #FBF2DC; }
+
+.tg-cell--billable {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 30px;
+}
+
+.tg-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: #4F46E5;
+  cursor: pointer;
+}
+
+.tg-cell--desc {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.tg-cell--desc .tg-input { flex: 1 1 140px; width: auto; }
+.tg-ambiguous,
+.tg-row-error { flex: 1 1 100%; }
+
+.tg-source {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #DEECFE;
+  color: #2563EB;
+  flex: 0 0 auto;
+}
+
+.field-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.field-readonly {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #E5E4DF;
+  border-radius: 7px;
+  padding: 7px 9px;
+  font: 500 12px/1.3 var(--font);
+  color: #4A4C55;
+  background: #F6F5F1;
 }

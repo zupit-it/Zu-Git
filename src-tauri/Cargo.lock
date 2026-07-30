@@ -6339,23 +6339,28 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zugit"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "futures",
  "keyring",
+ "libc",
  "once_cell",
  "parking_lot",
+ "rand 0.8.6",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
  "tokio",
+ "url",
 ]
 
 [[package]]

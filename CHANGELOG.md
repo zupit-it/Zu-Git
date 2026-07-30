@@ -7,6 +7,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+- **macOS keychain writes no longer expose secrets in the process list** — tokens were passed to
+  `security add-generic-password` as `-w <value>`, and process arguments are readable by any other
+  process of the same user for as long as the command runs. The value now goes to the tool's prompt
+  over stdin, with the child detached via `setsid()` so `readpassphrase(3)` cannot fall back to the
+  terminal, and every write is verified by reading it back — `security` exits 0 even when the prompt
+  round fails, storing an empty password. Affects the GitHub and Jira tokens too, not just the ones
+  added in this release.
+
+### Added
+- **Toggl timesheet autofill** (opt-in, Settings → Toggl) — a **Toggl** button in the toolbar opens a
+  day planner that fills the free slots of your working range (default 08:00–14:00) with the Jira
+  stories assigned to you in *In Progress* or in the merge-request status. Slots already booked on
+  Toggl are skipped, so the calendar events you accepted there are preserved and a second run
+  proposes nothing. The moment a story entered its status (read from the Jira changelog) splits the
+  day: the story you moved to merge request at 10:30 gets the morning, the one you picked up then
+  gets the afternoon. Only stories in the open sprint are considered. When two stories are equally
+  plausible the row asks which one to track, or splits the slot equally between them on request.
+  Project and tags are learned from your own Toggl history (Jira key → project, key prefix →
+  project, recurring meetings → project + tags), and manual choices are folded back into the rules.
+  Nothing is written until you confirm. The integration only creates entries — it never edits or
+  deletes existing ones — and can only write to today or the previous 7 days.
+- **Google Calendar import** (opt-in, Settings → Google Calendar) — meetings in the working range
+  become rows of their own and claim their slots before the stories are placed, with project, tags
+  and billable flag taken from the matching recurring rule. Declined, all-day, free-marked and
+  already-tracked events are ignored. Read-only scope, OAuth with PKCE on a loopback redirect; only
+  the refresh token is stored, in the system keychain.
+
 ---
 
 ## [0.9.7] - 2026-06-30

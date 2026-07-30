@@ -58,6 +58,22 @@ export const state = {
   scoreRuleChangesRequestedEnabled: defaultSettings.scoreRuleChangesRequestedEnabled,
   scoreRuleCiEnabled: defaultSettings.scoreRuleCiEnabled,
   scoreRuleBehindEnabled: defaultSettings.scoreRuleBehindEnabled,
+  mergeQueueEnabled: defaultSettings.mergeQueueEnabled,
+  togglEnabled: defaultSettings.togglEnabled,
+  togglDayStart: defaultSettings.togglDayStart,
+  togglDayEnd: defaultSettings.togglDayEnd,
+  togglSlotMinutes: defaultSettings.togglSlotMinutes,
+
+  // ── Merge queue ────────────────────────────────────────────────────────────
+  // "repo/id" of PRs at the head of their queue, auto-merge-enabled, and conflicting.
+  // Rebuilt from scratch on every processMergeQueue() call — read-only, for rendering.
+  queueBlockedPrKeys: new Set<string>(),
+  // "repo/id" of PRs with a rebase already triggered and not yet confirmed settled.
+  // Cleared once the PR is no longer reported as "behind" — see processMergeQueue.
+  queueRebaseTriggeredFor: new Set<string>(),
+  // "repo/id" → updatedAtIso at last conflict notification, so the queue-blocked
+  // native notification fires once per PR state, not on every auto-refresh tick.
+  queueConflictNotifiedFor: new Map<string, string>(),
 
   // ── Settings form ──────────────────────────────────────────────────────────
   settingsDirty: false,

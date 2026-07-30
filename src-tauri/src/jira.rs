@@ -65,6 +65,12 @@ pub fn extract_all_jira_keys(text: &str) -> Vec<String> {
     JIRA_KEY_RE.find_iter(text).map(|m| m.as_str().to_string()).collect()
 }
 
+/// Removes every Jira key from `text`. Used when grouping Toggl descriptions by
+/// "what kind of activity is this", where the key is noise.
+pub fn strip_jira_keys(text: &str) -> String {
+    JIRA_KEY_RE.replace_all(text, " ").to_string()
+}
+
 pub fn extract_jira_key_from_title(title: &str, expected_board: Option<&str>) -> JiraKeyMatch {
     let keys: Vec<String> = JIRA_KEY_RE
         .find_iter(title)
@@ -986,6 +992,240 @@ pub async fn move_fix_version(
         let text = resp.text().await.unwrap_or_default();
         Err(format!("Failed to move {key} to {to} ({status}): {text}"))
     }
+}
+
+// ── Active work (Toggl) ───────────────────────────────────────────────────────
+
+/// A story the viewer is currently working on, with the moment it entered its
+/// current status — that timestamp is what lets the day be split between "the
+/// story I closed this morning" and "the one I picked up after".
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveIssue {
+    pub key: String,
+    pub summary: String,
+    pub status: String,
+    pub issue_type: String,
+    pub url: String,
+    /// RFC3339 timestamp of the last status transition, when the changelog has one.
+    pub status_changed_at: Option<String>,
+    /// "in-progress" | "merge-request" | "other" — drives the default priority.
+    pub stage: String,
+}
+
+/// Result of the active-work lookup, plus whether the open-sprint filter was
+/// actually applied — the panel warns when it wasn't.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveIssues {
+    pub issues: Vec<ActiveIssue>,
+    pub sprint_scoped: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct JiraChangelogPage {
+    #[serde(default)]
+    values: Vec<JiraChangelogEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JiraChangelogEntry {
+    #[serde(default)]
+    created: Option<String>,
+    #[serde(default)]
+    items: Vec<JiraChangelogItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JiraChangelogItem {
+    #[serde(default)]
+    field: Option<String>,
+}
+
+/// Timestamp of the most recent status transition for an issue, or `None` when
+/// the changelog is empty or unreadable (the caller degrades to "unknown since").
+async fn fetch_last_status_change(
+    key: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Option<String> {
+    let url = format!(
+        "{}/rest/api/3/issue/{}/changelog?maxResults=100",
+        settings.jira_base_url, key
+    );
+    let resp = client
+        .get(&url)
+        .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let page: JiraChangelogPage = resp.json().await.ok()?;
+    // The changelog is returned oldest-first; the last status item wins.
+    page.values
+        .iter()
+        .filter(|entry| {
+            entry
+                .items
+                .iter()
+                .any(|item| item.field.as_deref() == Some("status"))
+        })
+        .filter_map(|entry| entry.created.clone())
+        .next_back()
+}
+
+/// Runs a JQL search for the active-work queries, falling back to the legacy
+/// endpoint on tenants that don't expose `/search/jql`.
+async fn search_issues(
+    jql: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<Vec<JiraIssueSummary>, ApiError> {
+    let fields = ["summary", "status", "issuetype"];
+    let body = serde_json::json!({
+        "jql": jql,
+        "fields": fields,
+        "maxResults": 50,
+    });
+
+    let resp = client
+        .post(format!("{}/rest/api/3/search/jql", settings.jira_base_url))
+        .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+
+    let status = resp.status();
+    let parsed: JiraSearchResponse = if status == 404 || status == 405 || status == 410 {
+        let legacy = client
+            .post(format!("{}/rest/api/3/search", settings.jira_base_url))
+            .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ApiError::Other(e.to_string()))?;
+        let legacy_status = legacy.status();
+        if !legacy_status.is_success() {
+            return Err(ApiError::from_status(
+                legacy_status.as_u16(),
+                format!("Jira search failed ({legacy_status})"),
+            ));
+        }
+        legacy.json().await.map_err(|e| ApiError::Other(e.to_string()))?
+    } else if !status.is_success() {
+        return Err(ApiError::from_status(
+            status.as_u16(),
+            format!("Jira search failed ({status})"),
+        ));
+    } else {
+        resp.json().await.map_err(|e| ApiError::Other(e.to_string()))?
+    };
+
+    Ok(parsed.issues.iter().map(map_issue).collect())
+}
+
+/// Issues assigned to the viewer in one specific status, restricted to the open
+/// sprint when the tenant has sprints.
+///
+/// The sprint clause is dropped when Jira rejects it — projects without Jira
+/// Software have no `sprint` field, and a hard failure there would leave the
+/// planner with no stories at all.
+async fn search_my_issues_in_status(
+    status_name: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<(Vec<JiraIssueSummary>, bool), ApiError> {
+    let escaped = status_name.replace('"', "\\\"");
+    let base = format!("assignee = currentUser() AND status = \"{escaped}\"");
+    let scoped = format!("{base} AND sprint in openSprints() ORDER BY updated DESC");
+
+    match search_issues(&scoped, settings, client).await {
+        Ok(issues) => Ok((issues, true)),
+        Err(error) if error.is_auth() => Err(error),
+        Err(_) => search_issues(&format!("{base} ORDER BY updated DESC"), settings, client)
+            .await
+            .map(|issues| (issues, false)),
+    }
+}
+
+/// Stories the viewer is working on: in progress, or waiting in the merge-request
+/// status (the configured `jiraMergeTransition`).
+///
+/// One query per status, so the stage comes from the query that matched rather
+/// than from the status name — Jira returns names in the user's language, and
+/// "In corso" cannot be pattern-matched against "In Progress".
+pub async fn fetch_my_active_issues(
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<ActiveIssues, ApiError> {
+    let (in_progress, merge_request) = futures::future::join(
+        search_my_issues_in_status("In Progress", settings, client),
+        search_my_issues_in_status(&settings.jira_merge_transition, settings, client),
+    )
+    .await;
+
+    let (in_progress, in_progress_scoped) = in_progress?;
+    let (merge_request, merge_scoped) = merge_request?;
+    let sprint_scoped = in_progress_scoped && merge_scoped;
+
+    // Nothing in the open sprint at all usually means the board doesn't use
+    // sprints the way the filter assumes — fall back to every active story and
+    // let the panel say so, rather than showing an empty planner.
+    let (in_progress, merge_request, sprint_scoped) =
+        if sprint_scoped && in_progress.is_empty() && merge_request.is_empty() {
+            let base = |status: &str| {
+                format!(
+                    "assignee = currentUser() AND status = \"{}\" ORDER BY updated DESC",
+                    status.replace('"', "\\\"")
+                )
+            };
+            let (a, b) = futures::future::join(
+                search_issues(&base("In Progress"), settings, client),
+                search_issues(&base(&settings.jira_merge_transition), settings, client),
+            )
+            .await;
+            (a.unwrap_or_default(), b.unwrap_or_default(), false)
+        } else {
+            (in_progress, merge_request, sprint_scoped)
+        };
+
+    let staged: Vec<(JiraIssueSummary, &str)> = in_progress
+        .into_iter()
+        .map(|issue| (issue, "in-progress"))
+        .chain(
+            merge_request
+                .into_iter()
+                .map(|issue| (issue, "merge-request")),
+        )
+        .collect();
+
+    // One changelog call per story — there are only ever a handful of them.
+    let changes = futures::future::join_all(
+        staged
+            .iter()
+            .map(|(issue, _)| fetch_last_status_change(&issue.key, settings, client)),
+    )
+    .await;
+
+    Ok(ActiveIssues {
+        issues: staged
+            .into_iter()
+            .zip(changes)
+            .map(|((issue, stage), status_changed_at)| ActiveIssue {
+                stage: stage.to_string(),
+                url: format!("{}/browse/{}", settings.jira_base_url, issue.key),
+                key: issue.key,
+                summary: issue.summary,
+                status: issue.status,
+                issue_type: issue.issue_type,
+                status_changed_at,
+            })
+            .collect(),
+        sprint_scoped,
+    })
 }
 
 /// Drops a Jira issue from a release. With `version = Some(v)` only that single

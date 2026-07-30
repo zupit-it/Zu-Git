@@ -19,12 +19,14 @@ export function getAvailableRepos(snapshot: DashboardSnapshot): string[] {
 
 // ── Sorting ───────────────────────────────────────────────────────────────────
 
+export function byPriorityRank(a: PullRequestSummary, b: PullRequestSummary): number {
+  const ra = PRIORITY_RANK[a.jiraPriority] ?? 4;
+  const rb = PRIORITY_RANK[b.jiraPriority] ?? 4;
+  return ra - rb;
+}
+
 export function applyListSort(prs: PullRequestSummary[]): PullRequestSummary[] {
-  return [...prs].sort((a, b) => {
-    const ra = PRIORITY_RANK[a.jiraPriority] ?? 4;
-    const rb = PRIORITY_RANK[b.jiraPriority] ?? 4;
-    return ra - rb;
-  });
+  return [...prs].sort(byPriorityRank);
 }
 
 // ── Filtering ─────────────────────────────────────────────────────────────────

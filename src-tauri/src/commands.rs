@@ -328,6 +328,21 @@ pub async fn promote_draft_pr(
 }
 
 #[tauri::command]
+pub async fn rebase_pull_request(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    pr_number: u64,
+    node_id: String,
+    head_sha: String,
+) -> Result<(), String> {
+    let settings = storage::load_settings(&app).await?;
+    crate::github::rebase_pull_request(&node_id, &head_sha, &settings, &state.http_client)
+        .await
+        .map_err(|e| format!("{repo}#{pr_number}: {e}"))
+}
+
+#[tauri::command]
 pub async fn request_review(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -604,6 +619,359 @@ pub async fn fetch_release_diff(
         repo,
         since_tag,
     })
+}
+
+// ── Toggl ─────────────────────────────────────────────────────────────────────
+
+/// Everything the day planner needs, in one round trip: the Toggl account, the
+/// entries already booked inside the working range, the stories the viewer is
+/// working on, and the learned project/tag mapping.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TogglDayContext {
+    pub account: crate::toggl::TogglAccount,
+    pub workspace_id: i64,
+    pub existing: Vec<crate::toggl::TogglTimeEntry>,
+    pub issues: Vec<crate::jira::ActiveIssue>,
+    pub rules: crate::toggl::LearnedRules,
+    /// Google Calendar events overlapping the range, when the calendar is connected.
+    pub events: Vec<crate::google::CalendarEvent>,
+    pub warnings: Vec<String>,
+}
+
+/// Rules older than this are refreshed from Toggl history on the next open.
+const TOGGL_RULES_MAX_AGE_DAYS: i64 = 7;
+
+fn toggl_settings(settings: &AppSettings) -> Result<(), String> {
+    if !settings.toggl_enabled {
+        return Err("Toggl integration is disabled in Settings.".into());
+    }
+    if settings.toggl_token.is_empty() {
+        return Err("Toggl API token missing — add it in Settings.".into());
+    }
+    Ok(())
+}
+
+/// The account payload behind a session cache: `/me` is capped at 30 calls/hour
+/// on Free plans, so it is fetched once per token unless `force` is set.
+async fn toggl_account(
+    settings: &AppSettings,
+    state: &tauri::State<'_, AppState>,
+    force: bool,
+) -> Result<crate::toggl::TogglAccount, String> {
+    if !force {
+        if let Some((token, account)) = state.toggl_account.lock().as_ref() {
+            if token == &settings.toggl_token {
+                return Ok(account.clone());
+            }
+        }
+    }
+    let account = crate::toggl::fetch_account(&settings.toggl_token, &state.http_client)
+        .await
+        .map_err(String::from)?;
+    *state.toggl_account.lock() = Some((settings.toggl_token.clone(), account.clone()));
+    Ok(account)
+}
+
+fn toggl_workspace_id(
+    settings: &AppSettings,
+    account: &crate::toggl::TogglAccount,
+) -> Result<i64, String> {
+    settings
+        .toggl_workspace_id
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .or(account.default_workspace_id)
+        .or_else(|| account.workspaces.first().map(|w| w.id))
+        .ok_or_else(|| "No Toggl workspace available for this account.".to_string())
+}
+
+// ── Google Calendar ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleStatus {
+    pub connected: bool,
+    /// Loopback URI to register in the Google Cloud console.
+    pub redirect_uri: String,
+}
+
+/// A live access token, refreshed only when the cached one is about to expire.
+async fn google_access_token(
+    settings: &AppSettings,
+    state: &tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    if let Some((token, expires_at)) = state.google_access.lock().as_ref() {
+        if *expires_at > std::time::Instant::now() {
+            return Ok(token.clone());
+        }
+    }
+
+    let refresh_token = secret_store::get_secret("googleRefreshToken");
+    if refresh_token.is_empty() {
+        return Err("Google Calendar not connected — connect it in Settings.".into());
+    }
+
+    let (token, expires_in) = crate::google::refresh_access_token(
+        &settings.google_client_id,
+        &settings.google_client_secret,
+        &refresh_token,
+        &state.http_client,
+    )
+    .await?;
+
+    // Refresh a minute early rather than racing the expiry.
+    let expires_at = std::time::Instant::now()
+        + std::time::Duration::from_secs(expires_in.saturating_sub(60).max(30));
+    *state.google_access.lock() = Some((token.clone(), expires_at));
+    Ok(token)
+}
+
+#[tauri::command]
+pub async fn google_status(app: tauri::AppHandle) -> Result<GoogleStatus, String> {
+    let _ = storage::load_settings(&app).await?;
+    Ok(GoogleStatus {
+        connected: !secret_store::get_secret("googleRefreshToken").is_empty(),
+        redirect_uri: crate::google::redirect_uri(),
+    })
+}
+
+#[tauri::command]
+pub async fn google_connect(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::google::GoogleConnection, String> {
+    let settings = storage::load_settings(&app).await?;
+    if settings.google_client_id.is_empty() || settings.google_client_secret.is_empty() {
+        return Err("Add the Google client id and secret in Settings, then save.".into());
+    }
+
+    let (refresh_token, connection) = crate::google::authorize(
+        &settings.google_client_id,
+        &settings.google_client_secret,
+        &app,
+        &state.http_client,
+    )
+    .await?;
+
+    if !secret_store::set_secret("googleRefreshToken", &refresh_token) {
+        return Err("Could not store the Google refresh token in the system credential store.".into());
+    }
+    *state.google_access.lock() = None;
+    Ok(connection)
+}
+
+#[tauri::command]
+pub async fn google_disconnect(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    secret_store::set_secret("googleRefreshToken", "");
+    *state.google_access.lock() = None;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn toggl_check_connection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::toggl::TogglAccount, String> {
+    let settings = storage::load_settings(&app).await?;
+    toggl_settings(&settings)?;
+    toggl_account(&settings, &state, true).await
+}
+
+#[tauri::command]
+pub async fn toggl_prepare_day(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    range_start: String,
+    range_end: String,
+    force_relearn: bool,
+) -> Result<TogglDayContext, String> {
+    let settings = storage::load_settings(&app).await?;
+    toggl_settings(&settings)?;
+
+    let account = toggl_account(&settings, &state, false).await?;
+    let workspace_id = toggl_workspace_id(&settings, &account)?;
+    let mut warnings: Vec<String> = vec![];
+
+    let entries_fut = crate::toggl::fetch_time_entries(
+        &settings.toggl_token,
+        &range_start,
+        &range_end,
+        &state.http_client,
+    );
+    let issues_fut = async {
+        if crate::models::settings_ready_for_jira(&settings) {
+            crate::jira::fetch_my_active_issues(&settings, &state.http_client).await
+        } else {
+            Ok(crate::jira::ActiveIssues {
+                issues: vec![],
+                sprint_scoped: true,
+            })
+        }
+    };
+    let (entries, issues) = futures::future::join(entries_fut, issues_fut).await;
+
+    let existing = entries.map_err(String::from)?;
+    let issues = match issues {
+        Ok(active) => {
+            if !active.sprint_scoped && !active.issues.is_empty() {
+                warnings.push(
+                    "Nessuna story nello sprint attivo: mostro tutte le story assegnate a te."
+                        .to_string(),
+                );
+            }
+            active.issues
+        }
+        Err(error) => {
+            warnings.push(format!("Jira stories unavailable: {error}"));
+            vec![]
+        }
+    };
+    if !crate::models::settings_ready_for_jira(&settings) {
+        warnings.push("Jira is not configured — no stories to propose.".to_string());
+    }
+
+    // Calendar events are proposals, not blockers: a failure here degrades to a
+    // warning instead of sinking the whole day plan.
+    let mut events = vec![];
+    if settings.google_calendar_enabled {
+        match google_access_token(&settings, &state).await {
+            Ok(token) => {
+                let calendar_id = if settings.google_calendar_id.trim().is_empty() {
+                    "primary"
+                } else {
+                    settings.google_calendar_id.trim()
+                };
+                match crate::google::fetch_events(
+                    &token,
+                    calendar_id,
+                    &range_start,
+                    &range_end,
+                    &state.http_client,
+                )
+                .await
+                {
+                    Ok(fetched) => events = fetched,
+                    Err(error) => warnings.push(format!("Google Calendar: {error}")),
+                }
+            }
+            Err(error) => warnings.push(format!("Google Calendar: {error}")),
+        }
+    }
+
+    let mut rules = storage::load_toggl_rules(&app);
+    let stale = force_relearn
+        || rules.entries_scanned == 0
+        // Cached under an older shape: re-learn rather than answer with defaults
+        // for fields that did not exist when the file was written.
+        || rules.version < crate::toggl::RULES_VERSION
+        || chrono::DateTime::parse_from_rfc3339(&rules.learned_at)
+            .map(|learned| {
+                (chrono::Utc::now() - learned.with_timezone(&chrono::Utc)).num_days()
+                    >= TOGGL_RULES_MAX_AGE_DAYS
+            })
+            .unwrap_or(true);
+
+    if stale {
+        let today = chrono::Local::now();
+        let from = (today - chrono::Duration::days(settings.toggl_history_days as i64))
+            .format("%Y-%m-%d")
+            .to_string();
+        let to = today.format("%Y-%m-%d").to_string();
+        match crate::toggl::fetch_time_entries(
+            &settings.toggl_token,
+            &from,
+            &to,
+            &state.http_client,
+        )
+        .await
+        {
+            Ok(history) => {
+                rules = crate::toggl::learn_from_entries(&history, chrono::Utc::now().to_rfc3339());
+                if let Err(error) = storage::save_toggl_rules(&app, &rules) {
+                    warnings.push(format!("Could not cache the learned mapping: {error}"));
+                }
+            }
+            Err(error) => warnings.push(format!(
+                "Could not read Toggl history — project mapping may be incomplete: {error}"
+            )),
+        }
+    }
+
+    Ok(TogglDayContext {
+        account,
+        workspace_id,
+        existing,
+        issues,
+        rules,
+        events,
+        warnings,
+    })
+}
+
+#[tauri::command]
+pub async fn toggl_submit_entries(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    entries: Vec<crate::toggl::NewTimeEntry>,
+) -> Result<Vec<crate::toggl::CreatedEntry>, String> {
+    let settings = storage::load_settings(&app).await?;
+    toggl_settings(&settings)?;
+
+    let account = toggl_account(&settings, &state, false).await?;
+    let workspace_id = toggl_workspace_id(&settings, &account)?;
+
+    // Sequential on purpose: Toggl rejects concurrent writes with 429 far too
+    // eagerly, and a day is only ever a handful of entries.
+    let mut results = Vec::with_capacity(entries.len());
+    let mut created_entries = Vec::new();
+    for entry in &entries {
+        match crate::toggl::create_time_entry(
+            &settings.toggl_token,
+            workspace_id,
+            entry,
+            &state.http_client,
+        )
+        .await
+        {
+            Ok(id) => {
+                created_entries.push(crate::toggl::TogglTimeEntry {
+                    id,
+                    workspace_id,
+                    project_id: entry.project_id,
+                    description: entry.description.clone(),
+                    start: entry.start.clone(),
+                    stop: Some(entry.stop.clone()),
+                    duration: entry.duration_seconds,
+                    tags: entry.tags.clone(),
+                    billable: entry.billable,
+                });
+                results.push(crate::toggl::CreatedEntry {
+                    client_ref: entry.client_ref.clone(),
+                    id: Some(id),
+                    description: entry.description.clone(),
+                    ok: true,
+                    error: None,
+                });
+            }
+            Err(error) => results.push(crate::toggl::CreatedEntry {
+                client_ref: entry.client_ref.clone(),
+                id: None,
+                description: entry.description.clone(),
+                ok: false,
+                error: Some(error.to_string()),
+            }),
+        }
+    }
+
+    if !created_entries.is_empty() {
+        let mut rules = storage::load_toggl_rules(&app);
+        crate::toggl::reinforce_rules(&mut rules, &created_entries, chrono::Utc::now().to_rfc3339());
+        let _ = storage::save_toggl_rules(&app, &rules);
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]

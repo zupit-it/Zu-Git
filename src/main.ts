@@ -13,6 +13,10 @@ import {
 } from "./api";
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
+import {
+  openTogglPanel, testTogglConnection,
+  connectGoogleCalendar, disconnectGoogleCalendar,
+} from "./toggl";
 import { escHtml, avatarColor, loginInitials } from "./utils";
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -39,6 +43,9 @@ window.addEventListener("DOMContentLoaded", () => {
   document
     .querySelector<HTMLButtonElement>("[data-add-pr-button]")
     ?.addEventListener("click", () => void loadDraftPrInfo());
+  document
+    .querySelector<HTMLButtonElement>("[data-toggl-button]")
+    ?.addEventListener("click", () => void openTogglPanel());
 
 
   // ── Settings link buttons ───────────────────────────────────────────────────
@@ -48,6 +55,41 @@ window.addEventListener("DOMContentLoaded", () => {
   document
     .querySelector<HTMLButtonElement>("[data-jira-token-link]")
     ?.addEventListener("click", () => void openExternal("https://id.atlassian.com/manage-profile/security/api-tokens"));
+  document
+    .querySelector<HTMLButtonElement>("[data-toggl-token-link]")
+    ?.addEventListener("click", () => void openExternal("https://track.toggl.com/profile"));
+  // Ticking the box is not enough: the panel reads the saved settings, so the
+  // toolbar button only appears after a save. Say so while the change is pending.
+  document
+    .querySelector<HTMLInputElement>("#togglEnabled")
+    ?.addEventListener("change", (event) => {
+      const checkbox = event.currentTarget;
+      if (!(checkbox instanceof HTMLInputElement)) return;
+      const hint = document.querySelector<HTMLElement>("[data-toggl-hint]");
+      if (hint) hint.hidden = !checkbox.checked;
+      const saveFirst = document.querySelector<HTMLElement>("[data-toggl-save-first]");
+      if (saveFirst) saveFirst.hidden = !checkbox.checked || state.togglEnabled;
+      const where = document.querySelector<HTMLElement>("[data-toggl-where]");
+      if (where) where.hidden = !checkbox.checked || !state.togglEnabled;
+    });
+  document
+    .querySelector<HTMLButtonElement>("[data-google-connect]")
+    ?.addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      if (button instanceof HTMLButtonElement) void connectGoogleCalendar(button);
+    });
+  document
+    .querySelector<HTMLButtonElement>("[data-google-disconnect]")
+    ?.addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      if (button instanceof HTMLButtonElement) void disconnectGoogleCalendar(button);
+    });
+  document
+    .querySelector<HTMLButtonElement>("[data-toggl-test]")
+    ?.addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      if (button instanceof HTMLButtonElement) void testTogglConnection(button);
+    });
 
   // ── Search ──────────────────────────────────────────────────────────────────
   document

@@ -52,6 +52,11 @@
           <span data-update-badge-label>Update available</span>
         </button>
 
+        <button class="secondary-button" data-toggl-button type="button" hidden>
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="8" r="5"/><path d="M7 5.5V8"/><path d="M5.5 1.5h3"/></svg>
+          Toggl
+        </button>
+
         <button class="secondary-button" data-refresh-button type="button">
           <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7a5 5 0 1 1-1.5-3.5M12 2v3h-3"/></svg>
           Refresh
@@ -325,6 +330,35 @@
                 </div>
               </div>
 
+              <!-- Merge queue card -->
+              <div class="settings-card">
+                <div class="settings-card-header">
+                  <span class="settings-card-icon">
+                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 3h8M2 6h8M2 9h5"/></svg>
+                  </span>
+                  <div>
+                    <div class="settings-card-label">Merge queue</div>
+                    <div class="settings-card-title">Priority auto-rebase</div>
+                  </div>
+                </div>
+                <div class="settings-card-grid">
+                  <div class="settings-field settings-field-wide">
+                    <label class="field-label">Queue automation</label>
+                    <label class="filter-pill">
+                      <input id="mergeQueueEnabled" name="mergeQueueEnabled" type="checkbox" />
+                      <span>Auto-rebase the top-priority auto-merge-enabled PR targeting the nearest release, per repo and base branch (not recommended)</span>
+                    </label>
+                    <p class="field-hint" data-merge-queue-warning hidden>
+                      Force-pusha il branch di una PR (riscrive gli SHA dei commit) quando è la PR con priorità Jira
+                      più alta, per quel repo + base branch, che ha già l'auto-merge attivo su GitHub, punta alla
+                      release più vicina, ed è solo indietro rispetto al base branch — non in conflitto. Nessun
+                      ordinamento manuale: l'ordine segue la priorità già assegnata su Jira, quindi è naturalmente
+                      lo stesso per chiunque apra la dashboard.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <!-- Jira card -->
               <div class="settings-card">
                 <div class="settings-card-header">
@@ -364,6 +398,133 @@
                     <input id="jiraMergeTransition" name="jiraMergeTransition" type="text" placeholder="MERGE REQUEST" />
                   </div>
 
+                </div>
+              </div>
+
+              <!-- Toggl card -->
+              <div class="settings-card">
+                <div class="settings-card-header">
+                  <span class="settings-card-icon">
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="8" r="5"/><path d="M7 5.5V8"/><path d="M5.5 1.5h3"/></svg>
+                  </span>
+                  <div>
+                    <div class="settings-card-label">Toggl</div>
+                    <div class="settings-card-title">Time entry autofill</div>
+                  </div>
+                </div>
+                <div class="settings-card-grid">
+                  <div class="settings-field settings-field-wide">
+                    <label class="field-label">Timesheet autofill</label>
+                    <label class="filter-pill">
+                      <input id="togglEnabled" name="togglEnabled" type="checkbox" />
+                      <span>Fill the free slots of my working day from the Jira stories I have in progress</span>
+                    </label>
+                    <p class="field-hint" data-toggl-hint hidden>
+                      ZuGit legge le time entry già presenti nella fascia oraria e riempie solo i buchi, usando le
+                      story assegnate a te in <strong>In Progress</strong> o nello stato di merge request. Il progetto
+                      Toggl e i tag vengono dedotti dallo storico delle tue entry. Nulla viene scritto senza conferma.
+                    </p>
+                    <p class="field-hint" data-toggl-where hidden>
+                      Dopo il salvataggio compare il pulsante <strong>Toggl</strong> nella barra in alto, subito a
+                      sinistra di Refresh: apre il pannello con il piano della giornata da rivedere e confermare.
+                    </p>
+                    <p class="field-hint" data-toggl-save-first hidden>
+                      Salva le impostazioni per far comparire il pulsante <strong>Toggl</strong> nella barra in alto.
+                    </p>
+                  </div>
+                  <div class="settings-field settings-field-wide">
+                    <div class="field-header">
+                      <label class="field-label" for="togglToken">Toggl API token</label>
+                      <button class="field-action-button" data-toggl-token-link type="button">
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 2H2v8h8V6M7 2h3v3M5.2 6.8l4.6-4.6"/></svg>
+                        Profile page
+                      </button>
+                    </div>
+                    <input id="togglToken" name="togglToken" type="password" placeholder="Toggl Track API token" />
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label" for="togglWorkspaceId">Workspace id</label>
+                    <input id="togglWorkspaceId" name="togglWorkspaceId" type="text" inputmode="numeric" placeholder="Default workspace" />
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label">Connection</label>
+                    <button class="secondary-button" data-toggl-test type="button">Test connection</button>
+                    <p class="field-hint">Salva le impostazioni prima di testare: il token viene letto dal portachiavi.</p>
+                    <p class="field-hint" data-toggl-test-result hidden></p>
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label" for="togglDayStart">Day starts at</label>
+                    <input id="togglDayStart" name="togglDayStart" type="time" step="300" placeholder="08:00" />
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label" for="togglDayEnd">Day ends at</label>
+                    <input id="togglDayEnd" name="togglDayEnd" type="time" step="300" placeholder="14:00" />
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label" for="togglSlotMinutes">Rounding (minutes)</label>
+                    <input id="togglSlotMinutes" name="togglSlotMinutes" type="number" min="5" max="120" step="5" placeholder="15" />
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label" for="togglHistoryDays">History to learn from (days)</label>
+                    <input id="togglHistoryDays" name="togglHistoryDays" type="number" min="7" max="90" step="1" placeholder="60" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Google Calendar card -->
+              <div class="settings-card">
+                <div class="settings-card-header">
+                  <span class="settings-card-icon">
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="11" height="10" rx="1.5"/><path d="M1.5 5.5h11M4.5 1.5v2M9.5 1.5v2"/></svg>
+                  </span>
+                  <div>
+                    <div class="settings-card-label">Google Calendar</div>
+                    <div class="settings-card-title">Meeting import</div>
+                  </div>
+                </div>
+                <div class="settings-card-grid">
+                  <div class="settings-field settings-field-wide">
+                    <label class="field-label">Calendar</label>
+                    <label class="filter-pill">
+                      <input id="googleCalendarEnabled" name="googleCalendarEnabled" type="checkbox" />
+                      <span>Proponi anche gli eventi del calendario nella fascia oraria</span>
+                    </label>
+                    <p class="field-hint">
+                      Sola lettura (scope <code>calendar.readonly</code>). Gli eventi diventano righe del piano, con
+                      progetto e tag presi dalle tue entry ricorrenti; le story riempiono solo quello che resta.
+                      Eventi rifiutati, tutto-il-giorno e segnati come "libero" vengono ignorati.
+                    </p>
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label" for="googleClientId">OAuth client id</label>
+                    <input id="googleClientId" name="googleClientId" type="text" placeholder="…apps.googleusercontent.com" />
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label" for="googleClientSecret">OAuth client secret</label>
+                    <input id="googleClientSecret" name="googleClientSecret" type="password" placeholder="GOCSPX-…" />
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label" for="googleCalendarId">Calendar id</label>
+                    <input id="googleCalendarId" name="googleCalendarId" type="text" placeholder="primary" />
+                  </div>
+                  <div class="settings-field">
+                    <label class="field-label">Autorizzazione</label>
+                    <div class="field-row">
+                      <button class="secondary-button" data-google-connect type="button">Collega account</button>
+                      <button class="secondary-button" data-google-disconnect type="button" hidden>Scollega</button>
+                    </div>
+                    <p class="field-hint" data-google-status></p>
+                  </div>
+                  <div class="settings-field settings-field-wide">
+                    <label class="field-label">Redirect URI usato da ZuGit</label>
+                    <input class="field-readonly" data-google-redirect type="text" readonly value="http://127.0.0.1:43117" />
+                    <p class="field-hint">
+                      Con un client di tipo <strong>Desktop app</strong> non devi registrarlo: Google accetta da sé i
+                      redirect su <code>127.0.0.1</code>, e nella console quel campo non esiste nemmeno. Serve solo se
+                      il client è di tipo <strong>Web application</strong>: in quel caso aggiungi esattamente questo URI
+                      fra gli URI di reindirizzamento autorizzati.
+                    </p>
+                  </div>
                 </div>
               </div>
 

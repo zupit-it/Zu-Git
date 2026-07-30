@@ -59,12 +59,36 @@ struct PersistedSettings {
     score_rule_ci_enabled: bool,
     #[serde(default)]
     score_rule_behind_enabled: bool,
+    #[serde(default)]
+    merge_queue_enabled: bool,
+    #[serde(default)]
+    toggl_enabled: bool,
+    #[serde(default)]
+    toggl_workspace_id: String,
+    #[serde(default = "default_day_start")]
+    toggl_day_start: String,
+    #[serde(default = "default_day_end")]
+    toggl_day_end: String,
+    #[serde(default = "default_slot_minutes")]
+    toggl_slot_minutes: u32,
+    #[serde(default = "default_history_days")]
+    toggl_history_days: u32,
+    #[serde(default)]
+    google_calendar_enabled: bool,
+    #[serde(default)]
+    google_client_id: String,
+    #[serde(default)]
+    google_calendar_id: String,
     // Legacy/fallback field. New fallback writes are only produced when they can
     // be protected by the platform (currently DPAPI on Windows).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     github_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     jira_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    toggl_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    google_client_secret: Option<String>,
 }
 
 fn default_api_base_url() -> String {
@@ -87,6 +111,18 @@ fn default_true() -> bool {
 }
 fn default_merge_transition() -> String {
     "Merge Request".to_string()
+}
+fn default_day_start() -> String {
+    "08:00".to_string()
+}
+fn default_day_end() -> String {
+    "14:00".to_string()
+}
+fn default_slot_minutes() -> u32 {
+    15
+}
+fn default_history_days() -> u32 {
+    60
 }
 
 fn token_fallback_value(token: &str) -> Option<String> {
@@ -167,6 +203,32 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         }
     };
 
+    let toggl_token = {
+        let from_keychain = get_secret("togglToken");
+        if !from_keychain.is_empty() {
+            from_keychain
+        } else {
+            persisted
+                .toggl_token
+                .as_deref()
+                .map(decrypt_token_from_file)
+                .unwrap_or_default()
+        }
+    };
+
+    let google_client_secret = {
+        let from_keychain = get_secret("googleClientSecret");
+        if !from_keychain.is_empty() {
+            from_keychain
+        } else {
+            persisted
+                .google_client_secret
+                .as_deref()
+                .map(decrypt_token_from_file)
+                .unwrap_or_default()
+        }
+    };
+
     // If legacy tokens were in the file, migrate them to the keychain.
     if persisted
         .github_token
@@ -215,6 +277,18 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         score_rule_changes_requested_enabled: if persisted.score_rule_changes_requested_enabled { "on".to_string() } else { String::new() },
         score_rule_ci_enabled: if persisted.score_rule_ci_enabled { "on".to_string() } else { String::new() },
         score_rule_behind_enabled: if persisted.score_rule_behind_enabled { "on".to_string() } else { String::new() },
+        merge_queue_enabled: if persisted.merge_queue_enabled { "on".to_string() } else { String::new() },
+        toggl_enabled: if persisted.toggl_enabled { "on".to_string() } else { String::new() },
+        toggl_token,
+        toggl_workspace_id: persisted.toggl_workspace_id,
+        toggl_day_start: persisted.toggl_day_start,
+        toggl_day_end: persisted.toggl_day_end,
+        toggl_slot_minutes: persisted.toggl_slot_minutes.to_string(),
+        toggl_history_days: persisted.toggl_history_days.to_string(),
+        google_calendar_enabled: if persisted.google_calendar_enabled { "on".to_string() } else { String::new() },
+        google_client_id: persisted.google_client_id,
+        google_client_secret,
+        google_calendar_id: persisted.google_calendar_id,
     };
 
     Ok(normalize_settings(&form))
@@ -232,10 +306,19 @@ pub async fn save_settings(
     // platforms where `encrypt_token_for_file` can protect the token.
     let github_in_keychain = set_secret("githubToken", &normalized.github_token);
     let jira_in_keychain = set_secret("jiraToken", &normalized.jira_token);
+    let toggl_in_keychain = set_secret("togglToken", &normalized.toggl_token);
+    let google_in_keychain = set_secret("googleClientSecret", &normalized.google_client_secret);
     let github_token_fallback =
         validate_token_persistence("GitHub", &normalized.github_token, github_in_keychain)?;
     let jira_token_fallback =
         validate_token_persistence("Jira", &normalized.jira_token, jira_in_keychain)?;
+    let toggl_token_fallback =
+        validate_token_persistence("Toggl", &normalized.toggl_token, toggl_in_keychain)?;
+    let google_secret_fallback = validate_token_persistence(
+        "Google",
+        &normalized.google_client_secret,
+        google_in_keychain,
+    )?;
 
     // Write everything-except-tokens to disk (unless keychain failed, then include them).
     ensure_data_dir(app)?;
@@ -256,15 +339,28 @@ pub async fn save_settings(
         score_rule_changes_requested_enabled: normalized.score_rule_changes_requested_enabled,
         score_rule_ci_enabled: normalized.score_rule_ci_enabled,
         score_rule_behind_enabled: normalized.score_rule_behind_enabled,
+        merge_queue_enabled: normalized.merge_queue_enabled,
+        toggl_enabled: normalized.toggl_enabled,
+        toggl_workspace_id: normalized.toggl_workspace_id.clone(),
+        toggl_day_start: normalized.toggl_day_start.clone(),
+        toggl_day_end: normalized.toggl_day_end.clone(),
+        toggl_slot_minutes: normalized.toggl_slot_minutes,
+        toggl_history_days: normalized.toggl_history_days,
+        google_calendar_enabled: normalized.google_calendar_enabled,
+        google_client_id: normalized.google_client_id.clone(),
+        google_calendar_id: normalized.google_calendar_id.clone(),
         github_token: github_token_fallback,
         jira_token: jira_token_fallback,
+        toggl_token: toggl_token_fallback,
+        google_client_secret: google_secret_fallback,
     };
 
     let path = settings_path(app)?;
     let json = serde_json::to_string_pretty(&persisted).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
 
-    let used_vault = github_in_keychain && jira_in_keychain;
+    let used_vault =
+        github_in_keychain && jira_in_keychain && toggl_in_keychain && google_in_keychain;
     Ok((normalized, used_vault))
 }
 
@@ -334,5 +430,32 @@ pub async fn save_list_filter_preferences(
     ensure_data_dir(app)?;
     let path = filters_path(app)?;
     let json = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+// ── Toggl learned rules ───────────────────────────────────────────────────────
+
+fn toggl_rules_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("toggl-rules.json"))
+}
+
+/// Mapping rules learned from Toggl history. A missing or corrupt file simply
+/// means "nothing learned yet" — the planner then asks the user for the project.
+pub fn load_toggl_rules(app: &tauri::AppHandle) -> crate::toggl::LearnedRules {
+    toggl_rules_path(app)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_toggl_rules(
+    app: &tauri::AppHandle,
+    rules: &crate::toggl::LearnedRules,
+) -> Result<(), String> {
+    ensure_data_dir(app)?;
+    let path = toggl_rules_path(app)?;
+    let json = serde_json::to_string_pretty(rules).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }

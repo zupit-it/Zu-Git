@@ -6,6 +6,9 @@ fn account(key: &str) -> &str {
     match key {
         "githubToken" => "github-token",
         "jiraToken" => "jira-token",
+        "togglToken" => "toggl-token",
+        "googleClientSecret" => "google-client-secret",
+        "googleRefreshToken" => "google-refresh-token",
         other => other,
     }
 }
@@ -52,21 +55,65 @@ pub fn set_secret(key: &str, value: &str) -> bool {
             Err(_) => false,
         }
     } else {
-        std::process::Command::new("security")
-            .args([
-                "add-generic-password",
-                "-U",
-                "-s",
-                SERVICE,
-                "-a",
-                account(key),
-                "-w",
-                value,
-            ])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        // Read back before reporting success: `security` exits 0 even when the
+        // prompt round did not take the value (it then stores an empty password).
+        write_secret(account(key), value) && get_secret(key) == value
     }
+}
+
+/// Stores a secret with `security add-generic-password`, feeding the value to the
+/// tool's prompt over stdin.
+///
+/// The value must never be passed as `-w <value>`: process arguments are visible
+/// to every other process of the same user for as long as the command runs.
+/// `security` itself says so — "Use of the -p or -w options is insecure".
+#[cfg(target_os = "macos")]
+fn write_secret(account: &str, value: &str) -> bool {
+    use std::io::Write;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let mut command = Command::new("security");
+    command
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            SERVICE,
+            "-a",
+            account,
+            // No value: `security` prompts for it, and for a confirmation.
+            "-w",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    // The prompt goes through readpassphrase(3), which reads from /dev/tty when
+    // the process has a controlling terminal and only falls back to stdin when it
+    // has none. Detaching the child with setsid() guarantees it reads the pipe
+    // below — otherwise running ZuGit from a terminal would hang here forever.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        // Value, then the confirmation the prompt asks for.
+        if write!(stdin, "{value}\n{value}\n").is_err() {
+            return false;
+        }
+    }
+
+    matches!(child.wait(), Ok(status) if status.success())
 }
 
 #[cfg(target_os = "macos")]
@@ -87,17 +134,8 @@ fn probe_secure_store() -> Option<String> {
             })
     };
 
-    if let Err(e) = run(&[
-        "add-generic-password",
-        "-U",
-        "-s",
-        SERVICE,
-        "-a",
-        "__probe__",
-        "-w",
-        CANARY,
-    ]) {
-        return Some(format!("Keychain write failed: {e}"));
+    if !write_secret("__probe__", CANARY) {
+        return Some("Keychain write failed".to_string());
     }
     let read = match run(&[
         "find-generic-password",
@@ -322,5 +360,30 @@ pub fn get_secret_store_info() -> SecretStoreInfo {
                 detail,
             }
         }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    /// Round-trips a value through the real keychain to prove the stdin prompt
+    /// path stores what it is given — a mismatched prompt would leave the item
+    /// empty while `security` still exits 0.
+    #[test]
+    fn writes_and_reads_back_without_putting_the_secret_in_argv() {
+        let key = "__zugit_test_secret__";
+        let secret = "tok_ABC-123_xyz~!#$%^&*()_+";
+
+        assert!(set_secret(key, secret), "write should succeed");
+        assert_eq!(get_secret(key), secret);
+
+        // Overwriting an existing item goes through the same prompt round.
+        let updated = "tok_second_value";
+        assert!(set_secret(key, updated), "update should succeed");
+        assert_eq!(get_secret(key), updated);
+
+        assert!(set_secret(key, ""), "delete should succeed");
+        assert_eq!(get_secret(key), "");
     }
 }

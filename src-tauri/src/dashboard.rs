@@ -507,6 +507,7 @@ fn enrich(
         merge_status: pr.merge_status.clone(),
         node_id: pr.node_id.clone(),
         head_ref: pr.head_ref.clone(),
+        head_sha: pr.head_sha.clone(),
         base_ref: pr.base_ref.clone(),
         body: pr.body.clone(),
     }

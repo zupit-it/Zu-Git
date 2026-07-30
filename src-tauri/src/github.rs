@@ -269,6 +269,9 @@ pub struct GithubPullRequestRecord {
     pub requested_reviewers: Vec<String>,
     pub participant_avatars: HashMap<String, String>,
     pub head_ref: String,
+    /// Head commit SHA at fetch time — used as `expectedHeadOid` when triggering a
+    /// rebase, so GitHub rejects the mutation instead of racing a concurrent push.
+    pub head_sha: String,
     pub updated_at: String,
     pub node_id: String,
     pub base_ref: String,
@@ -588,6 +591,12 @@ async fn fetch_repo_pull_requests_inner(
                 .head_ref
                 .as_ref()
                 .map(|h| h.name.clone())
+                .unwrap_or_default(),
+            head_sha: pr
+                .head_ref
+                .as_ref()
+                .and_then(|h| h.target.as_ref())
+                .map(|t| t.oid.clone())
                 .unwrap_or_default(),
             updated_at: pr.updated_at.clone(),
             node_id: pr.id.clone(),
@@ -1270,6 +1279,60 @@ pub async fn promote_draft_pr(
     }
 
     Ok(pr_url)
+}
+
+/// Triggers a real rebase + force-push of a PR's branch onto its base branch via
+/// `updatePullRequestBranch(updateMethod: REBASE)` — the same operation as GitHub's
+/// web UI "Update with rebase" button. Unlike `PUT /pulls/{n}/update-branch` (REST),
+/// which only supports a merge-commit update, this is GraphQL-only.
+///
+/// `expected_head_sha` is passed as `expectedHeadOid`, GitHub's optimistic-concurrency
+/// guard for this mutation: if the branch's real current head doesn't match (e.g. the
+/// author pushed a new commit after our last dashboard refresh), GitHub rejects the
+/// call instead of rebasing over it — turning a possible silent clobber of concurrent
+/// work into a clean, visible error.
+///
+/// Callers should only invoke this when `mergeStatus == "behind"`; a rejection here
+/// most likely means the state changed a moment ago (a new push, or a new conflicting
+/// commit on the base branch), not routine behavior, so the error is surfaced as-is
+/// rather than retried or swallowed.
+pub async fn rebase_pull_request(
+    node_id: &str,
+    expected_head_sha: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<(), String> {
+    let mutation = r#"mutation($id: ID!, $sha: GitObjectID!) {
+  updatePullRequestBranch(input: { pullRequestId: $id, expectedHeadOid: $sha, updateMethod: REBASE }) {
+    pullRequest { id }
+  }
+}"#;
+    let gql_body = serde_json::json!({
+        "query": mutation,
+        "variables": { "id": node_id, "sha": expected_head_sha }
+    });
+
+    let resp = client
+        .post(graphql_url(settings))
+        .headers(github_headers(settings))
+        .json(&gql_body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("updatePullRequestBranch failed ({})", resp.status()));
+    }
+
+    let val: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = val["errors"].as_array() {
+        if !errors.is_empty() {
+            let msg = errors[0]["message"].as_str().unwrap_or("Unknown GraphQL error");
+            return Err(format!("updatePullRequestBranch: {msg}"));
+        }
+    }
+
+    Ok(())
 }
 
 fn keep_latest_check_runs<'a>(runs: &[&'a GqlStatusContext]) -> Vec<&'a GqlStatusContext> {

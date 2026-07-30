@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DashboardSnapshot, TokenStoreStatus } from "./shared/rpc";
 import type { PullRequestSummary } from "./shared/pr-model";
 import type { SettingsFormValues } from "./shared/settings";
-import { normalizeSettings, serializeSettingsForm } from "./shared/settings";
+import { defaultSettings, normalizeSettings, serializeSettingsForm } from "./shared/settings";
 import { state } from "./state";
 import {
   escHtml, relativeTime, avatarColor, avatarSm, chip,
@@ -181,8 +181,47 @@ export function renderSettings(values: SettingsFormValues) {
   state.scoreRuleChangesRequestedEnabled = values.scoreRuleChangesRequestedEnabled === "on";
   state.scoreRuleCiEnabled = values.scoreRuleCiEnabled === "on";
   state.scoreRuleBehindEnabled = values.scoreRuleBehindEnabled === "on";
+  state.mergeQueueEnabled = values.mergeQueueEnabled === "on";
+  state.togglEnabled = values.togglEnabled === "on";
+  state.togglDayStart = values.togglDayStart || defaultSettings.togglDayStart;
+  state.togglDayEnd = values.togglDayEnd || defaultSettings.togglDayEnd;
+  state.togglSlotMinutes =
+    Number.parseInt(values.togglSlotMinutes, 10) || defaultSettings.togglSlotMinutes;
   document.documentElement.toggleAttribute("data-colorblind", values.colorBlindMode === "on");
+  const queueWarning = document.querySelector<HTMLElement>("[data-merge-queue-warning]");
+  if (queueWarning) queueWarning.hidden = values.mergeQueueEnabled !== "on";
+  const togglHint = document.querySelector<HTMLElement>("[data-toggl-hint]");
+  if (togglHint) togglHint.hidden = !state.togglEnabled;
+  // "Where is it" only once the setting is saved — that is when the button appears.
+  const togglWhere = document.querySelector<HTMLElement>("[data-toggl-where]");
+  if (togglWhere) togglWhere.hidden = !state.togglEnabled;
+  const togglSaveFirst = document.querySelector<HTMLElement>("[data-toggl-save-first]");
+  if (togglSaveFirst) togglSaveFirst.hidden = true;
+  const togglButton = document.querySelector<HTMLElement>("[data-toggl-button]");
+  if (togglButton) togglButton.hidden = !state.togglEnabled;
+  void refreshGoogleStatus();
   setSettingsDirtyState(false);
+}
+
+/** Reads whether Google Calendar is connected — the refresh token lives in the
+ *  keychain, so only the backend knows. */
+export async function refreshGoogleStatus() {
+  const label = document.querySelector<HTMLElement>("[data-google-status]");
+  const connect = document.querySelector<HTMLButtonElement>("[data-google-connect]");
+  const disconnect = document.querySelector<HTMLButtonElement>("[data-google-disconnect]");
+  if (!label || !connect || !disconnect) return;
+
+  try {
+    const status = await invoke<{ connected: boolean; redirectUri: string }>("google_status");
+    label.textContent = status.connected ? "Account collegato." : "Non collegato.";
+    label.classList.remove("field-hint--danger");
+    connect.textContent = status.connected ? "Ricollega account" : "Collega account";
+    disconnect.hidden = !status.connected;
+    const redirect = document.querySelector<HTMLInputElement>("[data-google-redirect]");
+    if (redirect) redirect.value = status.redirectUri;
+  } catch {
+    // Settings were never saved yet — nothing to report.
+  }
 }
 
 export function collectSettingsForm(): SettingsFormValues {
@@ -464,6 +503,11 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
 
   const diffChip = renderDiffStat(pr.additions, pr.deletions, isDraft);
 
+  const queueBlocked = state.mergeQueueEnabled && state.queueBlockedPrKeys.has(`${pr.repo}/${pr.id}`);
+  const queueBlockedChip = queueBlocked
+    ? chip("fail", "Blocking merge queue", SVG.conflict)
+    : "";
+
   const jiraBtn = pr.jiraUrl
     ? `<button class="icon-btn" data-jira-link="${pr.jiraUrl}" type="button">${SVG.jira}<span>Jira</span></button>`
     : "";
@@ -476,7 +520,7 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
   const descColor   = isDraft ? "var(--draft-ink-soft)"  : "var(--ink-muted)";
 
   return `
-    <div class="pr-row${isDraft ? " pr-row--draft" : ""}" data-pr-id="${pr.repo}/${pr.id}" style="${isLast ? "" : "border-bottom:1px solid var(--border)"}">
+    <div class="pr-row${isDraft ? " pr-row--draft" : ""}${queueBlocked ? " pr-row--queue-blocked" : ""}" data-pr-id="${pr.repo}/${pr.id}" style="${isLast ? "" : "border-bottom:1px solid var(--border)"}">
       <div class="pr-row-bar"></div>
       <div style="min-width:0">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
@@ -501,6 +545,7 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
         ${autoMergeChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${autoMergeChip}</div>` : ""}
         ${threadsChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${threadsChip}</div>` : ""}
         ${mergeStatusChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${mergeStatusChip}</div>` : ""}
+        ${queueBlockedChip ? `<div style="display:flex;gap:5px;flex-wrap:wrap">${queueBlockedChip}</div>` : ""}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;padding-top:2px;margin-left:auto">
         <div style="display:flex;gap:6px">
@@ -1086,6 +1131,36 @@ export async function notifyMyChangesRequested(newChangesRequestedCount: number)
       body: newChangesRequestedCount === 1
         ? "Hai 1 tua PR con changes requested."
         : `Hai ${newChangesRequestedCount} tue PR con changes requested.`,
+      silent: false,
+    });
+  } catch (error) {
+    setStatus(
+      error instanceof Error ? error.message : "Unable to show the native notification.",
+      "danger",
+    );
+  }
+}
+
+export async function notifyQueueRebaseTriggered(pr: PullRequestSummary) {
+  try {
+    await invoke("show_native_notification", {
+      title: "ZuGit – Merge queue",
+      body: `${pr.repo}#${pr.id} è stata ribasata per restare in cima alla coda di merge.`,
+      silent: false,
+    });
+  } catch (error) {
+    setStatus(
+      error instanceof Error ? error.message : "Unable to show the native notification.",
+      "danger",
+    );
+  }
+}
+
+export async function notifyQueueConflictBlocked(pr: PullRequestSummary) {
+  try {
+    await invoke("show_native_notification", {
+      title: "ZuGit – Merge queue bloccata",
+      body: `${pr.repo}#${pr.id} ha conflitti: la coda di merge è ferma finché non la risolvi.`,
       silent: false,
     });
   } catch (error) {

@@ -20,6 +20,7 @@ A desktop app for monitoring GitHub pull requests enriched with Jira data, built
 - Re-request reviews directly from the list
 - Native notifications for new review requests and changes requested
 - Auto-refresh on a configurable interval
+- Toggl timesheet autofill — fills the free slots of your working day from the Jira stories you have in progress
 - Tokens stored in the system vault (macOS Keychain, Windows Credential Manager)
 
 ## Notifications
@@ -44,7 +45,12 @@ The cache is cleared entirely only when settings are saved.
 
 Tokens are never written to disk in plain text. On save, ZuGit attempts to store them in the system vault:
 
-- **macOS** — macOS Keychain via the `security` CLI
+- **macOS** — macOS Keychain via the `security` CLI. The secret is fed to the tool's prompt over
+  stdin, never as `-w <value>`: process arguments are readable by any other process of the same user
+  while the command runs. The child is detached with `setsid()` first, because `security` prompts
+  through `readpassphrase(3)`, which prefers `/dev/tty` over stdin whenever a controlling terminal
+  exists. Every write is verified by reading the value back — `security` exits 0 even when the
+  prompt round fails, leaving an empty password behind
 - **Windows** — Windows Credential Manager via the `keyring` crate
 - **Fallback** — if the system vault is unavailable, tokens are encrypted with DPAPI (Windows) before being written to the settings file in the app data folder. The Status tab shows which backend is active and whether the last save reached the vault.
 
@@ -175,10 +181,114 @@ Herocoders applies a workflow validator that checks its internal checklist state
 
 The target workflow transition is configurable in Settings → **Jira merge transition** (default: `MERGE REQUEST`). The name is matched case-insensitively against the transitions returned by `GET /rest/api/3/issue/{key}/transitions`.
 
+## Toggl integration
+
+Optional, off by default. Enable it in Settings → **Toggl** and the toolbar grows a **Toggl** button
+that opens the day planner.
+
+### What it does
+
+For the chosen day (today by default) ZuGit:
+
+1. reads the time entries you already have inside the working range (default `08:00–14:00`);
+2. computes the **free slots** — the parts of the range not already booked. Existing entries are
+   snapped outwards to the rounding grid, so a generated entry can never bite into one of them;
+3. fetches the Jira stories assigned to you in **In Progress** or in the merge-request status
+   (the same `jiraMergeTransition` used elsewhere), restricted to the **open sprint**, together with
+   the timestamp of their last status change, read from the issue changelog. One query per status —
+   the stage comes from the query that matched, not from the status name, because Jira returns those
+   localised ("In corso" cannot be pattern-matched against "In Progress"). The sprint filter is
+   dropped, with a warning in the panel, if the tenant has no `sprint` field or nothing is in the
+   open sprint;
+4. turns each story into an *activity window*: a story that moved **into** In Progress at 10:30 was
+   picked up then, so it only covers the day after 10:30; one that moved **into** the merge-request
+   status at 10:30 covers the day before it. Transitions from earlier days cover the whole range;
+5. assigns every free slot to the most plausible story. A transition that happened **today** is the
+   strongest signal, so the story you moved to merge request at 11:00 gets the morning even if
+   another one has been in progress for days; within the same day, In Progress wins over merge
+   request. When two stories are equally plausible for the same slot the row asks which one to
+   track, with a **Dividi tra N** button that shares the slot equally between them;
+6. fills project, tags and the **billable** flag from your own history (see below).
+
+Nothing is written until you press **Crea su Toggl**. Rows are editable (time, description, project,
+tags), overlapping rows block the submit, and after a successful run the day is re-read — so the new
+entries show up as "already on Toggl" and a second run proposes nothing.
+
+### What it can and cannot touch
+
+The integration only ever **creates** entries: the Toggl client has a single write call
+(`POST .../time_entries`) and no update or delete path, so existing history cannot be edited or
+removed by ZuGit. Writes land only in the free slots of the day selected in the panel, which is
+today by default and cannot go further back than 7 days (`MAX_BACKFILL_DAYS`) or into the future.
+The 60-day history window is read-only — it feeds the mapping rules and nothing else.
+
+Entries are fetched with 12 hours of margin around the working range because the Toggl query filters
+on the entry *start*: a meeting that began at 07:00 and ran to 09:00 would otherwise be invisible and
+its slot double-booked. Only the entries that actually overlap the range are listed in the panel.
+
+### Project and tag mapping
+
+On first use (and weekly after that) ZuGit reads the last N days of your Toggl entries (default 60,
+capped at 90 by the API) and learns:
+
+- **Jira key → project**, plus the exact wording you used for that story;
+- **key prefix → project** (e.g. every `PENT-*` goes to one project), for stories never booked before;
+- **recurring meetings** — entries without a Jira key seen at least twice (retro, stime, daily…),
+  with the tags you normally attach. They appear as chips in the panel footer, one click to add, and
+  they are what calendar events are matched against.
+
+The tag is picked from a dropdown of everything the workspace knows about (plus anything seen in
+history) — one tag per entry, the shape the history shows — and **billable** follows the majority of
+past entries for that story or meeting.
+
+A tag is only replayed if it was used on at least half of the past entries for that key, so a one-off
+tag doesn't stick. Choices you make by hand are folded back into the rules, so tomorrow they come
+pre-filled. The rules live in `toggl-rules.json` in the app data folder and carry a version stamp: when a ZuGit
+release learns a new field (as `billable` did), rules cached under the old version are re-learned
+automatically on the next open. The ⟳ button in the panel header forces a re-read at any time, and
+the footer shows when the mapping was last learned.
+
+### Calendar events
+
+Toggl's own Google Calendar suggestions are not exposed by its public API, so ZuGit reads the
+calendar directly from Google instead (optional, Settings → **Google Calendar**).
+
+Events inside the working range become rows of their own, and claim their slots before the stories
+are placed — a meeting is never overwritten by "work on PENT-123". Their project, tags and billable
+flag come from the recurring rule that matches the event title, so the retro on your calendar lands
+on the project and tags you always give it. Dropped without asking: declined invitations, all-day
+entries, events marked *free* rather than busy, Google's synthetic "working location" entries, and
+any event whose slot is already covered by a Toggl entry (that one is tracked already).
+
+Setup, once:
+
+1. In the Google Cloud console create an OAuth client (Desktop app or Web application) and enable the
+   Google Calendar API.
+2. Only for a **Web application** client: add `http://127.0.0.1:43117` to the authorised redirect
+   URIs — Settings shows the exact string. A **Desktop app** client needs nothing: Google accepts
+   loopback redirects for those on its own, and the console has no field for them.
+3. Paste client id and secret into Settings, save, then press **Collega account**. ZuGit opens the
+   consent page in your browser, catches the redirect on that loopback port, and keeps only the
+   refresh token, in the system keychain.
+
+The requested scope is `calendar.readonly`: ZuGit can list events and nothing else. The authorisation
+code exchange uses PKCE (S256) with a random `state`, both verified before the code is used.
+
+### API endpoints used
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/v9/me?with_related_data=true` | account, workspaces, projects (cached — 30 calls/hour limit) |
+| `GET /api/v9/me/time_entries` | entries for the day, and the history window for learning |
+| `POST /api/v9/workspaces/{id}/time_entries` | entry creation, one at a time |
+| `GET /calendar/v3/calendars/{id}/events` | calendar meetings for the day (read-only) |
+
 ## Requirements
 
 - GitHub personal access token (classic or fine-grained, `repo` scope)
 - Jira API token (optional — enables ticket enrichment)
+- Toggl Track API token (optional — enables the timesheet autofill; found in your Toggl profile page)
+- Google OAuth client id + secret (optional — enables the calendar import)
 
 ## Development
 

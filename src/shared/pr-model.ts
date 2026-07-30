@@ -59,6 +59,8 @@ export interface PullRequestSummary {
   mergeStatus: "clean" | "behind" | "conflicting" | "blocked" | "unknown";
   nodeId: string;
   headRef: string;
+  /** Head commit SHA at fetch time — sent as expectedHeadOid when triggering a rebase. */
+  headSha: string;
   baseRef: string;
   body: string;
 }
@@ -127,6 +129,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     mergeStatus: "behind",
     nodeId: "",
     headRef: "",
+    headSha: "",
     baseRef: "",
     body: "",
   },
@@ -169,6 +172,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     mergeStatus: "clean",
     nodeId: "",
     headRef: "",
+    headSha: "",
     baseRef: "",
     body: "",
   },
@@ -211,6 +215,7 @@ export const mockPullRequests: PullRequestSummary[] = [
     mergeStatus: "unknown",
     nodeId: "",
     headRef: "CHK-311/refactor-promo-validation",
+    headSha: "",
     baseRef: "main",
     body: "",
   },
