@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.10.0] - 2026-07-30
+
 ### Security
 - **macOS keychain writes no longer expose secrets in the process list** — tokens were passed to
   `security add-generic-password` as `-w <value>`, and process arguments are readable by any other
