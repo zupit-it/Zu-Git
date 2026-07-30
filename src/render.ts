@@ -7,7 +7,7 @@ import { state } from "./state";
 import {
   escHtml, relativeTime, avatarColor, avatarSm, chip,
   SVG, formatDiffNum, diffSizeBucket, countNewIds,
-  personLoadLevel, teamLoadLevel, loginInitials,
+  personLoadLevel, teamLoadLevel, loginInitials, errorMessage,
 } from "./utils";
 import {
   applyListFilters,
@@ -1117,7 +1117,7 @@ export async function notifyPendingReviewReminder(pendingReviewCount: number) {
     });
   } catch (error) {
     setStatus(
-      error instanceof Error ? error.message : "Unable to show the native notification.",
+      errorMessage(error, "Unable to show the native notification."),
       "danger",
     );
   }
@@ -1135,7 +1135,7 @@ export async function notifyMyChangesRequested(newChangesRequestedCount: number)
     });
   } catch (error) {
     setStatus(
-      error instanceof Error ? error.message : "Unable to show the native notification.",
+      errorMessage(error, "Unable to show the native notification."),
       "danger",
     );
   }
@@ -1150,7 +1150,7 @@ export async function notifyQueueRebaseTriggered(pr: PullRequestSummary) {
     });
   } catch (error) {
     setStatus(
-      error instanceof Error ? error.message : "Unable to show the native notification.",
+      errorMessage(error, "Unable to show the native notification."),
       "danger",
     );
   }
@@ -1165,7 +1165,7 @@ export async function notifyQueueConflictBlocked(pr: PullRequestSummary) {
     });
   } catch (error) {
     setStatus(
-      error instanceof Error ? error.message : "Unable to show the native notification.",
+      errorMessage(error, "Unable to show the native notification."),
       "danger",
     );
   }

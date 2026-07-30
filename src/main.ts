@@ -17,7 +17,7 @@ import {
   openTogglPanel, testTogglConnection,
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
-import { escHtml, avatarColor, loginInitials } from "./utils";
+import { escHtml, avatarColor, loginInitials, errorMessage} from "./utils";
 
 window.addEventListener("DOMContentLoaded", () => {
   // ── Settings form ───────────────────────────────────────────────────────────
@@ -499,7 +499,7 @@ function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
         closeAddReviewerPopover();
         void refreshDashboard("auto");
       } catch (err) {
-        setStatus(err instanceof Error ? err.message : "Failed to add reviewer.", "danger");
+        setStatus(errorMessage(err, "Failed to add reviewer."), "danger");
         chip.disabled = false;
         chip.classList.remove("arv-chip--loading");
       }

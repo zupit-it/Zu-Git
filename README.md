@@ -45,12 +45,15 @@ The cache is cleared entirely only when settings are saved.
 
 Tokens are never written to disk in plain text. On save, ZuGit attempts to store them in the system vault:
 
-- **macOS** — macOS Keychain via the `security` CLI. The secret is fed to the tool's prompt over
-  stdin, never as `-w <value>`: process arguments are readable by any other process of the same user
-  while the command runs. The child is detached with `setsid()` first, because `security` prompts
-  through `readpassphrase(3)`, which prefers `/dev/tty` over stdin whenever a controlling terminal
-  exists. Every write is verified by reading the value back — `security` exits 0 even when the
-  prompt round fails, leaving an empty password behind
+- **macOS** — macOS Keychain via the `security` CLI, driven in interactive mode (`security -i`): the
+  whole command goes over stdin with the value hex-encoded, so the secret never reaches `argv` —
+  process arguments are readable by any other process of the same user while a command runs, which
+  is why `security` itself calls `-w <value>` insecure. Hex also sidesteps interactive mode's
+  space-splitting, and unlike prompting for the value it has no length limit: `readpassphrase(3)`
+  truncates at 128 characters, and an Atlassian API token is around 192. Every write is verified by
+  reading the value back, because `security` can exit 0 having stored something else. Non-ASCII
+  secrets are refused up front: `security` prints those back as hex with no marker, so they could
+  not be read again reliably
 - **Windows** — Windows Credential Manager via the `keyring` crate
 - **Fallback** — if the system vault is unavailable, tokens are encrypted with DPAPI (Windows) before being written to the settings file in the app data folder. The Status tab shows which backend is active and whether the last save reached the vault.
 
@@ -282,6 +285,18 @@ code exchange uses PKCE (S256) with a random `state`, both verified before the c
 | `GET /api/v9/me/time_entries` | entries for the day, and the history window for learning |
 | `POST /api/v9/workspaces/{id}/time_entries` | entry creation, one at a time |
 | `GET /calendar/v3/calendars/{id}/events` | calendar meetings for the day (read-only) |
+
+## What's new modal
+
+Two separate things, on purpose:
+
+- The **What's new** modal (shown once after an update, and from the nav entry) is curated by hand in
+  the `VERSIONS` array of [`src/changelog.ts`](src/changelog.ts), with optional screenshots per
+  entry. It is what a user should read about a release — not every fix and internal change.
+- [`CHANGELOG.md`](CHANGELOG.md) is the full record, for whoever works on the app.
+
+When an update is available, the badge in the toolbar opens the **release notes published with the
+incoming version** with *Install and restart* or *Later*.
 
 ## Requirements
 

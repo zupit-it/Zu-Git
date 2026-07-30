@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DashboardSnapshot } from "./shared/rpc";
 import type { PullRequestSummary } from "./shared/pr-model";
 import { state } from "./state";
+import { errorMessage } from "./utils";
 import { applyListFilters, byPriorityRank } from "./filters";
 import { renderListBoard, setStatus, notifyQueueRebaseTriggered, notifyQueueConflictBlocked } from "./render";
 
@@ -117,9 +118,7 @@ async function triggerRebase(pr: PullRequestSummary) {
   } catch (error) {
     state.queueRebaseTriggeredFor.delete(key); // allow a retry on the next refresh
     setStatus(
-      error instanceof Error
-        ? `Failed to rebase ${pr.repo}#${pr.id}: ${error.message}`
-        : `Failed to rebase ${pr.repo}#${pr.id}.`,
+      `Failed to rebase ${pr.repo}#${pr.id}: ${errorMessage(error, "unknown reason")}`,
       "danger",
     );
   }

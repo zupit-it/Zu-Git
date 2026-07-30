@@ -755,8 +755,10 @@ pub async fn google_connect(
     )
     .await?;
 
-    if !secret_store::set_secret("googleRefreshToken", &refresh_token) {
-        return Err("Could not store the Google refresh token in the system credential store.".into());
+    if let Err(reason) = secret_store::set_secret("googleRefreshToken", &refresh_token) {
+        return Err(format!(
+            "Could not store the Google refresh token in the system credential store ({reason})."
+        ));
     }
     *state.google_access.lock() = None;
     Ok(connection)
@@ -764,7 +766,7 @@ pub async fn google_connect(
 
 #[tauri::command]
 pub async fn google_disconnect(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    secret_store::set_secret("googleRefreshToken", "");
+    let _ = secret_store::set_secret("googleRefreshToken", "");
     *state.google_access.lock() = None;
     Ok(())
 }

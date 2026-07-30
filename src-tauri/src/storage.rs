@@ -137,23 +137,24 @@ fn token_fallback_value(token: &str) -> Option<String> {
 fn validate_token_persistence(
     label: &str,
     token: &str,
-    stored_in_vault: bool,
+    stored: &Result<(), String>,
 ) -> Result<Option<String>, String> {
-    if stored_in_vault {
+    if stored.is_ok() || token.is_empty() {
         return Ok(None);
     }
 
-    if token.is_empty() {
-        return Ok(None);
-    }
+    let reason = stored
+        .as_ref()
+        .err()
+        .map(String::as_str)
+        .unwrap_or("unknown reason");
 
-    token_fallback_value(token)
-        .map(Some)
-        .ok_or_else(|| {
-            format!(
-                "Could not store the {label} token in the system credential store, and this platform has no encrypted file fallback."
-            )
-        })
+    token_fallback_value(token).map(Some).ok_or_else(|| {
+        format!(
+            "Could not store the {label} token in the system credential store ({reason}). \
+             This platform has no encrypted file fallback, so nothing was saved."
+        )
+    })
 }
 
 pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String> {
@@ -235,14 +236,14 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         .as_deref()
         .is_some_and(|t| !t.is_empty())
     {
-        set_secret("githubToken", &github_token);
+        let _ = set_secret("githubToken", &github_token);
     }
     if persisted
         .jira_token
         .as_deref()
         .is_some_and(|t| !t.is_empty())
     {
-        set_secret("jiraToken", &jira_token);
+        let _ = set_secret("jiraToken", &jira_token);
     }
 
     let form = SettingsFormValues {
@@ -304,20 +305,20 @@ pub async fn save_settings(
 
     // Persist tokens to the system vault; fall back to an encrypted file only on
     // platforms where `encrypt_token_for_file` can protect the token.
-    let github_in_keychain = set_secret("githubToken", &normalized.github_token);
-    let jira_in_keychain = set_secret("jiraToken", &normalized.jira_token);
-    let toggl_in_keychain = set_secret("togglToken", &normalized.toggl_token);
-    let google_in_keychain = set_secret("googleClientSecret", &normalized.google_client_secret);
+    let github_stored = set_secret("githubToken", &normalized.github_token);
+    let jira_stored = set_secret("jiraToken", &normalized.jira_token);
+    let toggl_stored = set_secret("togglToken", &normalized.toggl_token);
+    let google_stored = set_secret("googleClientSecret", &normalized.google_client_secret);
     let github_token_fallback =
-        validate_token_persistence("GitHub", &normalized.github_token, github_in_keychain)?;
+        validate_token_persistence("GitHub", &normalized.github_token, &github_stored)?;
     let jira_token_fallback =
-        validate_token_persistence("Jira", &normalized.jira_token, jira_in_keychain)?;
+        validate_token_persistence("Jira", &normalized.jira_token, &jira_stored)?;
     let toggl_token_fallback =
-        validate_token_persistence("Toggl", &normalized.toggl_token, toggl_in_keychain)?;
+        validate_token_persistence("Toggl", &normalized.toggl_token, &toggl_stored)?;
     let google_secret_fallback = validate_token_persistence(
         "Google",
         &normalized.google_client_secret,
-        google_in_keychain,
+        &google_stored,
     )?;
 
     // Write everything-except-tokens to disk (unless keychain failed, then include them).
@@ -357,10 +358,11 @@ pub async fn save_settings(
 
     let path = settings_path(app)?;
     let json = serde_json::to_string_pretty(&persisted).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Could not write {}: {e}", path.display()))?;
 
     let used_vault =
-        github_in_keychain && jira_in_keychain && toggl_in_keychain && google_in_keychain;
+        github_stored.is_ok() && jira_stored.is_ok() && toggl_stored.is_ok() && google_stored.is_ok();
     Ok((normalized, used_vault))
 }
 

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { state, type ChecklistItem, type DraftPrInfo, type BranchStats } from "./state";
-import { escHtml, avatarColor, loginInitials } from "./utils";
+import { escHtml, avatarColor, loginInitials, errorMessage} from "./utils";
 import { setStatus, setView } from "./render";
 import { getAvailableRepos } from "./filters";
 import { refreshDashboard } from "./api";
@@ -445,7 +445,7 @@ export async function loadDraftPrInfo() {
         });
     }
   } catch (err) {
-    setStatus(err instanceof Error ? err.message : "Could not fetch branch info.", "danger");
+    setStatus(errorMessage(err, "Could not fetch branch info."), "danger");
   } finally {
     if (btn) { btn.disabled = false; btn.classList.remove("is-loading"); }
   }
@@ -556,7 +556,7 @@ export async function publishNewPr(draft: boolean) {
       }
     }
   } catch (err) {
-    setStatus(err instanceof Error ? err.message : "Failed to publish pull request.", "danger");
+    setStatus(errorMessage(err, "Failed to publish pull request."), "danger");
     if (publishBtn) {
       publishBtn.disabled = false;
       publishBtn.textContent = draft ? "Open draft PR" : "Open pull request";

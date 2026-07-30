@@ -3,6 +3,7 @@ import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notif
 import type { DashboardBootstrap, DashboardSnapshot, SaveSettingsResult } from "./shared/rpc";
 import { defaultSettings, serializeSettingsForm } from "./shared/settings";
 import { state } from "./state";
+import { showUpdateNotes } from "./changelog";
 import {
   setStatus, setListLoading, setView,
   setSettingsNotice, syncSettingsSaveButton,
@@ -10,7 +11,7 @@ import {
   renderDashboard, renderSettings, renderSecretStoreInfo,
   renderPRRow, collectSettingsForm,
 } from "./render";
-import { SVG } from "./utils";
+import { SVG, errorMessage } from "./utils";
 import { processMergeQueue } from "./merge-queue";
 
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ export async function persistListFilters() {
     state.hiddenRepos = saved.hiddenRepos;
   } catch (error) {
     setStatus(
-      error instanceof Error ? error.message : "Unable to save list filters.",
+      errorMessage(error, "Unable to save list filters."),
       "danger",
     );
   }
@@ -92,7 +93,7 @@ export async function refreshDashboard(mode: "manual" | "auto" = "manual") {
     if (myId !== state.refreshRequestId) return;
     stopSyncLabelTicker();
     setStatus(
-      error instanceof Error ? error.message : "Unable to refresh dashboard.",
+      errorMessage(error, "Unable to refresh dashboard."),
       "danger",
     );
     setListLoading(false);
@@ -141,11 +142,11 @@ export async function saveSettingsAndRefresh(event: SubmitEvent) {
     state.settingsSaving = false;
     syncSettingsSaveButton();
     setStatus(
-      error instanceof Error ? error.message : "Unable to save settings.",
+      errorMessage(error, "Unable to save settings."),
       "danger",
     );
     setSettingsNotice(
-      error instanceof Error ? error.message : "Unable to save settings.",
+      errorMessage(error, "Unable to save settings."),
       "danger",
     );
     setListLoading(false);
@@ -180,7 +181,7 @@ export async function bootstrap() {
     stopSyncLabelTicker();
     renderSettings(serializeSettingsForm(defaultSettings));
     setStatus(
-      error instanceof Error ? error.message : "Unable to load settings.",
+      errorMessage(error, "Unable to load settings."),
       "danger",
     );
     setSettingsNotice("Unable to load settings.", "danger");
@@ -250,20 +251,9 @@ export async function checkForUpdate() {
     label.textContent = `v${update.version} available`;
     badge.hidden = false;
 
-    badge.addEventListener("click", async () => {
-      badge.classList.add("is-loading");
-      badge.disabled = true;
-      label.textContent = "Installing…";
-      try {
-        await invoke("install_update");
-      } catch (err) {
-        badge.classList.remove("is-loading");
-        badge.disabled = false;
-        label.textContent = `v${update.version} available`;
-        // eslint-disable-next-line no-console
-        console.error("Update install failed:", err);
-      }
-    }, { once: true });
+    // Show what is in the release before installing it, rather than restarting
+    // the app on a single click.
+    badge.addEventListener("click", () => showUpdateNotes(update.version, update.body));
   } catch {
     // Silently ignore: no internet, endpoint unavailable, etc.
   }
@@ -276,7 +266,7 @@ export async function openExternal(url: string) {
     await invoke("open_external", { url });
   } catch (error) {
     setStatus(
-      error instanceof Error ? error.message : "Unable to open the URL in the browser.",
+      errorMessage(error, "Unable to open the URL in the browser."),
       "danger",
     );
   }
@@ -303,7 +293,7 @@ export async function rerequestReview(button: HTMLButtonElement) {
     button.disabled = false;
     button.classList.remove("review-badge-rerequest--loading");
     setStatus(
-      error instanceof Error ? error.message : `Failed to re-request review from ${login}.`,
+      errorMessage(error, `Failed to re-request review from ${login}.`),
       "danger",
     );
   }

@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { escHtml } from "./utils";
+import { escHtml, errorMessage } from "./utils";
 import { state } from "./state";
 import { refreshGoogleStatus, setStatus } from "./render";
 import type { Assignment, Candidate, PlannerEvent } from "./toggl-plan";
 import {
   assignSlots, busyIntervals, calendarBlocks, candidatesFor, ceilTo, clockLabel, dateAt,
-  durationLabel, floorTo, freeGaps, midnightOf, minutesFromMidnight, normalizeDescription,
+  floorTo, freeGaps, midnightOf, minutesFromMidnight, normalizeDescription,
   overlappingIds, parseClock, splitRange, toIsoWithOffset,
 } from "./toggl-plan";
 
@@ -118,14 +118,32 @@ interface PlanRow {
   error?: string;
 }
 
+/** An entry already on Toggl. Read-only, but shown in place among the proposals
+ *  so the day reads as one timeline instead of two disconnected lists. */
+interface LockedRow {
+  id: string;
+  startMin: number;
+  endMin: number;
+  description: string;
+  projectName: string;
+  kind: "calendar" | "story";
+}
+
 interface PanelState {
   date: string; // YYYY-MM-DD
   context: TogglDayContext | null;
   /** Working range of the loaded day, in minutes from its midnight. */
   range: { from: number; to: number };
   rows: PlanRow[];
+  locked: LockedRow[];
   loading: boolean;
   submitting: boolean;
+  /** Rows the user opened for editing. Attention rows are always open. */
+  expanded: Set<string>;
+  hoverId: string | null;
+  dateOpen: boolean;
+  /** Whole-request failure, distinct from the per-row errors. */
+  apiError: string | null;
   notice: { text: string; tone: "info" | "danger" | "success" } | null;
 }
 
@@ -138,6 +156,9 @@ const FETCH_MARGIN_MIN = 720;
  *  always a mistake, and the stories in progress no longer describe it. */
 const MAX_BACKFILL_DAYS = 7;
 
+/** Rail density: 480px for a 6-hour day, held constant when the range widens. */
+const PX_PER_MIN = 480 / 360;
+
 function shiftDays(dateIso: string, days: number): string {
   const date = midnightOf(dateIso);
   date.setDate(date.getDate() + days);
@@ -148,6 +169,90 @@ function shiftDays(dateIso: string, days: number): string {
 function todayIso(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function dayLabel(dateIso: string): string {
+  return midnightOf(dateIso).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+  });
+}
+
+function isWeekend(dateIso: string): boolean {
+  const day = midnightOf(dateIso).getDay();
+  return day === 0 || day === 6;
+}
+
+/** "1h30m" — compact, so it never competes with the times next to it. */
+function shortDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h ? `${h}h` : ""}${m ? `${m}m` : h ? "" : "0m"}`;
+}
+
+function totalDuration(rows: PlanRow[]): string {
+  const minutes = rows.reduce((sum, row) => sum + Math.max(0, row.endMin - row.startMin), 0);
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+// ── Task colours ──────────────────────────────────────────────────────────────
+
+/** Keyed by task (Jira key, or the description for calendar rows) rather than by
+ *  project: most rows of a day share one or two projects, so colouring by project
+ *  would paint the whole timeline the same. Hues stay clear of the ok/warn/fail
+ *  range so status colours keep their meaning. */
+const PALETTE = [
+  { bg: "#EEF0FF", bd: "#D9DCFE", fg: "#3730A3" },
+  { bg: "#E6F3FE", bd: "#C9E4FB", fg: "#1E5BA8" },
+  { bg: "#F1EFFC", bd: "#DCD6F5", fg: "#5B4FB0" },
+  { bg: "#FCE9F1", bd: "#F5CFE0", fg: "#A8306A" },
+  { bg: "#E3F6F6", bd: "#BFE7E7", fg: "#0E7C86" },
+];
+const PALETTE_NEUTRAL = { bg: "#F1F1EE", bd: "#DEDAD0", fg: "#5B5D66" };
+
+/** A row with nothing in it yet has no task, and gets the neutral tone. */
+function taskKey(row: PlanRow): string {
+  return row.issueKey || row.description || "";
+}
+
+function hashIndex(key: string): number {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return hash % PALETTE.length;
+}
+
+/**
+ * One colour per task for the whole day, hashed from the task key so a story
+ * keeps its colour across days — but resolved against the tasks already on
+ * screen, because hashing alone collides far too often: with five colours and
+ * three tasks, two of them share a tone better than half the time.
+ */
+function buildTaskColors(rows: PlanRow[]): Map<string, (typeof PALETTE)[number]> {
+  const colors = new Map<string, (typeof PALETTE)[number]>();
+  const taken = new Set<number>();
+
+  for (const row of rows) {
+    const key = taskKey(row);
+    if (!key || colors.has(key)) continue;
+
+    const preferred = hashIndex(key);
+    let index = preferred;
+    // Walk to the first free tone; past five tasks the palette wraps and tones
+    // repeat, which is unavoidable and still better than a random clash.
+    for (let step = 0; step < PALETTE.length && taken.has(index); step += 1) {
+      index = (preferred + step + 1) % PALETTE.length;
+    }
+    taken.add(index);
+    colors.set(key, PALETTE[index]);
+  }
+
+  return colors;
+}
+
+function colorFor(colors: Map<string, (typeof PALETTE)[number]>, row: PlanRow) {
+  const key = taskKey(row);
+  return (key && colors.get(key)) || PALETTE_NEUTRAL;
 }
 
 // ── Row building ──────────────────────────────────────────────────────────────
@@ -170,6 +275,25 @@ function makeRow(
   rules: LearnedRules,
   candidateKeys: string[] = [],
 ): PlanRow {
+  // A toss-up is left blank on purpose: pre-filling one of the candidates would
+  // let a straight-through confirm book a story the user never chose, and the
+  // empty description is what keeps the submit button disabled until they do.
+  if (candidateKeys.length > 1) {
+    return {
+      id,
+      startMin: from,
+      endMin: to,
+      issueKey: null,
+      description: "",
+      projectId: null,
+      tags: [],
+      billable: false,
+      source: "story",
+      candidateKeys,
+      submitted: "pending",
+    };
+  }
+
   const hint = hintFor(rules, key);
   // Past wording for this exact story wins — that is what "reproduce my past
   // choices" means in practice.
@@ -236,17 +360,64 @@ function buildRows(
     .filter((row) => row.endMin > row.startMin || candidates.length > 0);
 }
 
-// ── Panel ─────────────────────────────────────────────────────────────────────
+/** Entries already on Toggl that overlap the working range. */
+function buildLockedRows(context: TogglDayContext, dateIso: string, range: Interval): LockedRow[] {
+  return context.existing
+    .map((entry) => {
+      const startMin = minutesFromMidnight(entry.start, dateIso);
+      // A running entry has no stop and a negative duration — it runs up to now.
+      const endMin = entry.stop
+        ? minutesFromMidnight(entry.stop, dateIso)
+        : minutesFromMidnight(new Date().toISOString(), dateIso);
+      const project = context.account.projects.find((p) => p.id === entry.projectId);
+      return {
+        id: `locked-${entry.id}`,
+        startMin,
+        endMin,
+        description: entry.description || "(no description)",
+        projectName: project?.name ?? "",
+        kind: "story" as const,
+      };
+    })
+    .filter((row) => row.startMin < range.to && row.endMin > range.from)
+    .sort((a, b) => a.startMin - b.startMin);
+}
+
+interface Interval {
+  from: number;
+  to: number;
+}
+
+/** The configured window, widened to fit any row that fell outside it. */
+function effectiveRange(rows: { startMin: number; endMin: number }[], range: Interval): Interval {
+  return rows.reduce(
+    (acc, row) => ({ from: Math.min(acc.from, row.startMin), to: Math.max(acc.to, row.endMin) }),
+    { ...range },
+  );
+}
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
 
 const I = {
-  close: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>`,
-  refresh: `<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7a5 5 0 1 1-1.5-3.5M12 2v3h-3"/></svg>`,
-  trash: `<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h9M5.5 4V2.5h3V4M4 4l.5 7.5h5L10 4"/></svg>`,
-  plus: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 1v10M1 6h10"/></svg>`,
-  warn: `<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1.5L1.5 12.5h11L7 1.5Z"/><path d="M7 5.5v3M7 10.4h.01"/></svg>`,
-  calendar: `<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="11" height="10" rx="1.5"/><path d="M1.5 5.5h11M4.5 1.5v2M9.5 1.5v2"/></svg>`,
+  clock: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6" cy="6" r="4.5"/><path d="M6 3.5v3L8 8"/></svg>`,
+  cal: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.3" width="9" height="8" rx="1.2"/><path d="M1.5 4.8h9M4 1.3v2M8 1.3v2"/></svg>`,
+  warn: `<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1.5L1.5 12.5h11L7 1.5Z"/><path d="M7 5.5v3M7 10.4h.01"/></svg>`,
   check: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.2L5 9l5-6"/></svg>`,
+  x: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg>`,
+  trash: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h7M4.5 3.5V2.3a.7.7 0 0 1 .7-.7h1.6a.7.7 0 0 1 .7.7v1.2M3.3 3.5l.4 6.4a1 1 0 0 0 1 .9h2.6a1 1 0 0 0 1-.9l.4-6.4"/></svg>`,
+  plus: `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 2v6M2 5h6"/></svg>`,
+  refresh: `<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7a5 5 0 1 1-1.5-3.5M12 2v3h-3"/></svg>`,
+  close: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>`,
+  lock: `<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.3" width="7" height="5" rx="1"/><path d="M4 5.3V3.8a2 2 0 0 1 4 0v1.5"/></svg>`,
+  split: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h3l2 2 2-2h1M2 9h3l2-2 2 2h1"/></svg>`,
+  chev: `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 4l2.5 2.5L7.5 4"/></svg>`,
+  pencil: `<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10l1-3 5-5 2 2-5 5z"/><path d="M7 3l2 2"/></svg>`,
+  dollar: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1.5v9M8.2 3.3c-.3-.5-1-.8-1.9-.8-1.2 0-2.1.6-2.1 1.5 0 2.1 4 1 4 3 0 .9-.9 1.5-2.1 1.5-.9 0-1.6-.3-1.9-.8"/></svg>`,
+  spinner: `<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12.5 7A5.5 5.5 0 1 1 7 1.5"/></svg>`,
+  moon: `<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 7.3A4 4 0 1 1 4.7 2.5a4.7 4.7 0 0 0 4.8 4.8Z"/></svg>`,
 };
+
+// ── Panel ─────────────────────────────────────────────────────────────────────
 
 let openPanel: HTMLElement | null = null;
 
@@ -261,38 +432,24 @@ export async function openTogglPanel() {
     context: null,
     range: { from: parseClock(state.togglDayStart), to: parseClock(state.togglDayEnd) },
     rows: [],
+    locked: [],
     loading: true,
     submitting: false,
+    expanded: new Set(),
+    hoverId: null,
+    dateOpen: false,
+    apiError: null,
     notice: null,
   };
 
   const overlay = document.createElement("div");
   overlay.className = "tg-overlay";
   overlay.dataset.togglOverlay = "";
-  overlay.innerHTML = `
-    <div class="tg-shell" role="dialog" aria-modal="true" aria-label="Toggl day">
-      <div class="tg-header">
-        <span class="tg-badge">Toggl</span>
-        <input class="tg-date" type="date" data-tg-date value="${st.date}"
-               min="${shiftDays(st.date, -MAX_BACKFILL_DAYS)}" max="${st.date}" />
-        <span class="tg-range" data-tg-range></span>
-        <span class="tg-sep">·</span>
-        <span class="tg-account" data-tg-account>loading…</span>
-        <div class="tg-spacer"></div>
-        <button class="tg-icon-btn" data-tg-relearn title="Re-read Toggl history">${I.refresh}</button>
-        <button class="tg-icon-btn tg-icon-btn--ghost" data-tg-close title="Close">${I.close}</button>
-      </div>
-      <div class="tg-notice" data-tg-notice hidden></div>
-      <div class="tg-body" data-tg-body></div>
-      <div class="tg-footer" data-tg-footer></div>
-    </div>
-  `;
-
+  overlay.innerHTML = `<div class="tg-shell" role="dialog" aria-modal="true" aria-label="Toggl day" data-tg-shell></div>`;
   document.body.appendChild(overlay);
   openPanel = overlay;
 
-  const bodyEl = () => overlay.querySelector<HTMLElement>("[data-tg-body]");
-  const footerEl = () => overlay.querySelector<HTMLElement>("[data-tg-footer]");
+  const shell = () => overlay.querySelector<HTMLElement>("[data-tg-shell]");
 
   function close() {
     overlay.remove();
@@ -301,46 +458,24 @@ export async function openTogglPanel() {
   }
 
   function onKey(event: KeyboardEvent) {
-    if (event.key === "Escape" && !st.submitting) close();
-  }
-  document.addEventListener("keydown", onKey);
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay && !st.submitting) close();
-  });
-
-  function renderNotice() {
-    const el = overlay.querySelector<HTMLElement>("[data-tg-notice]");
-    if (!el) return;
-    if (!st.notice) {
-      el.hidden = true;
-      el.textContent = "";
+    if (event.key !== "Escape" || st.submitting) return;
+    if (st.dateOpen) {
+      st.dateOpen = false;
+      render();
       return;
     }
-    el.hidden = false;
-    el.className = `tg-notice tg-notice--${st.notice.tone}`;
-    el.textContent = st.notice.text;
+    close();
   }
+  document.addEventListener("keydown", onKey);
 
   function render() {
-    const body = bodyEl();
-    const footer = footerEl();
-    if (body) body.innerHTML = renderBody(st);
-    if (footer) footer.innerHTML = renderFooter(st);
-    const rangeEl = overlay.querySelector<HTMLElement>("[data-tg-range]");
-    if (rangeEl) rangeEl.textContent = `${state.togglDayStart}–${state.togglDayEnd}`;
-    const accountEl = overlay.querySelector<HTMLElement>("[data-tg-account]");
-    if (accountEl) {
-      const account = st.context?.account;
-      const workspace = account?.workspaces.find((w) => w.id === st.context?.workspaceId);
-      accountEl.textContent = account
-        ? `${account.fullname || account.email}${workspace ? ` · ${workspace.name}` : ""}`
-        : "not connected";
-    }
-    renderNotice();
+    const target = shell();
+    if (target) target.innerHTML = renderShell(st);
   }
 
   async function load(forceRelearn = false) {
     st.loading = true;
+    st.apiError = null;
     st.notice = null;
     render();
 
@@ -363,6 +498,9 @@ export async function openTogglPanel() {
       st.context = context;
       const range = { from: startMin, to: endMin };
       st.range = range;
+      st.locked = buildLockedRows(context, st.date, range);
+      st.expanded = new Set();
+
       const busy = busyIntervals(context.existing, st.date, slot, Date.now());
       // Calendar events claim their slots first; the stories then fill what is
       // left, so a meeting is never overwritten by "work on PENT-123".
@@ -372,24 +510,22 @@ export async function openTogglPanel() {
         .sort((a, b) => a.from - b.from);
       const gaps = freeGaps(range, claimed, slot);
       const candidates = candidatesFor(context.issues, range, st.date, slot);
-      st.rows = [...calendarRows, ...buildRows(assignSlots(gaps, candidates), context.rules, candidates)]
-        .sort((a, b) => a.startMin - b.startMin);
+      const storyRows = candidates.length
+        ? buildRows(assignSlots(gaps, candidates), context.rules, candidates)
+        : [];
+      st.rows = [...calendarRows, ...storyRows].sort((a, b) => a.startMin - b.startMin);
+
       if (context.warnings.length > 0) {
         st.notice = { text: context.warnings.join(" · "), tone: "info" };
       }
       if (st.date !== todayIso()) {
-        st.notice = {
-          text: `Stai pianificando ${st.date}, non oggi.`,
-          tone: "info",
-        };
+        st.notice = { text: `Planning ${dayLabel(st.date)}, not today.`, tone: "info" };
       }
     } catch (error) {
       st.context = null;
       st.rows = [];
-      st.notice = {
-        text: error instanceof Error ? error.message : String(error),
-        tone: "danger",
-      };
+      st.locked = [];
+      st.apiError = errorMessage(error, "Unexpected error.");
     } finally {
       st.loading = false;
       render();
@@ -400,22 +536,65 @@ export async function openTogglPanel() {
 
   overlay.addEventListener("click", (event) => {
     const target = event.target as Element;
+
+    if (event.target === overlay) {
+      if (!st.submitting) close();
+      return;
+    }
     if (target.closest("[data-tg-close]")) {
       if (!st.submitting) close();
       return;
     }
-    if (target.closest("[data-tg-relearn]")) {
-      void load(true);
+
+    // Any click outside the date menu closes it.
+    if (st.dateOpen && !target.closest("[data-tg-date-menu]") && !target.closest("[data-tg-date-toggle]")) {
+      st.dateOpen = false;
+      render();
+    }
+
+    if (target.closest("[data-tg-date-toggle]")) {
+      st.dateOpen = !st.dateOpen;
+      render();
       return;
     }
+    const day = target.closest<HTMLElement>("[data-tg-date-pick]");
+    if (day) {
+      st.date = day.dataset.tgDatePick ?? st.date;
+      st.dateOpen = false;
+      void load();
+      return;
+    }
+    if (target.closest("[data-tg-relearn]") || target.closest("[data-tg-retry]")) {
+      void load(target.closest("[data-tg-relearn]") !== null);
+      return;
+    }
+    if (target.closest("[data-tg-dismiss-error]")) {
+      st.apiError = null;
+      render();
+      return;
+    }
+
     const removeBtn = target.closest<HTMLElement>("[data-tg-remove]");
     if (removeBtn) {
       st.rows = st.rows.filter((row) => row.id !== removeBtn.dataset.tgRemove);
       render();
       return;
     }
-    if (target.closest("[data-tg-add-row]")) {
-      addRow();
+    const editBtn = target.closest<HTMLElement>("[data-tg-edit]");
+    if (editBtn) {
+      const id = editBtn.dataset.tgEdit ?? "";
+      if (st.expanded.has(id)) st.expanded.delete(id);
+      else st.expanded.add(id);
+      render();
+      return;
+    }
+    const billableBtn = target.closest<HTMLElement>("[data-tg-billable]");
+    if (billableBtn) {
+      const row = st.rows.find((candidate) => candidate.id === billableBtn.dataset.tgBillable);
+      if (row) {
+        row.billable = !row.billable;
+        render();
+      }
       return;
     }
     const splitBtn = target.closest<HTMLElement>("[data-tg-split]");
@@ -423,9 +602,16 @@ export async function openTogglPanel() {
       splitRow(splitBtn.dataset.tgSplit ?? "");
       return;
     }
-    const chip = target.closest<HTMLElement>("[data-tg-recurring]");
-    if (chip) {
-      applyRecurring(chip.dataset.tgRecurring ?? "");
+    const storyBtn = target.closest<HTMLElement>("[data-tg-story-add]");
+    if (storyBtn) {
+      addStoryRow(storyBtn.dataset.tgStoryAdd ?? "");
+      return;
+    }
+    const quick = target.closest<HTMLElement>("[data-tg-quick]");
+    if (quick) {
+      const which = quick.dataset.tgQuick ?? "";
+      if (which === "row") addRow();
+      else applyRecurring(which);
       return;
     }
     if (target.closest("[data-tg-submit]")) {
@@ -433,22 +619,27 @@ export async function openTogglPanel() {
     }
   });
 
+  // Hovering a rail block highlights its card and vice versa. Done by toggling a
+  // class instead of re-rendering, so it cannot steal focus from an open input.
+  overlay.addEventListener("mouseover", (event) => {
+    const holder = (event.target as Element).closest<HTMLElement>("[data-tg-hover]");
+    setHover(holder?.dataset.tgHover ?? null);
+  });
+  overlay.addEventListener("mouseout", (event) => {
+    const holder = (event.target as Element).closest<HTMLElement>("[data-tg-hover]");
+    if (holder) setHover(null);
+  });
+
+  function setHover(id: string | null) {
+    if (st.hoverId === id) return;
+    st.hoverId = id;
+    overlay.querySelectorAll<HTMLElement>("[data-tg-hover]").forEach((element) => {
+      element.classList.toggle("is-active", element.dataset.tgHover === id);
+    });
+  }
+
   overlay.addEventListener("change", (event) => {
     const target = event.target as HTMLElement;
-
-    const dateInput = target.closest<HTMLInputElement>("[data-tg-date]");
-    if (dateInput) {
-      // min/max on the input can be bypassed by typing — clamp here too, so a
-      // stray keystroke can never write entries onto a random past day.
-      const today = todayIso();
-      const earliest = shiftDays(today, -MAX_BACKFILL_DAYS);
-      const picked = dateInput.value || today;
-      st.date = picked > today ? today : picked < earliest ? earliest : picked;
-      dateInput.value = st.date;
-      void load();
-      return;
-    }
-
     const rowId = target.closest<HTMLElement>("[data-tg-row]")?.dataset.tgRow;
     const row = st.rows.find((candidate) => candidate.id === rowId);
     if (!row) return;
@@ -472,16 +663,13 @@ export async function openTogglPanel() {
 
     if (target instanceof HTMLSelectElement && target.dataset.tgField === "project") {
       row.projectId = target.value ? Number.parseInt(target.value, 10) : null;
+      render();
       return;
     }
 
     if (target instanceof HTMLSelectElement && target.dataset.tgField === "tag") {
       row.tags = target.value ? [target.value] : [];
-      return;
-    }
-
-    if (target instanceof HTMLInputElement && target.dataset.tgField === "billable") {
-      row.billable = target.checked;
+      render();
       return;
     }
 
@@ -504,6 +692,7 @@ export async function openTogglPanel() {
     const row = st.rows.find((candidate) => candidate.id === rowId);
     if (!row || !(target instanceof HTMLInputElement)) return;
 
+    // No re-render here: it would pull the caret out of the field being typed in.
     if (target.dataset.tgField === "description") {
       row.description = target.value;
       const submitBtn = overlay.querySelector<HTMLButtonElement>("[data-tg-submit]");
@@ -515,14 +704,18 @@ export async function openTogglPanel() {
     return Math.max(0, Math.min(value, max));
   }
 
+  function nextSlotStart(): number {
+    const last = [...st.rows, ...st.locked].sort((a, b) => a.endMin - b.endMin).pop();
+    return last ? last.endMin : st.range.from;
+  }
+
   function addRow() {
-    const slot = state.togglSlotMinutes;
-    const last = st.rows[st.rows.length - 1];
-    const startMin = last ? last.endMin : parseClock(state.togglDayStart);
+    const startMin = nextSlotStart();
+    const id = `row-manual-${Date.now()}`;
     st.rows.push({
-      id: `row-manual-${Date.now()}`,
+      id,
       startMin,
-      endMin: startMin + slot * 2,
+      endMin: startMin + state.togglSlotMinutes * 2,
       issueKey: null,
       description: "",
       projectId: null,
@@ -532,6 +725,27 @@ export async function openTogglPanel() {
       candidateKeys: [],
       submitted: "pending",
     });
+    // A blank row is useless collapsed — open it straight away.
+    st.expanded.add(id);
+    render();
+  }
+
+  /** Adds a row already pointing at one of the active stories. */
+  function addStoryRow(key: string) {
+    const context = st.context;
+    const issue = context?.issues.find((candidate) => candidate.key === key);
+    if (!context || !issue) return;
+    const startMin = nextSlotStart();
+    const row = makeRow(
+      `row-story-${Date.now()}`,
+      startMin,
+      startMin + state.togglSlotMinutes * 2,
+      issue.key,
+      issue.summary,
+      context.rules,
+    );
+    st.rows.push(row);
+    st.expanded.add(row.id);
     render();
   }
 
@@ -555,17 +769,16 @@ export async function openTogglPanel() {
   }
 
   /** Recurring meetings (retro, estimation…) replay the project and tags the user
-   *  gave them in the past; they land on the last row so it can be split by hand. */
+   *  gave them in the past. */
   function applyRecurring(normalized: string) {
     const rule = st.context?.rules.recurring.find((entry) => entry.normalized === normalized);
     if (!rule) return;
-    const slot = state.togglSlotMinutes;
-    const last = st.rows[st.rows.length - 1];
-    const startMin = last ? last.endMin : parseClock(state.togglDayStart);
+    const startMin = nextSlotStart();
+    const id = `row-recurring-${Date.now()}`;
     st.rows.push({
-      id: `row-recurring-${Date.now()}`,
+      id,
       startMin,
-      endMin: startMin + slot * 2,
+      endMin: startMin + state.togglSlotMinutes * 2,
       issueKey: null,
       description: rule.label,
       projectId: rule.hint.projectId ?? null,
@@ -575,6 +788,7 @@ export async function openTogglPanel() {
       candidateKeys: [],
       submitted: "pending",
     });
+    st.expanded.add(id);
     render();
   }
 
@@ -582,7 +796,7 @@ export async function openTogglPanel() {
     const context = st.context;
     if (!context || st.submitting || !canSubmit(st)) return;
     st.submitting = true;
-    st.notice = { text: "Creating entries on Toggl…", tone: "info" };
+    st.apiError = null;
     render();
 
     const pending = st.rows.filter((row) => row.submitted !== "ok");
@@ -609,26 +823,24 @@ export async function openTogglPanel() {
 
       const failed = results.filter((result) => !result.ok);
       const created = results.length - failed.length;
-      st.notice = failed.length
-        ? {
-            text: `${created} entry create, ${failed.length} fallite: ${failed[0]?.error ?? ""}`,
-            tone: "danger",
-          }
-        : { text: `${created} entry create su Toggl.`, tone: "success" };
       if (failed.length === 0) {
         setStatus(`Toggl: ${created} time entries created.`, "neutral");
-        // Re-read the day so the new entries show up under "already on Toggl" —
-        // that is the confirmation the entries really landed.
+        // Re-read the day so the new entries come back as locked rows — that is
+        // the confirmation they really landed.
         st.submitting = false;
-        const notice = st.notice;
         await load();
-        st.notice = notice;
+        st.notice = {
+          text: `${created} ${created === 1 ? "entry" : "entries"} created in Toggl.`,
+          tone: "success",
+        };
+      } else {
+        st.notice = {
+          text: `${created} created, ${failed.length} rejected — see the rows below.`,
+          tone: "danger",
+        };
       }
     } catch (error) {
-      st.notice = {
-        text: error instanceof Error ? error.message : String(error),
-        tone: "danger",
-      };
+      st.apiError = `${errorMessage(error, "Unexpected error.")} Your proposal is safe — nothing was submitted.`;
     } finally {
       st.submitting = false;
       render();
@@ -639,16 +851,373 @@ export async function openTogglPanel() {
   await load();
 }
 
-// ── Rendering ─────────────────────────────────────────────────────────────────
+// ── Submit guard ──────────────────────────────────────────────────────────────
 
 function canSubmit(st: PanelState): boolean {
   const rows = st.rows.filter((row) => row.submitted !== "ok");
   if (rows.length === 0 || st.submitting) return false;
-  if (overlappingIds(rows).size > 0) return false;
+  if (overlappingIds([...rows, ...st.locked.map((l) => ({ id: l.id, startMin: l.startMin, endMin: l.endMin }))]).size > 0) {
+    return false;
+  }
   return rows.every((row) => row.description.trim().length > 0 && row.endMin > row.startMin);
 }
 
-function renderProjectSelect(row: PlanRow, projects: TogglProject[]): string {
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+function renderShell(st: PanelState): string {
+  const complete = !st.loading && st.context !== null && st.rows.length === 0 && st.locked.length > 0;
+  const noStory =
+    !st.loading &&
+    st.context !== null &&
+    st.rows.length === 0 &&
+    st.locked.length === 0 &&
+    (st.context?.issues.length ?? 0) === 0;
+
+  return `
+    ${renderHeader(st)}
+    ${renderApiError(st)}
+    ${renderNotice(st)}
+    ${st.loading || complete || noStory ? "" : renderStoryChips(st)}
+    <div class="tg-body">
+      ${
+        st.loading
+          ? renderLoading()
+          : st.context === null
+            ? renderDisconnected()
+            : complete
+              ? renderComplete(st)
+              : noStory
+                ? renderNoStory(st)
+                : renderPlan(st)
+      }
+    </div>
+    ${st.loading || complete || st.context === null ? "" : renderFooter(st)}
+  `;
+}
+
+function renderHeader(st: PanelState): string {
+  const account = st.context?.account;
+  const workspace = account?.workspaces.find((w) => w.id === st.context?.workspaceId);
+  const today = todayIso();
+  const days = Array.from({ length: MAX_BACKFILL_DAYS + 1 }, (_, i) => shiftDays(today, -i));
+
+  return `
+    <div class="tg-header">
+      <span class="tg-badge">Toggl</span>
+      <div class="tg-date-wrap">
+        <button class="tg-date-btn" data-tg-date-toggle type="button">
+          ${escHtml(dayLabel(st.date))}<span class="tg-date-chev">${I.chev}</span>
+        </button>
+        ${
+          st.dateOpen
+            ? `<div class="tg-date-menu" data-tg-date-menu>
+                 ${days
+                   .map(
+                     (day) =>
+                       `<div class="tg-date-item ${day === st.date ? "is-current" : ""} ${
+                         isWeekend(day) ? "is-weekend" : ""
+                       }" data-tg-date-pick="${day}">${escHtml(dayLabel(day))}</div>`,
+                   )
+                   .join("")}
+                 <div class="tg-date-note">Only the last ${MAX_BACKFILL_DAYS} days are available</div>
+               </div>`
+            : ""
+        }
+      </div>
+      <span class="tg-range">${clockLabel(st.range.from)}–${clockLabel(st.range.to)}</span>
+      <span class="tg-sep">·</span>
+      <span class="tg-account">${
+        account
+          ? `${escHtml(account.fullname || account.email)}${workspace ? ` <span class="tg-sep">·</span> ${escHtml(workspace.name)}` : ""}`
+          : "not connected"
+      }</span>
+      <div class="tg-spacer"></div>
+      <button class="tg-icon-btn" data-tg-relearn type="button" title="Re-read Toggl history">${I.refresh}</button>
+      <button class="tg-icon-btn tg-icon-btn--ghost" data-tg-close type="button" title="Close">${I.close}</button>
+    </div>`;
+}
+
+function renderApiError(st: PanelState): string {
+  if (!st.apiError) return "";
+  return `
+    <div class="tg-banner tg-banner--fail">
+      ${I.x}
+      <span class="tg-banner-text">${escHtml(st.apiError)}</span>
+      <button class="tg-banner-action" data-tg-retry type="button">Retry</button>
+      <button class="tg-banner-close" data-tg-dismiss-error type="button" title="Dismiss">${I.close}</button>
+    </div>`;
+}
+
+function renderNotice(st: PanelState): string {
+  if (!st.notice) return "";
+  const icon = st.notice.tone === "success" ? I.check : I.warn;
+  return `
+    <div class="tg-banner tg-banner--${st.notice.tone}">
+      ${icon}
+      <span class="tg-banner-text">${escHtml(st.notice.text)}</span>
+    </div>`;
+}
+
+function renderStoryChips(st: PanelState): string {
+  const issues = st.context?.issues ?? [];
+  if (issues.length === 0) return "";
+  return `
+    <div class="tg-chips">
+      ${issues
+        .map(
+          (issue) => `
+        <span class="tg-story-chip">
+          ${escHtml(issue.key)}<span class="tg-story-status">· ${escHtml(issue.status)}</span>
+          <button class="tg-story-add" data-tg-story-add="${escHtml(issue.key)}" type="button"
+                  title="Add a row for ${escHtml(issue.key)}">${I.plus}</button>
+        </span>`,
+        )
+        .join("")}
+      <div class="tg-spacer"></div>
+      ${renderLegend(st)}
+    </div>`;
+}
+
+/** Built from the tasks actually in today's proposal — the set changes daily,
+ *  unlike the project, which rarely does. */
+function renderLegend(st: PanelState): string {
+  const seen = new Set<string>();
+  const tasks = st.rows.filter((row) => {
+    if (row.candidateKeys.length > 1) return false;
+    const key = taskKey(row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (tasks.length === 0) return "";
+  const colors = buildTaskColors(st.rows);
+  return `
+    <div class="tg-legend">
+      ${tasks
+        .map((row) => {
+          const color = colorFor(colors, row);
+          return `<span class="tg-legend-item">
+            <span class="tg-legend-dot" style="background:${color.bg};border-color:${color.bd}"></span>
+            ${escHtml(row.issueKey || row.description || "Untitled")}
+          </span>`;
+        })
+        .join("")}
+    </div>`;
+}
+
+// ── Timeline rail ─────────────────────────────────────────────────────────────
+
+function renderRail(st: PanelState): string {
+  const range = effectiveRange([...st.rows, ...st.locked], st.range);
+  const total = Math.max(range.to - range.from, 60);
+  const height = total * PX_PER_MIN;
+
+  const hours: string[] = [];
+  for (let minute = ceilTo(range.from, 60); minute <= range.to; minute += 60) {
+    hours.push(
+      `<div class="tg-rail-hour" style="top:${(minute - range.from) * PX_PER_MIN - 5}px">${clockLabel(minute)}</div>`,
+    );
+  }
+
+  const block = (
+    id: string,
+    startMin: number,
+    endMin: number,
+    className: string,
+    style: string,
+    title: string,
+  ) => `
+    <div class="tg-rail-block ${className}" data-tg-hover="${id}"
+         style="top:${(startMin - range.from) * PX_PER_MIN}px;height:${Math.max((endMin - startMin) * PX_PER_MIN, 3)}px;${style}"
+         title="${escHtml(title)}"></div>`;
+
+  const lockedBlocks = st.locked
+    .map((row) =>
+      block(row.id, row.startMin, row.endMin, "tg-rail-block--locked", "", `${clockLabel(row.startMin)}–${clockLabel(row.endMin)} · ${row.description}`),
+    )
+    .join("");
+
+  const clashing = overlappingIds([
+    ...st.rows,
+    ...st.locked.map((l) => ({ id: l.id, startMin: l.startMin, endMin: l.endMin })),
+  ]);
+
+  const colors = buildTaskColors(st.rows);
+  const rowBlocks = st.rows
+    .map((row) => {
+      const status = rowStatus(row, clashing.has(row.id));
+      const color = colorFor(colors, row);
+      const style =
+        status === "ok"
+          ? `background:${color.bg};border-color:${color.bd}`
+          : "";
+      return block(
+        row.id,
+        row.startMin,
+        row.endMin,
+        `tg-rail-block--${status}`,
+        style,
+        `${clockLabel(row.startMin)}–${clockLabel(row.endMin)} · ${row.description || "Untitled"}`,
+      );
+    })
+    .join("");
+
+  return `
+    <div class="tg-rail" style="height:${height}px">
+      ${hours.join("")}
+      <div class="tg-rail-track" style="height:${height}px">${lockedBlocks}${rowBlocks}</div>
+    </div>`;
+}
+
+type RowStatus = "ok" | "ambiguous" | "clash" | "submitted" | "error";
+
+function rowStatus(row: PlanRow, clashing: boolean): RowStatus {
+  if (row.submitted === "ok") return "submitted";
+  if (row.submitted === "error") return "error";
+  if (clashing) return "clash";
+  if (row.candidateKeys.length > 1) return "ambiguous";
+  return "ok";
+}
+
+// ── Plan ──────────────────────────────────────────────────────────────────────
+
+function renderPlan(st: PanelState): string {
+  const clashing = overlappingIds([
+    ...st.rows,
+    ...st.locked.map((l) => ({ id: l.id, startMin: l.startMin, endMin: l.endMin })),
+  ]);
+  const items: { startMin: number; html: string }[] = [
+    ...st.locked.map((row) => ({ startMin: row.startMin, html: renderLockedCard(row) })),
+    ...st.rows.map((row) => ({ startMin: row.startMin, html: renderCard(row, st, clashing.has(row.id)) })),
+  ].sort((a, b) => a.startMin - b.startMin);
+
+  return `
+    <div class="tg-plan">
+      ${renderRail(st)}
+      <div class="tg-cards">${items.map((item) => item.html).join("")}</div>
+    </div>`;
+}
+
+function renderLockedCard(row: LockedRow): string {
+  return `
+    <div class="tg-card tg-card--locked" data-tg-hover="${row.id}">
+      <span class="tg-card-icon">${I.lock}</span>
+      <span class="tg-card-time">${clockLabel(row.startMin)}–${clockLabel(row.endMin)}</span>
+      <span class="tg-card-desc">${escHtml(row.description)}</span>
+      ${row.projectName ? `<span class="tg-card-project">${escHtml(row.projectName)}</span>` : ""}
+      <span class="tg-card-locked-label">Already on Toggl</span>
+    </div>`;
+}
+
+function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
+  const context = st.context;
+  if (!context) return "";
+
+  const status = rowStatus(row, clashing);
+  const needsAttention = status === "ambiguous" || status === "clash" || status === "error";
+  const expanded = st.expanded.has(row.id) || needsAttention;
+  const submitted = status === "submitted";
+  const color = colorFor(buildTaskColors(st.rows), row);
+  const outside = row.startMin < st.range.from || row.endMin > st.range.to;
+  const duration = shortDuration(row.endMin - row.startMin);
+
+  const tone =
+    status === "ok"
+      ? `style="background:${color.bg};border-color:${color.bd}"`
+      : "";
+
+  const project = context.account.projects.find((p) => p.id === row.projectId);
+
+  return `
+    <div class="tg-card tg-card--${status}" data-tg-row="${row.id}" data-tg-hover="${row.id}" ${tone}>
+      <div class="tg-card-main">
+        <span class="tg-card-icon" ${status === "ok" ? `style="color:${color.fg}"` : ""}>
+          ${row.source === "calendar" ? I.cal : I.clock}
+        </span>
+
+        ${
+          expanded && !submitted
+            ? `<input class="tg-time" type="text" inputmode="numeric" maxlength="5" data-tg-field="start"
+                      value="${clockLabel(row.startMin)}" aria-label="Start" />
+               <span class="tg-dash">–</span>
+               <input class="tg-time" type="text" inputmode="numeric" maxlength="5" data-tg-field="end"
+                      value="${clockLabel(row.endMin)}" aria-label="End" />`
+            : `<span class="tg-card-time">${clockLabel(row.startMin)}–${clockLabel(row.endMin)}</span>`
+        }
+        <span class="tg-card-dur">${duration}</span>
+        ${
+          outside
+            ? `<span class="tg-outside" title="Falls outside the usual working window">${I.moon} Outside hours</span>`
+            : ""
+        }
+
+        ${
+          expanded && !submitted
+            ? `<input class="tg-desc-input" type="text" data-tg-field="description"
+                      value="${escHtml(row.description)}" placeholder="What were you working on?" />`
+            : `<span class="tg-card-desc ${row.description ? "" : "is-empty"}">${
+                escHtml(row.description) || "No description"
+              }</span>`
+        }
+
+        ${
+          submitted
+            ? `<span class="tg-card-created">${I.check} Created</span>`
+            : expanded
+              ? `${renderProjectSelect(row, context)}${renderTagSelect(row, context)}${renderBillable(row)}`
+              : `<span class="tg-pill ${project ? "" : "tg-pill--empty"}">${
+                  project ? escHtml(project.name) : "No project"
+                }</span>
+                 ${row.tags[0] ? `<span class="tg-pill-tag">#${escHtml(row.tags[0])}</span>` : ""}
+                 <span class="tg-bill-mark ${row.billable ? "is-on" : ""}" title="${
+                   row.billable ? "Billable" : "Non-billable"
+                 }">${I.dollar}</span>`
+        }
+
+        ${
+          !needsAttention && !submitted
+            ? `<button class="tg-card-btn ${expanded ? "is-done" : ""}" data-tg-edit="${row.id}" type="button"
+                       title="${expanded ? "Done editing" : "Edit"}">${expanded ? I.check : I.pencil}</button>`
+            : ""
+        }
+        ${
+          submitted
+            ? ""
+            : `<button class="tg-card-btn tg-card-btn--danger" data-tg-remove="${row.id}" type="button" title="Delete">${I.trash}</button>`
+        }
+      </div>
+
+      ${
+        status === "ambiguous"
+          ? `<div class="tg-band tg-band--warn">
+               ${I.warn}
+               <span class="tg-band-text">Which story was this from?</span>
+               ${renderIssueSelect(row, context)}
+               <button class="tg-band-btn" data-tg-split="${row.id}" type="button">
+                 ${I.split} Split between ${row.candidateKeys.length}
+               </button>
+             </div>`
+          : ""
+      }
+      ${
+        status === "clash"
+          ? `<div class="tg-band tg-band--fail">${I.warn}
+               <span class="tg-band-text">Overlaps another entry — adjust the time to submit.</span>
+             </div>`
+          : ""
+      }
+      ${
+        status === "error"
+          ? `<div class="tg-band tg-band--fail">${I.x}
+               <span class="tg-band-text">${escHtml(row.error ?? "Toggl rejected this entry.")}</span>
+             </div>`
+          : ""
+      }
+    </div>`;
+}
+
+function renderProjectSelect(row: PlanRow, context: TogglDayContext): string {
+  const projects = context.account.projects.filter((p) => p.workspaceId === context.workspaceId);
   const options = projects
     .map(
       (project) =>
@@ -658,8 +1227,8 @@ function renderProjectSelect(row: PlanRow, projects: TogglProject[]): string {
     )
     .join("");
   return `
-    <select class="tg-select ${row.projectId === null ? "tg-select--empty" : ""}" data-tg-field="project">
-      <option value="">No project</option>
+    <select class="tg-mini-select ${row.projectId === null ? "tg-mini-select--empty" : ""}" data-tg-field="project">
+      <option value="">Select project</option>
       ${options}
     </select>`;
 }
@@ -679,224 +1248,130 @@ function knownTags(context: TogglDayContext): string[] {
   return [...names].sort((a, b) => a.localeCompare(b));
 }
 
-/** One tag per entry, as a plain select: the same control and the same height as
- *  the project picker. Toggl accepts several tags per entry, but tracking one is
- *  what the history shows and what keeps the row readable. */
-function renderTagPicker(row: PlanRow, context: TogglDayContext): string {
+function renderTagSelect(row: PlanRow, context: TogglDayContext): string {
   const current = row.tags[0] ?? "";
   const known = knownTags(context);
   // A tag that no longer exists in the workspace is still shown while selected,
   // so editing another field cannot silently drop it.
   const options = (known.includes(current) || !current ? known : [current, ...known])
-    .map(
-      (tag) =>
-        `<option value="${escHtml(tag)}" ${tag === current ? "selected" : ""}>${escHtml(tag)}</option>`,
-    )
+    .map((tag) => `<option value="${escHtml(tag)}" ${tag === current ? "selected" : ""}>${escHtml(tag)}</option>`)
     .join("");
-
   return `
-    <select class="tg-select" data-tg-field="tag">
-      <option value="">Nessun tag</option>
+    <select class="tg-mini-select" data-tg-field="tag">
+      <option value="">+ Tag</option>
       ${options}
     </select>`;
 }
 
-function renderIssueSelect(row: PlanRow, issues: ActiveIssue[]): string {
-  const options = issues
-    .map(
-      (issue) =>
-        `<option value="${escHtml(issue.key)}" ${row.issueKey === issue.key ? "selected" : ""}>${escHtml(
-          issue.key,
-        )} · ${escHtml(issue.status)}</option>`,
-    )
+function renderBillable(row: PlanRow): string {
+  return `
+    <button class="tg-bill ${row.billable ? "is-on" : ""}" data-tg-billable="${row.id}" type="button" title="Billable">
+      ${I.dollar}${row.billable ? "Billable" : "Non-bill."}
+    </button>`;
+}
+
+function renderIssueSelect(row: PlanRow, context: TogglDayContext): string {
+  const options = row.candidateKeys
+    .map((key) => context.issues.find((issue) => issue.key === key))
+    .filter((issue): issue is ActiveIssue => Boolean(issue))
+    .map((issue) => `<option value="${escHtml(issue.key)}">${escHtml(issue.key)} · ${escHtml(issue.status)}</option>`)
     .join("");
   return `
-    <select class="tg-select tg-select--issue" data-tg-field="issue">
+    <select class="tg-band-select" data-tg-field="issue">
       <option value="">Choose story…</option>
       ${options}
     </select>`;
 }
 
-function renderRow(row: PlanRow, context: TogglDayContext, clashing: boolean): string {
-  const projects = context.account.projects.filter(
-    (project) => project.workspaceId === context.workspaceId,
-  );
-  const ambiguous = row.candidateKeys.length > 1;
-  const classes = [
-    "tg-row",
-    ambiguous ? "tg-row--ambiguous" : "",
-    clashing ? "tg-row--clash" : "",
-    row.submitted === "ok" ? "tg-row--done" : "",
-    row.submitted === "error" ? "tg-row--error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const candidates = row.candidateKeys
-    .map((key) => context.issues.find((issue) => issue.key === key))
-    .filter((issue): issue is ActiveIssue => Boolean(issue));
-
-  return `
-    <div class="${classes}" data-tg-row="${row.id}">
-      <div class="tg-cell tg-cell--time">
-        <input class="tg-time" type="text" inputmode="numeric" maxlength="5" data-tg-field="start"
-               value="${clockLabel(row.startMin)}" aria-label="Inizio" />
-        <span class="tg-dash">–</span>
-        <input class="tg-time" type="text" inputmode="numeric" maxlength="5" data-tg-field="end"
-               value="${clockLabel(row.endMin)}" aria-label="Fine" />
-        <span class="tg-duration">${durationLabel(row.endMin - row.startMin)}</span>
-      </div>
-      <div class="tg-cell tg-cell--desc">
-        ${row.source === "calendar" ? `<span class="tg-source" title="Da Google Calendar">${I.calendar}</span>` : ""}
-        <input class="tg-input" type="text" data-tg-field="description" value="${escHtml(row.description)}" placeholder="Description" />
-        ${
-          ambiguous
-            ? `<div class="tg-ambiguous">
-                 ${I.warn}
-                 <span>Su quale story vuoi tracciare questo slot?</span>
-                 <button class="tg-split" data-tg-split="${row.id}" type="button">
-                   Dividi tra ${candidates.length}
-                 </button>
-                 ${renderIssueSelect(row, candidates)}
-               </div>`
-            : ""
-        }
-        ${row.error ? `<div class="tg-row-error">${escHtml(row.error)}</div>` : ""}
-      </div>
-      <div class="tg-cell tg-cell--project">${renderProjectSelect(row, projects)}</div>
-      <div class="tg-cell tg-cell--tags">${renderTagPicker(row, context)}</div>
-      <div class="tg-cell tg-cell--billable">
-        <label class="tg-check" title="Billable">
-          <input type="checkbox" data-tg-field="billable" ${row.billable ? "checked" : ""} />
-        </label>
-      </div>
-      <div class="tg-cell tg-cell--actions">
-        ${
-          row.submitted === "ok"
-            ? `<span class="tg-done-mark">${I.check}</span>`
-            : `<button class="tg-icon-btn tg-icon-btn--ghost" data-tg-remove="${row.id}" title="Remove">${I.trash}</button>`
-        }
-      </div>
-    </div>`;
-}
-
-function renderExisting(
-  context: TogglDayContext,
-  dateIso: string,
-  range: { from: number; to: number },
-): string {
-  // Entries are fetched with a margin around the range; only the ones that
-  // actually overlap it explain a skipped slot.
-  const inRange = context.existing
-    .map((entry) => {
-      const from = minutesFromMidnight(entry.start, dateIso);
-      // A running entry has no stop and a negative duration — it runs up to now.
-      const to = entry.stop
-        ? minutesFromMidnight(entry.stop, dateIso)
-        : minutesFromMidnight(new Date().toISOString(), dateIso);
-      return { entry, from, to };
-    })
-    .filter(({ from, to }) => from < range.to && to > range.from);
-  if (inRange.length === 0) return "";
-
-  const rows = inRange
-    .sort((a, b) => a.from - b.from)
-    .map(({ entry, from, to }) => {
-      const project = context.account.projects.find((candidate) => candidate.id === entry.projectId);
-      return `
-        <div class="tg-existing-row">
-          <span class="tg-existing-time">${clockLabel(from)}–${clockLabel(to)}</span>
-          <span class="tg-existing-desc">${escHtml(entry.description || "(no description)")}</span>
-          <span class="tg-existing-project">${escHtml(project?.name ?? "")}</span>
-        </div>`;
-    })
-    .join("");
-
-  return `
-    <div class="tg-existing">
-      <div class="tg-existing-title">Già su Toggl in questa fascia — questi slot vengono saltati</div>
-      ${rows}
-    </div>`;
-}
-
-function renderBody(st: PanelState): string {
-  if (st.loading) {
-    return `<div class="tg-empty"><div class="tg-spinner"></div><span>Reading Toggl and Jira…</span></div>`;
-  }
-  const context = st.context;
-  if (!context) {
-    return `<div class="tg-empty"><span>Toggl non raggiungibile. Controlla token e impostazioni.</span></div>`;
-  }
-
-  const clashing = overlappingIds(st.rows);
-  const rows = st.rows.length
-    ? st.rows.map((row) => renderRow(row, context, clashing.has(row.id))).join("")
-    : `<div class="tg-empty"><span>Nessuno slot libero da riempire in questa fascia oraria.</span></div>`;
-
-  const issueSummary = context.issues.length
-    ? `<div class="tg-issues">
-        ${context.issues
-          .map(
-            (issue) =>
-              `<span class="tg-issue-chip tg-issue-chip--${issue.stage}">${escHtml(issue.key)} · ${escHtml(
-                issue.status,
-              )}</span>`,
-          )
-          .join("")}
-      </div>`
-    : `<div class="tg-issues tg-issues--empty">Nessuna story assegnata a te in corso — compila le righe a mano.</div>`;
-
-  return `
-    ${issueSummary}
-    <div class="tg-table">
-      <div class="tg-table-head">
-        <span>Orario</span><span>Descrizione</span><span>Progetto</span><span>Tag</span><span>Fatt.</span><span></span>
-      </div>
-      ${rows}
-    </div>
-    ${renderExisting(context, st.date, st.range)}`;
-}
+// ── Footer ────────────────────────────────────────────────────────────────────
 
 function renderFooter(st: PanelState): string {
   const pending = st.rows.filter((row) => row.submitted !== "ok");
-  const totalMinutes = pending.reduce((sum, row) => sum + Math.max(0, row.endMin - row.startMin), 0);
-  const recurring = (st.context?.rules.recurring ?? [])
-    .slice(0, 6)
-    .map(
-      (rule) =>
-        `<button class="tg-chip" data-tg-recurring="${escHtml(rule.normalized)}" type="button">${I.plus} ${escHtml(
-          rule.label,
-        )}</button>`,
-    )
-    .join("");
-
+  const recurring = (st.context?.rules.recurring ?? []).slice(0, 4);
   const learned = st.context?.rules.entriesScanned ?? 0;
-  const learnedAt = st.context?.rules.learnedAt;
-  const learnedOn = learnedAt
-    ? new Date(learnedAt).toLocaleDateString(undefined, { day: "2-digit", month: "2-digit" })
-    : "";
+  const ready = canSubmit(st);
 
   return `
-    <div class="tg-footer-left">
-      <button class="tg-chip" data-tg-add-row type="button">${I.plus} Riga</button>
-      ${recurring}
-    </div>
-    <div class="tg-footer-right">
-      <span class="tg-total">${pending.length} entry · ${durationLabel(totalMinutes)}</span>
-      ${
-        learned
-          ? `<span class="tg-learned">mapping da ${learned} entry storiche${
-              learnedOn ? ` · letto il ${learnedOn}` : ""
-            }</span>`
-          : ""
-      }
-      <button class="tg-submit" data-tg-submit type="button" ${canSubmit(st) ? "" : "disabled"}>
-        ${st.submitting ? "Invio…" : "Crea su Toggl"}
-      </button>
+    <div class="tg-footer">
+      <div class="tg-quick">
+        <span class="tg-quick-label">Quick add</span>
+        <button class="tg-quick-chip" data-tg-quick="row" type="button">${I.plus} Row</button>
+        ${recurring
+          .map(
+            (rule) =>
+              `<button class="tg-quick-chip" data-tg-quick="${escHtml(rule.normalized)}" type="button">${I.cal} ${escHtml(
+                rule.label,
+              )}</button>`,
+          )
+          .join("")}
+      </div>
+      <div class="tg-totals-row">
+        <span class="tg-totals">
+          <strong>${pending.length}</strong> ${pending.length === 1 ? "entry" : "entries"} ·
+          <strong>${totalDuration(pending)}</strong> total${
+            learned ? ` · mapped from ${learned} past entries` : ""
+          }
+        </span>
+        <div class="tg-spacer"></div>
+        <button class="tg-submit" data-tg-submit type="button" ${ready ? "" : "disabled"}>
+          ${
+            st.submitting
+              ? `<span class="tg-spin">${I.spinner}</span> Creating…`
+              : `Create in Toggl${pending.length ? ` <span class="tg-submit-count">(${pending.length})</span>` : ""}`
+          }
+        </button>
+      </div>
     </div>`;
 }
 
-// ── Settings helper ───────────────────────────────────────────────────────────
+// ── Whole-body states ─────────────────────────────────────────────────────────
+
+function renderLoading(): string {
+  return `
+    <div class="tg-loading">
+      <div class="tg-loading-label"><span class="tg-spin">${I.spinner}</span> Reading Toggl, Jira and your calendar…</div>
+      ${[0, 1, 2, 3].map(() => `<div class="tg-skeleton"></div>`).join("")}
+    </div>`;
+}
+
+function renderDisconnected(): string {
+  return `
+    <div class="tg-state">
+      <div class="tg-state-icon tg-state-icon--muted">${I.warn}</div>
+      <div class="tg-state-title">Toggl is not reachable</div>
+      <div class="tg-state-text">Check the token and the day range in Settings, then try again.</div>
+    </div>`;
+}
+
+function renderComplete(st: PanelState): string {
+  return `
+    <div class="tg-plan">
+      ${renderRail(st)}
+      <div class="tg-state">
+        <div class="tg-state-icon tg-state-icon--ok">${I.check}</div>
+        <div class="tg-state-title">Today's timesheet is complete</div>
+        <div class="tg-state-text">
+          Every working minute between ${clockLabel(st.range.from)} and ${clockLabel(st.range.to)}
+          is already booked on Toggl. Nothing to propose.
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderNoStory(st: PanelState): string {
+  return `
+    <div class="tg-plan">
+      ${renderRail(st)}
+      <div class="tg-state">
+        <div class="tg-state-icon tg-state-icon--muted">${I.warn}</div>
+        <div class="tg-state-title">No active story in the open sprint</div>
+        <div class="tg-state-text">Jira has nothing assigned to you right now. Add rows by hand for the rest of the day.</div>
+        <button class="tg-quick-chip" data-tg-quick="row" type="button">${I.plus} Add a row</button>
+      </div>
+    </div>`;
+}
+
+// ── Settings helpers ──────────────────────────────────────────────────────────
 
 export async function connectGoogleCalendar(button: HTMLButtonElement) {
   const label = document.querySelector<HTMLElement>("[data-google-status]");
@@ -911,7 +1386,7 @@ export async function connectGoogleCalendar(button: HTMLButtonElement) {
     await refreshGoogleStatus();
   } catch (error) {
     if (label) {
-      label.textContent = error instanceof Error ? error.message : String(error);
+      label.textContent = errorMessage(error, "Unexpected error.");
       label.classList.add("field-hint--danger");
     }
   } finally {
@@ -945,7 +1420,7 @@ export async function testTogglConnection(button: HTMLButtonElement) {
     }
   } catch (error) {
     if (result) {
-      result.textContent = error instanceof Error ? error.message : String(error);
+      result.textContent = errorMessage(error, "Unexpected error.");
       result.classList.add("field-hint--danger");
     }
   } finally {

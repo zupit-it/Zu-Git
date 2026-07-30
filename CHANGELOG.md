@@ -14,11 +14,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Security
 - **macOS keychain writes no longer expose secrets in the process list** — tokens were passed to
   `security add-generic-password` as `-w <value>`, and process arguments are readable by any other
-  process of the same user for as long as the command runs. The value now goes to the tool's prompt
-  over stdin, with the child detached via `setsid()` so `readpassphrase(3)` cannot fall back to the
-  terminal, and every write is verified by reading it back — `security` exits 0 even when the prompt
-  round fails, storing an empty password. Affects the GitHub and Jira tokens too, not just the ones
-  added in this release.
+  process of the same user for as long as the command runs. Writes now go through `security -i`,
+  which takes the whole command on stdin, with the value hex-encoded: the secret never reaches
+  `argv`, hex avoids interactive mode's space-splitting, and there is no length cap — prompting for
+  the value would have been simpler but `readpassphrase(3)` truncates at 128 characters, half an
+  Atlassian API token. Every write is verified by reading it back, and non-ASCII values are refused
+  rather than stored in a form that cannot be read again. Affects the GitHub and Jira tokens too,
+  not just the ones added in this release.
+
+### Changed
+- **Toggl day planner redesigned** — the day is now a timeline: a rail on the left maps the whole
+  working range, and each entry is a compact card next to it, colour-coded by task and highlighted
+  in both places on hover. Entries already on Toggl are interleaved in place as locked rows instead
+  of sitting in a separate list, confident rows collapse to one line and expand only when you click
+  edit, and the rows that need an answer (ambiguous, overlapping, rejected) are the ones that stand
+  out. An ambiguous slot now starts empty rather than pre-filled with a guess, so a straight-through
+  confirm can no longer book a story you never chose.
+- **Update notes before installing** — clicking the update badge opens the release notes published
+  with the incoming version, with Install and Later, instead of restarting the app on a single
+  click. The **What's new** modal stays hand-curated in `src/changelog.ts` and is deliberately not
+  generated from this file: it is what a user should read about a release, not the full record.
+- **Distinct colours per task in the Toggl planner** — task colours were hashed independently, so
+  with three stories in a day two of them shared a tone better than half the time. A colour is now
+  claimed once per task and collisions walk to the next free tone, while a row with no story and no
+  description keeps the neutral grey instead of being handed a random colour.
+
+### Fixed
+- **Backend errors reached the user as "Unable to save settings"** — Tauri rejects with the plain
+  string a command returned, not with an `Error`, so every `instanceof Error` check in the frontend
+  failed and the real reason was replaced by a generic message. All 19 call sites now go through one
+  helper, and the credential-store failures say which secret failed and why.
 
 ### Added
 - **Toggl timesheet autofill** (opt-in, Settings → Toggl) — a **Toggl** button in the toolbar opens a

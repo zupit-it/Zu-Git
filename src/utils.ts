@@ -157,3 +157,20 @@ export function matchesSearch(pr: PullRequestSummary, query: string): boolean {
 
   return haystack.includes(query.toLowerCase());
 }
+
+/**
+ * Message to show for a failed call.
+ *
+ * Tauri rejects with the plain string a command returned in `Err(String)`, not
+ * with an `Error`, so testing `instanceof Error` alone throws away every backend
+ * reason and leaves the user with a generic "something went wrong".
+ */
+export function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}

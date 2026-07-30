@@ -1,4 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
+import { escHtml, errorMessage } from "./utils";
+import { setStatus } from "./render";
 
 const STORAGE_KEY = "zugit-changelog-seen";
 
@@ -17,6 +20,20 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Toggl — fill your timesheet from the day you actually had",
+        body: "Turn it on in <strong>Settings → Toggl</strong> and a <strong>Toggl</strong> button appears next to Refresh. It reads the entries you already have, finds the free slots of your working range (default <strong>08:00–14:00</strong>) and fills them with the Jira stories assigned to you — using <em>when</em> each story changed status to split the day: the one you moved to merge request at 10:30 gets the morning, the one you picked up then gets the afternoon. Project, tags and the billable flag come from your own Toggl history. When two stories are equally plausible the row asks which one, or splits the slot between them. Nothing is written until you press <strong>Create in Toggl</strong>.",
+        imgs: ["/assets/changelog/toggl.png"],
+      },
+      {
+        title: "Meetings from Google Calendar, in the same plan",
+        body: "Connect your calendar in <strong>Settings → Google Calendar</strong> (read-only) and the meetings inside your working range become rows of their own, taking their slot before the stories are placed — the retro lands on the project and tags you always give it. Declined invitations, all-day entries and anything already tracked are skipped.",
+      },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
+      {
         title: "Stories across multiple releases",
         body: "A story/PR can now belong to several Jira fix versions at once. The dashboard groups it under its <strong>primary</strong> (most imminent) release with a <strong>+N release</strong> badge listing the others, and the release diff finally classifies it correctly — <strong>Done/Missing instead of Extra</strong> — whenever any of its versions matches. <strong>Move, Defer, Adopt and Drop</strong> now act only on the current release, preserving the story's other version assignments instead of overwriting them.",
       },
@@ -24,11 +41,6 @@ const VERSIONS: VersionBlock[] = [
         title: "Add graphic warning for expired tokens",
         body: "Removed mock data",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "Add reviewer from the dashboard",
         body: "Each PR row now has a <strong>+</strong> button next to the reviewer badges. Click it to pick any team member not already reviewing — they get added instantly without leaving the dashboard.",
@@ -128,6 +140,16 @@ function buildModal(version: string): HTMLElement {
   return overlay;
 }
 
+/** Links inside release notes must open in the real browser, not inside the app. */
+function wireExternalLinks(root: HTMLElement) {
+  root.addEventListener("click", (event) => {
+    const link = (event.target as Element).closest<HTMLAnchorElement>("[data-external-link]");
+    if (!link) return;
+    event.preventDefault();
+    void invoke("open_external", { url: link.getAttribute("href") ?? "" }).catch(() => {});
+  });
+}
+
 function close(version: string) {
   localStorage.setItem(STORAGE_KEY, version);
   document.querySelector("[data-changelog-overlay]")?.remove();
@@ -143,4 +165,179 @@ export async function showChangelog() {
   if (document.querySelector("[data-changelog-overlay]")) return;
   const version = await getVersion();
   document.body.appendChild(buildModal(version));
+}
+
+// ── Update release notes ──────────────────────────────────────────────────────
+//
+// Fed by the body published with the release, not by CHANGELOG.md: what goes in
+// the What's new modal above is curated by hand, on purpose.
+
+interface ChangelogItem {
+  title: string;
+  body: string;
+  category: string;
+}
+
+interface Release {
+  /** "0.9.7", or "Unreleased". */
+  version: string;
+  date: string;
+  items: ChangelogItem[];
+}
+
+const RELEASE_HEADING = /^##\s+\[([^\]]+)\]\s*(?:-\s*(.+))?$/;
+const CATEGORY_HEADING = /^###\s+(.+)$/;
+const BULLET = /^[-*]\s+(.*)$/;
+
+export function parseChangelog(markdown: string): Release[] {
+  const releases: Release[] = [];
+  let release: Release | null = null;
+  let category = "";
+  let item: ChangelogItem | null = null;
+
+  const flush = () => {
+    if (release && item && (item.title || item.body)) release.items.push(item);
+    item = null;
+  };
+
+  for (const raw of markdown.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+
+    const heading = RELEASE_HEADING.exec(line);
+    if (heading) {
+      flush();
+      release = { version: heading[1], date: (heading[2] ?? "").trim(), items: [] };
+      releases.push(release);
+      category = "";
+      continue;
+    }
+    if (!release) continue;
+
+    const categoryLine = CATEGORY_HEADING.exec(line);
+    if (categoryLine) {
+      flush();
+      category = categoryLine[1].trim();
+      continue;
+    }
+
+    const bullet = BULLET.exec(line);
+    if (bullet) {
+      flush();
+      const text = bullet[1].trim();
+      // "**Title** — body" is the shape used throughout the changelog; anything
+      // else becomes a body-only item so nothing is lost.
+      const titled = /^\*\*(.+?)\*\*\s*[—–-]?\s*(.*)$/.exec(text);
+      item = titled
+        ? { title: titled[1].trim(), body: titled[2].trim(), category }
+        : { title: "", body: text, category };
+      continue;
+    }
+
+    // Continuation of the current bullet: the changelog wraps long entries.
+    if (item && line.trim()) {
+      item.body = `${item.body} ${line.trim()}`.trim();
+      continue;
+    }
+    if (!line.trim()) flush();
+  }
+  flush();
+
+  return releases.filter((entry) => entry.items.length > 0);
+}
+
+/** Inline markdown → HTML, for the small subset the changelog actually uses. */
+export function renderInline(markdown: string): string {
+  return escHtml(markdown)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" data-external-link>$1</a>');
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+function renderItems(items: ChangelogItem[]): string {
+  let lastCategory = "";
+  return items
+    .map((item, index) => {
+      const heading =
+        item.category && item.category !== lastCategory
+          ? `<div class="cl-category">${escHtml(item.category)}</div>`
+          : "";
+      lastCategory = item.category || lastCategory;
+      return `
+        ${heading}
+        <div class="cl-entry">
+          <div class="cl-entry-body">
+            <div class="cl-entry-num">${index + 1}</div>
+            <div>
+              ${item.title ? `<div class="cl-entry-title">${renderInline(item.title)}</div>` : ""}
+              <div class="cl-entry-desc">${renderInline(item.body)}</div>
+            </div>
+          </div>
+        </div>`;
+    })
+    .join("");
+}
+
+/**
+ * What is in the update, before installing it. The body is the release notes
+ * published with the update, so this is the one place where the notes are read
+ * from the release rather than from the bundled changelog.
+ */
+export function showUpdateNotes(version: string, body: string | null) {
+  document.querySelector("[data-changelog-overlay]")?.remove();
+
+  const notes = (body ?? "").trim();
+  const items = notes ? parseChangelog(`## [${version}]\n\n${notes}`)[0]?.items ?? [] : [];
+
+  const overlay = document.createElement("div");
+  overlay.className = "cl-overlay";
+  overlay.dataset.changelogOverlay = "";
+  overlay.innerHTML = `
+    <div class="cl-modal" role="dialog" aria-modal="true" aria-label="Update available">
+      <div class="cl-header">
+        <span class="cl-badge cl-badge--update">Update available</span>
+        <span class="cl-version">v${escHtml(version)}</span>
+      </div>
+      <div class="cl-entries">
+        ${
+          items.length
+            ? `<div class="cl-version-block">${renderItems(items)}</div>`
+            : notes
+              ? `<div class="cl-entry"><div class="cl-entry-body"><div>${renderInline(notes)}</div></div></div>`
+              : `<div class="cl-entry"><div class="cl-entry-body"><div class="cl-entry-desc">
+                   This release ships without notes. Install it to get the latest fixes.
+                 </div></div></div>`
+        }
+      </div>
+      <div class="cl-footer">
+        <button class="secondary-button" data-update-later type="button">Later</button>
+        <button class="primary-button" data-update-install type="button">Install and restart</button>
+      </div>
+    </div>
+  `;
+
+  const dismiss = () => overlay.remove();
+  overlay.querySelector("[data-update-later]")?.addEventListener("click", dismiss);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) dismiss();
+  });
+  wireExternalLinks(overlay);
+
+  overlay.querySelector("[data-update-install]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    if (!(button instanceof HTMLButtonElement)) return;
+    button.disabled = true;
+    button.textContent = "Installing…";
+    try {
+      await invoke("install_update");
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Install and restart";
+      setStatus(errorMessage(error, "Could not install the update."), "danger");
+    }
+  });
+
+  document.body.appendChild(overlay);
 }
