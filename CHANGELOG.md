@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.10.2] - 2026-07-31
+
 ### Added
 - **End-of-day Toggl reminder** — when the working range is over, a native notification ("Ricordati
   di compilare Toggl") and the planner open for a check. Once a day, working days only, and only
