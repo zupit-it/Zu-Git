@@ -183,6 +183,9 @@ export function renderSettings(values: SettingsFormValues) {
   state.scoreRuleBehindEnabled = values.scoreRuleBehindEnabled === "on";
   state.mergeQueueEnabled = values.mergeQueueEnabled === "on";
   state.togglEnabled = values.togglEnabled === "on";
+  // A token is what makes the panel usable: without one every call fails, so the
+  // button stays hidden rather than opening a modal that can only show an error.
+  state.togglReady = state.togglEnabled && values.togglToken.trim().length > 0;
   state.togglDayStart = values.togglDayStart || defaultSettings.togglDayStart;
   state.togglDayEnd = values.togglDayEnd || defaultSettings.togglDayEnd;
   state.togglSlotMinutes =
@@ -198,7 +201,7 @@ export function renderSettings(values: SettingsFormValues) {
   const togglSaveFirst = document.querySelector<HTMLElement>("[data-toggl-save-first]");
   if (togglSaveFirst) togglSaveFirst.hidden = true;
   const togglButton = document.querySelector<HTMLElement>("[data-toggl-button]");
-  if (togglButton) togglButton.hidden = !state.togglEnabled;
+  if (togglButton) togglButton.hidden = !state.togglReady;
   void refreshGoogleStatus();
   setSettingsDirtyState(false);
 }
@@ -1104,6 +1107,18 @@ export function renderWarnings(snapshot: DashboardSnapshot) {
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────
+
+export async function notifyTogglReminder() {
+  try {
+    await invoke("show_native_notification", {
+      title: "ZuGit – Toggl",
+      body: "Ricordati di compilare Toggl.",
+      silent: false,
+    });
+  } catch (error) {
+    setStatus(errorMessage(error, "Unable to show the native notification."), "danger");
+  }
+}
 
 export async function notifyPendingReviewReminder(pendingReviewCount: number) {
   if (pendingReviewCount <= 0) return;

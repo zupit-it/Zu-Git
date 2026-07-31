@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **End-of-day Toggl reminder** — when the working range is over, a native notification ("Ricordati
+  di compilare Toggl") and the planner open for a check. Once a day, working days only, and only
+  when Toggl is configured; it never reopens over a planner already on screen.
+
+### Changed
+- **The Toggl button only appears once the integration is configured** — it used to show as soon as
+  the checkbox was ticked, so it could open a panel that had no token to work with.
+
 ---
 
 ## [0.10.1] - 2026-07-30
@@ -38,6 +47,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with the incoming version, with Install and Later, instead of restarting the app on a single
   click. The **What's new** modal stays hand-curated in `src/changelog.ts` and is deliberately not
   generated from this file: it is what a user should read about a release, not the full record.
+- **Days with nothing In Progress are filled too** — the planner left a slot blank when no story's
+  activity window covered it, which is exactly what happens when the only story of the day moved to
+  merge request in the morning: the afternoon came out empty. Uncovered slots now fall back to the
+  story worked on immediately before them (or the next one picked up, if the gap is at the start).
 - **Distinct colours per task in the Toggl planner** — task colours were hashed independently, so
   with three stories in a day two of them shared a tone better than half the time. A colour is now
   claimed once per task and collisions walk to the next free tone, while a row with no story and no

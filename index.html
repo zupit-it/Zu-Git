@@ -166,15 +166,18 @@
               <input data-filter-show-draft type="checkbox" />
               <span>Show draft</span>
             </label>
+
+            <!-- Loading hairline: absolutely positioned over the toolbar's bottom
+                 border, so showing it cannot move a single row of the list. -->
+            <div class="list-progress" data-list-loading hidden role="progressbar"
+                 aria-label="Loading pull requests">
+              <span class="sr-only" data-list-loading-label>Loading pull requests…</span>
+            </div>
           </div>
 
           <!-- Scrollable content -->
           <div class="list-scroll">
             <div data-new-pr-container></div>
-            <div class="list-loading" data-list-loading hidden>
-              <span class="list-loading-spinner" aria-hidden="true"></span>
-              <span data-list-loading-label>Loading pull requests…</span>
-            </div>
             <div data-list-table></div>
           </div>
         </section>

@@ -209,13 +209,26 @@ For the chosen day (today by default) ZuGit:
 5. assigns every free slot to the most plausible story. A transition that happened **today** is the
    strongest signal, so the story you moved to merge request at 11:00 gets the morning even if
    another one has been in progress for days; within the same day, In Progress wins over merge
-   request. When two stories are equally plausible for the same slot the row asks which one to
-   track, with a **Dividi tra N** button that shares the slot equally between them;
+   request. A slot no window covers — the whole afternoon, when the only story of the day went to
+   merge request in the morning — falls back to the story worked on just before it, so a day with
+   nothing In Progress is still filled. When two stories are equally plausible for the same slot the
+   row asks which one to track, with a **Split between N** button that shares the slot between them;
 6. fills project, tags and the **billable** flag from your own history (see below).
 
-Nothing is written until you press **Crea su Toggl**. Rows are editable (time, description, project,
+Nothing is written until you press **Create in Toggl**. Rows are editable (time, description, project,
 tags), overlapping rows block the submit, and after a successful run the day is re-read — so the new
 entries show up as "already on Toggl" and a second run proposes nothing.
+
+### The end-of-day reminder
+
+Once the working range is over, ZuGit sends a native notification ("Ricordati di compilare Toggl")
+and opens the planner for a check. It fires at most once a day, only on working days, and only when
+Toggl is configured — the notification also respects the global notifications toggle. Opening the app
+at 17:00 on a day it never fired still triggers it: the timesheet is still unfilled, which is the
+point. It never reopens over a planner you already have open, so rows being edited are safe.
+
+The **Toggl** button in the toolbar appears only when the integration is enabled *and* a token is
+saved: without one the panel could only show an error.
 
 ### What it can and cannot touch
 

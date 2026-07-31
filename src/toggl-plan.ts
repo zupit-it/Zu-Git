@@ -211,6 +211,27 @@ export function candidatesFor(
     .sort((a, b) => a.rank - b.rank || b.fromMin - a.fromMin);
 }
 
+/**
+ * The story to fall back on for a slot no activity window covers.
+ *
+ * Happens whenever the day's stories all stopped being "active" before the range
+ * ends — the common case being a single story moved to merge request this
+ * morning, which would otherwise leave the whole afternoon blank. Continuity is
+ * the best guess available: the story worked on most recently before the slot,
+ * or failing that the next one picked up after it.
+ */
+function nearestCandidate(candidates: Candidate[], from: number, to: number): Candidate | null {
+  const before = candidates
+    .filter((candidate) => candidate.toMin <= from)
+    .sort((a, b) => b.toMin - a.toMin || a.rank - b.rank);
+  if (before.length > 0) return before[0];
+
+  const after = candidates
+    .filter((candidate) => candidate.fromMin >= to)
+    .sort((a, b) => a.fromMin - b.fromMin || a.rank - b.rank);
+  return after[0] ?? null;
+}
+
 /** Splits the free gaps at every activity-window boundary, picks the best candidate
  *  for each piece, then merges neighbours that ended up on the same story. */
 export function assignSlots(gaps: Interval[], candidates: Candidate[]): Assignment[] {
@@ -234,7 +255,7 @@ export function assignSlots(gaps: Interval[], candidates: Candidate[]): Assignme
       assignments.push({
         from,
         to,
-        chosen: best[0] ?? null,
+        chosen: best[0] ?? nearestCandidate(candidates, from, to),
         // Only a genuine toss-up is worth asking about: several stories with the
         // same plausibility covering the same slot.
         candidateKeys: best.length > 1 ? best.map((c) => c.key) : [],
@@ -346,6 +367,39 @@ export function splitRange(from: number, to: number, parts: number, slot: number
     }
   }
   return bounds;
+}
+
+// ── End-of-day reminder ───────────────────────────────────────────────────────
+
+export interface ReminderCheck {
+  /** Toggl enabled *and* holding a token. */
+  ready: boolean;
+  /** End of the working range, "HH:MM". */
+  dayEnd: string;
+  now: Date;
+  /** Day the reminder last fired, "YYYY-MM-DD", or null. */
+  lastFiredDay: string | null;
+}
+
+/**
+ * Whether the "fill your timesheet" nudge is due.
+ *
+ * Fires from the end of the working range until midnight, once per day, and only
+ * on working days: a timesheet reminder on a Sunday is noise. Firing late (the
+ * app was closed at 14:00 and opened at 17:00) is deliberate — the day is still
+ * unfilled, which is the whole point of the reminder.
+ */
+export function shouldRemind({ ready, dayEnd, now, lastFiredDay }: ReminderCheck): boolean {
+  if (!ready) return false;
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  if (lastFiredDay === today) return false;
+
+  const weekday = now.getDay();
+  if (weekday === 0 || weekday === 6) return false;
+
+  return now.getHours() * 60 + now.getMinutes() >= parseClock(dayEnd);
 }
 
 /** Every row involved in an overlap — the planner refuses to submit while any exist.

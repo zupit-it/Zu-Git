@@ -68,8 +68,47 @@ jobs:
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-  build:
+  create-release:
+    # The release is created once, here, instead of by each matrix job: three
+    # parallel jobs all calling tauri-action with `tagName` race to create the
+    # same release, and the losers fail with `already_exists`. Listing releases
+    # (rather than fetching by tag) also finds drafts, so re-running the workflow
+    # on a tag that already has one reuses it instead of failing.
     needs: [check, release-notes]
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.ensure.outputs.result }}
+    steps:
+      - uses: actions/github-script@v7
+        id: ensure
+        with:
+          result-encoding: string
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const { owner, repo } = context.repo;
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 100,
+            });
+            const existing = releases.find((release) => release.tag_name === tag);
+            if (existing) {
+              core.info(`Reusing release ${existing.id} for ${tag}`);
+              return String(existing.id);
+            }
+            const { data } = await github.rest.repos.createRelease({
+              owner, repo,
+              tag_name: tag,
+              name: `ZuGit ${tag}`,
+              body: process.env.RELEASE_BODY || '',
+              draft: true,      // published by publish-release once every build uploaded
+              prerelease: false,
+            });
+            core.info(`Created release ${data.id} for ${tag}`);
+            return String(data.id);
+        env:
+          RELEASE_BODY: ${{ needs.release-notes.outputs.body }}
+
+  build:
+    needs: [check, release-notes, create-release]
     strategy:
       fail-fast: false
       matrix:
@@ -123,10 +162,22 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "ZuGit ${{ github.ref_name }}"
-          releaseBody: ${{ needs.release-notes.outputs.body }}
-          releaseDraft: false
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  publish-release:
+    # Undrafts the release only after every platform uploaded, so users never see
+    # a release that is missing the build for their OS.
+    needs: [create-release, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            await github.rest.repos.updateRelease({
+              owner, repo,
+              release_id: Number('${{ needs.create-release.outputs.release_id }}'),
+              draft: false,
+            });

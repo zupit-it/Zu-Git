@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { escHtml, errorMessage } from "./utils";
 import { state } from "./state";
-import { refreshGoogleStatus, setStatus } from "./render";
+import { notifyTogglReminder, refreshGoogleStatus, setStatus } from "./render";
 import type { Assignment, Candidate, PlannerEvent } from "./toggl-plan";
 import {
   assignSlots, busyIntervals, calendarBlocks, candidatesFor, ceilTo, clockLabel, dateAt,
   floorTo, freeGaps, midnightOf, minutesFromMidnight, normalizeDescription,
-  overlappingIds, parseClock, splitRange, toIsoWithOffset,
+  overlappingIds, parseClock, shouldRemind, splitRange, toIsoWithOffset,
 } from "./toggl-plan";
 
 // ── Backend types ─────────────────────────────────────────────────────────────
@@ -416,6 +416,41 @@ const I = {
   spinner: `<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12.5 7A5.5 5.5 0 1 1 7 1.5"/></svg>`,
   moon: `<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 7.3A4 4 0 1 1 4.7 2.5a4.7 4.7 0 0 0 4.8 4.8Z"/></svg>`,
 };
+
+// ── End-of-day reminder ───────────────────────────────────────────────────────
+
+/** Marks the day whose reminder already fired, so it survives an app restart. */
+const REMINDER_KEY = "zugit-toggl-reminder";
+
+let reminderTimer: number | null = null;
+
+/**
+ * Once the working range is over, nudge the user and open the planner for a
+ * check. Fires at most once a day, and only when Toggl is actually configured.
+ */
+export function startTogglReminder() {
+  if (reminderTimer !== null) window.clearInterval(reminderTimer);
+  reminderTimer = window.setInterval(() => void maybeRemind(), 60_000);
+  void maybeRemind();
+}
+
+async function maybeRemind() {
+  const due = shouldRemind({
+    ready: state.togglReady,
+    dayEnd: state.togglDayEnd,
+    now: new Date(),
+    lastFiredDay: localStorage.getItem(REMINDER_KEY),
+  });
+  if (!due) return;
+
+  // Marked before doing anything, so a failure cannot turn into a loop.
+  localStorage.setItem(REMINDER_KEY, todayIso());
+  if (state.notificationsEnabled) void notifyTogglReminder();
+
+  // Never reopen over an open planner: that would throw away rows being edited.
+  if (openPanel) return;
+  await openTogglPanel();
+}
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 

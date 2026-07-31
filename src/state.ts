@@ -60,6 +60,10 @@ export const state = {
   scoreRuleBehindEnabled: defaultSettings.scoreRuleBehindEnabled,
   mergeQueueEnabled: defaultSettings.mergeQueueEnabled,
   togglEnabled: defaultSettings.togglEnabled,
+  /** Enabled *and* holding a token — the panel cannot do anything without one. */
+  togglReady: false,
+  /** Day whose end-of-range reminder already fired, as YYYY-MM-DD. */
+  togglReminderShownFor: null as string | null,
   togglDayStart: defaultSettings.togglDayStart,
   togglDayEnd: defaultSettings.togglDayEnd,
   togglSlotMinutes: defaultSettings.togglSlotMinutes,

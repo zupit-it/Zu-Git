@@ -14,10 +14,10 @@ import {
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
 import {
-  openTogglPanel, testTogglConnection,
+  openTogglPanel, startTogglReminder, testTogglConnection,
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
-import { escHtml, avatarColor, loginInitials, errorMessage} from "./utils";
+import { escHtml, avatarColor, loginInitials, errorMessage } from "./utils";
 
 window.addEventListener("DOMContentLoaded", () => {
   // ── Settings form ───────────────────────────────────────────────────────────
@@ -362,6 +362,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   void maybeShowChangelog();
+  startTogglReminder();
 });
 
 // ── Demo mode toast ───────────────────────────────────────────────────────────
