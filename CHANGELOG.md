@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.11.1] - 2026-08-11
+
+---
+
 ## [0.11.0] - 2026-08-11
 
 ---
