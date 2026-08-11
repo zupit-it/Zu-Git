@@ -5193,3 +5193,30 @@ img.avatar { object-fit: cover; }
 }
 
 .orphan-list--grouped .orphan-row-author { display: none; }
+
+/* ── What's new / update modal — spacing & footer ─────────── */
+/* One horizontal inset for every row of the modal, with a wider right side so
+   the text does not run into the border. */
+.cl-header { padding: 18px 30px 14px 22px; }
+.cl-entry { padding: 16px 30px 16px 22px; }
+.cl-version-label { padding: 10px 22px 4px; }
+
+/* Category labels line up with the entry box, like the version label above */
+.cl-category { margin: 16px 0 8px; padding: 0 22px; }
+.cl-version-block > .cl-category:first-child { margin-top: 6px; }
+
+.cl-footer {
+  padding: 14px 30px 16px 22px;
+  gap: 8px;
+  align-items: center;
+}
+
+/* The two button styles differ by design elsewhere (26px vs 30px tall, different
+   radius and type size); side by side in the footer they just look misaligned. */
+.cl-footer .secondary-button,
+.cl-footer .primary-button {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: var(--r);
+  font-size: 12px;
+}

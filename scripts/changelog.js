@@ -34,8 +34,12 @@ if (command === "bump") {
 
 } else if (command === "extract") {
   // Extract everything between ## [version] and the next ## heading.
+  // Both escapes matter: `[\\s\\S]` because a template literal would eat the
+  // backslashes and leave `[sS]`, and `$(?![\\s\\S])` because with the `m` flag
+  // a bare `$` matches the end of the *first line* — either one silently
+  // reduces the release notes to an empty string.
   const pattern = new RegExp(
-    `^## \\[${version.replace(/\./g, "\\.")}\\][^\n]*\n([\s\S]*?)(?=^## |$)`,
+    `^## \\[${version.replace(/\./g, "\\.")}\\][^\n]*\n([\\s\\S]*?)(?=^## |$(?![\\s\\S]))`,
     "m"
   );
   const match = content.match(pattern);
