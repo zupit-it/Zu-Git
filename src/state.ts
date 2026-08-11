@@ -1,4 +1,4 @@
-import type { DashboardSnapshot } from "./shared/rpc";
+import type { DashboardSnapshot, OrphanBranchesResult } from "./shared/rpc";
 import { defaultListFilterPreferences, defaultSettings } from "./shared/settings";
 
 export interface CommitSummary {
@@ -27,10 +27,12 @@ export interface ChecklistItem {
   done: boolean;
 }
 
+export type AppView = "status" | "list" | "settings" | "orphans";
+
 export const state = {
   // ── Dashboard ──────────────────────────────────────────────────────────────
   currentDashboard: null as DashboardSnapshot | null,
-  currentView: "list" as "status" | "list" | "settings",
+  currentView: "list" as AppView,
   lastSyncedAt: null as string | null,
   lastSyncSource: "mock" as "live" | "mock",
   lastMyChangesRequestedIds: new Set<string>(),
@@ -67,6 +69,23 @@ export const state = {
   togglDayStart: defaultSettings.togglDayStart,
   togglDayEnd: defaultSettings.togglDayEnd,
   togglSlotMinutes: defaultSettings.togglSlotMinutes,
+
+  // ── Orphan branches ────────────────────────────────────────────────────────
+  orphanBranchesEnabled: defaultSettings.orphanBranchesEnabled,
+  orphanBranchStaleDays: defaultSettings.orphanBranchStaleDays,
+  /** Last scan result — kept so re-opening the tab doesn't re-scan every repo. */
+  orphanBranches: null as OrphanBranchesResult | null,
+  orphanLoading: false,
+  orphanError: null as string | null,
+  /** Non-error message shown in place of the list (e.g. no repository selected). */
+  orphanNotice: null as string | null,
+  /** Repositories the cached scan covered; null = every configured one. */
+  orphanScannedRepos: null as string[] | null,
+  orphanOnlyMine: false,
+  orphanGroupByAuthor: false,
+  /** Internal-only by default: outside contributors' branches are rarely ours to chase. */
+  orphanShowInternal: true,
+  orphanShowCollaborator: false,
 
   // ── Merge queue ────────────────────────────────────────────────────────────
   // "repo/id" of PRs at the head of their queue, auto-merge-enabled, and conflicting.

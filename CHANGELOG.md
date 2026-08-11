@@ -12,6 +12,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.10.2] - 2026-07-31
 
 ### Added
+- **Orphan branches** — a tab (off by default, enable it in **Settings → Orphan branches**) listing
+  the remote branches with no open PR that nobody has pushed to for more than N days, 15 by default.
+  The scan skips the default branch, protected branches, anything that is the head or the base of an
+  open PR, and any name starting with one of the configurable **ignored prefixes** (`release` by
+  default). What is left is sorted ascending by last commit, most stale first, and can be grouped by
+  author — one section per person, ordered by who owns the oldest branch. A filter switches between
+  **Only mine** — branches whose last commit is yours, the only ownership GitHub records for a ref —
+  and **Everyone**, and two more filter by author type: **Internal** (on by default; the internal
+  marker or the team list) and **Collaborator** (everyone else, unlinked commits included). It is read-only: rows open the branch on GitHub, ZuGit never deletes anything.
+  The scan follows the toolbar's repository selector, like the PR list does, and reruns when that
+  selection changes. Walking every branch of every repository is expensive, so it runs when the tab
+  is opened or **Rescan** is pressed, never on the auto-refresh.
 - **End-of-day Toggl reminder** — when the working range is over, a native notification ("Ricordati
   di compilare Toggl") and the planner open for a check. Once a day, working days only, and only
   when Toggl is configured; it never reopens over a planner already on screen.

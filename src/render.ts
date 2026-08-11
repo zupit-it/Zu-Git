@@ -4,6 +4,7 @@ import type { PullRequestSummary } from "./shared/pr-model";
 import type { SettingsFormValues } from "./shared/settings";
 import { defaultSettings, normalizeSettings, serializeSettingsForm } from "./shared/settings";
 import { state } from "./state";
+import type { AppView } from "./state";
 import {
   escHtml, relativeTime, avatarColor, avatarSm, chip,
   SVG, formatDiffNum, diffSizeBucket, countNewIds,
@@ -55,7 +56,7 @@ export function stopSyncLabelTicker() {
 
 // ── View switching ────────────────────────────────────────────────────────────
 
-export function setView(view: "status" | "list" | "settings") {
+export function setView(view: AppView) {
   state.currentView = view;
 
   document.querySelectorAll<HTMLElement>("[data-view-panel]").forEach((panel) => {
@@ -202,6 +203,15 @@ export function renderSettings(values: SettingsFormValues) {
   if (togglSaveFirst) togglSaveFirst.hidden = true;
   const togglButton = document.querySelector<HTMLElement>("[data-toggl-button]");
   if (togglButton) togglButton.hidden = !state.togglReady;
+  state.orphanBranchesEnabled = values.orphanBranchesEnabled === "on";
+  state.orphanBranchStaleDays =
+    Number.parseInt(values.orphanBranchStaleDays, 10) || defaultSettings.orphanBranchStaleDays;
+  const orphanTab = document.querySelector<HTMLElement>('[data-view-tab="orphans"]');
+  if (orphanTab) orphanTab.hidden = !state.orphanBranchesEnabled;
+  const orphanHint = document.querySelector<HTMLElement>("[data-orphan-hint]");
+  if (orphanHint) orphanHint.hidden = !state.orphanBranchesEnabled;
+  // Turning the tab off while looking at it would leave the app on a hidden view.
+  if (!state.orphanBranchesEnabled && state.currentView === "orphans") setView("list");
   void refreshGoogleStatus();
   setSettingsDirtyState(false);
 }

@@ -194,6 +194,31 @@ pub async fn fetch_branch_stats(
     Ok(crate::github::fetch_compare(&repo, &base, &head, &settings, &state.http_client).await)
 }
 
+/// Remote branches with no open PR, untouched for longer than the configured
+/// threshold. Not part of the dashboard refresh: scanning every branch of every
+/// repo is expensive, so the view asks for it on demand.
+#[tauri::command]
+pub async fn fetch_orphan_branches(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    active_repos: Option<Vec<String>>,
+) -> Result<crate::models::OrphanBranchesResult, String> {
+    let settings = storage::load_settings(&app).await?;
+    if !crate::models::settings_ready_for_github(&settings) {
+        return Err("Configure the GitHub token and at least one repository first.".to_string());
+    }
+    let repos = active_repos.unwrap_or_else(|| settings.github_repos.clone());
+    crate::github::fetch_orphan_branches(
+        &repos,
+        settings.orphan_branch_stale_days,
+        &settings.orphan_ignored_branch_prefixes,
+        &settings,
+        &state.http_client,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn create_pull_request(

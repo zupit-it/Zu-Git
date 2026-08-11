@@ -34,6 +34,12 @@ export interface AppSettings {
   googleClientSecret: string;
   /** Empty = the account's primary calendar. */
   googleCalendarId: string;
+  /** Shows the "Orphan branches" tab. */
+  orphanBranchesEnabled: boolean;
+  /** Days without a push after which a branch with no open PR counts as orphan. */
+  orphanBranchStaleDays: number;
+  /** Branch name prefixes never reported as orphan (release trains, long-lived lines…). */
+  orphanIgnoredBranchPrefixes: string[];
 }
 
 export interface ListFilterPreferences {
@@ -78,6 +84,9 @@ export interface SettingsFormValues {
   googleClientId: string;
   googleClientSecret: string;
   googleCalendarId: string;
+  orphanBranchesEnabled: string;          // "on" | ""
+  orphanBranchStaleDays: string;
+  orphanIgnoredBranchPrefixes: string;
 }
 
 export const defaultSettings: AppSettings = {
@@ -111,6 +120,10 @@ export const defaultSettings: AppSettings = {
   googleClientId: "",
   googleClientSecret: "",
   googleCalendarId: "",
+  orphanBranchesEnabled: false,
+  orphanBranchStaleDays: 15,
+  // Release branches are long-lived by convention, not by protection rule.
+  orphanIgnoredBranchPrefixes: ["release"],
 };
 
 export const defaultListFilterPreferences: ListFilterPreferences = {
@@ -188,6 +201,9 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
     googleClientId: settings.googleClientId,
     googleClientSecret: settings.googleClientSecret,
     googleCalendarId: settings.googleCalendarId,
+    orphanBranchesEnabled: settings.orphanBranchesEnabled ? "on" : "",
+    orphanBranchStaleDays: String(settings.orphanBranchStaleDays),
+    orphanIgnoredBranchPrefixes: settings.orphanIgnoredBranchPrefixes.join("\n"),
   };
 }
 
@@ -246,6 +262,12 @@ export function normalizeSettings(
     googleClientId: values.googleClientId?.trim() ?? "",
     googleClientSecret: values.googleClientSecret?.trim() ?? "",
     googleCalendarId: values.googleCalendarId?.trim() ?? "",
+    orphanBranchesEnabled: values.orphanBranchesEnabled === "on",
+    // Below a week the list fills with branches that are simply in progress.
+    orphanBranchStaleDays: boundedInt(
+      values.orphanBranchStaleDays, 7, 365, defaultSettings.orphanBranchStaleDays,
+    ),
+    orphanIgnoredBranchPrefixes: splitMultilineList(values.orphanIgnoredBranchPrefixes),
   };
 }
 

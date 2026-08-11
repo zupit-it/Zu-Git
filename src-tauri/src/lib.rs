@@ -93,6 +93,7 @@ pub fn run() {
             commands::install_update,
             commands::get_draft_pr_info,
             commands::fetch_branch_stats,
+            commands::fetch_orphan_branches,
             commands::fetch_release_diff,
             commands::move_jira_fix_versions,
             commands::drop_jira_fix_versions,

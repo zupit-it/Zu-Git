@@ -65,6 +65,38 @@ export interface SaveSettingsResult {
   dashboard: DashboardSnapshot;
 }
 
+/** A remote branch with no open PR, untouched for longer than the threshold. */
+export interface OrphanBranch {
+  repo: string;
+  branch: string;
+  /** Web URL of the branch — where the row links to. */
+  url: string;
+  lastCommitAt: string;
+  lastCommitMessage: string;
+  lastCommitSha: string;
+  /** Empty when the last commit has no linked GitHub account. */
+  authorLogin: string;
+  authorName: string;
+  authorAvatarUrl: string;
+  ageDays: number;
+  /** The last commit is the viewer's — what the "Only mine" filter uses. */
+  isMine: boolean;
+  /**
+   * Two-way split for this view: "internal" covers both the author marker and the
+   * explicit team list, "collaborator" is everyone else (commits with no linked
+   * GitHub account included).
+   */
+  authorType: "internal" | "collaborator";
+}
+
+export interface OrphanBranchesResult {
+  branches: OrphanBranch[];
+  viewerLogin: string;
+  /** Repos that could not be scanned; the rest still render. */
+  warnings: string[];
+  staleDays: number;
+}
+
 export interface AppContext {
   settings: AppSettings;
   dashboard: DashboardSnapshot;

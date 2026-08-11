@@ -41,6 +41,12 @@ pub struct AppSettings {
     pub google_client_secret: String,
     /// Calendar to read; empty means the account's primary one.
     pub google_calendar_id: String,
+    /// Shows the "Orphan branches" tab.
+    pub orphan_branches_enabled: bool,
+    /// Days without a push after which a branch with no open PR counts as orphan.
+    pub orphan_branch_stale_days: u32,
+    /// Branch name prefixes never reported as orphan (release trains, long-lived lines…).
+    pub orphan_ignored_branch_prefixes: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -76,6 +82,9 @@ impl Default for AppSettings {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_calendar_id: String::new(),
+            orphan_branches_enabled: false,
+            orphan_branch_stale_days: 15,
+            orphan_ignored_branch_prefixes: vec!["release".to_string()],
         }
     }
 }
@@ -121,6 +130,9 @@ pub struct SettingsFormValues {
     pub google_client_id: String,
     pub google_client_secret: String,
     pub google_calendar_id: String,
+    pub orphan_branches_enabled: String,                  // "on" | ""
+    pub orphan_branch_stale_days: String,
+    pub orphan_ignored_branch_prefixes: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -496,6 +508,15 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         google_client_id: values.google_client_id.trim().to_string(),
         google_client_secret: values.google_client_secret.trim().to_string(),
         google_calendar_id: values.google_calendar_id.trim().to_string(),
+        orphan_branches_enabled: values.orphan_branches_enabled.trim() == "on",
+        // Below a week the list fills with branches that are simply in progress.
+        orphan_branch_stale_days: match values.orphan_branch_stale_days.trim().parse::<u32>() {
+            Ok(days) if (7..=365).contains(&days) => days,
+            _ => 15,
+        },
+        orphan_ignored_branch_prefixes: split_multiline_list(
+            &values.orphan_ignored_branch_prefixes,
+        ),
     }
 }
 
@@ -557,6 +578,9 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         google_client_id: settings.google_client_id.clone(),
         google_client_secret: settings.google_client_secret.clone(),
         google_calendar_id: settings.google_calendar_id.clone(),
+        orphan_branches_enabled: if settings.orphan_branches_enabled { "on".to_string() } else { String::new() },
+        orphan_branch_stale_days: settings.orphan_branch_stale_days.to_string(),
+        orphan_ignored_branch_prefixes: settings.orphan_ignored_branch_prefixes.join("\n"),
     }
 }
 
@@ -568,6 +592,45 @@ pub fn settings_ready_for_jira(settings: &AppSettings) -> bool {
     !settings.jira_base_url.is_empty()
         && !settings.jira_email.is_empty()
         && !settings.jira_token.is_empty()
+}
+
+// ── Orphan branches ───────────────────────────────────────────────────────────
+
+/// A remote branch with no open pull request whose last commit is older than the
+/// configured staleness threshold — i.e. a branch someone opened and forgot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanBranch {
+    pub repo: String,
+    pub branch: String,
+    /// Web URL of the branch (not the API one) — what the row links to.
+    pub url: String,
+    pub last_commit_at: String,
+    pub last_commit_message: String,
+    pub last_commit_sha: String,
+    /// GitHub login of the last committer; empty when the commit has no linked account.
+    pub author_login: String,
+    /// Raw git author name — the only thing available when `author_login` is empty.
+    pub author_name: String,
+    pub author_avatar_url: String,
+    pub age_days: u32,
+    /// True when the last commit is the viewer's — what the "Only mine" filter uses.
+    pub is_mine: bool,
+    /// Two-way split for this view: `Internal` covers both the author marker and
+    /// the explicit team list, `Collaborator` is everyone else (including commits
+    /// with no linked GitHub account). Never `Team`.
+    pub author_type: AuthorType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanBranchesResult {
+    pub branches: Vec<OrphanBranch>,
+    pub viewer_login: String,
+    /// Repos that could not be scanned, one message each — the rest still render.
+    pub warnings: Vec<String>,
+    /// Threshold actually applied, so the view can label itself.
+    pub stale_days: u32,
 }
 
 // ── Draft PR info ─────────────────────────────────────────────────────────────

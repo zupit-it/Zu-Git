@@ -14,6 +14,10 @@ import {
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
 import {
+  loadOrphanBranches, restoreOrphanFilter,
+  setOrphanAuthorType, setOrphanGroupByAuthor, setOrphanOnlyMine,
+} from "./orphan-branches";
+import {
   openTogglPanel, startTogglReminder, testTogglConnection,
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
@@ -71,6 +75,16 @@ window.addEventListener("DOMContentLoaded", () => {
       if (saveFirst) saveFirst.hidden = !checkbox.checked || state.togglEnabled;
       const where = document.querySelector<HTMLElement>("[data-toggl-where]");
       if (where) where.hidden = !checkbox.checked || !state.togglEnabled;
+    });
+  // The hint explains what the scan does, so show it while the box is ticked —
+  // not only after the save that makes the tab appear.
+  document
+    .querySelector<HTMLInputElement>("#orphanBranchesEnabled")
+    ?.addEventListener("change", (event) => {
+      const checkbox = event.currentTarget;
+      if (!(checkbox instanceof HTMLInputElement)) return;
+      const hint = document.querySelector<HTMLElement>("[data-orphan-hint]");
+      if (hint) hint.hidden = !checkbox.checked;
     });
   document
     .querySelector<HTMLButtonElement>("[data-google-connect]")
@@ -207,13 +221,54 @@ window.addEventListener("DOMContentLoaded", () => {
     tab.addEventListener("click", () => {
       const view = tab.dataset.viewTab;
       if (view === "status" || view === "list" || view === "settings") setView(view);
+      if (view === "orphans") {
+        setView("orphans");
+        // Scanning every branch is expensive, so the first visit pays for it and
+        // later ones reuse the result until Rescan is pressed.
+        void loadOrphanBranches();
+      }
     });
   });
+
+  // ── Orphan branches ─────────────────────────────────────────────────────────
+  document
+    .querySelector<HTMLButtonElement>("[data-orphan-refresh]")
+    ?.addEventListener("click", () => void loadOrphanBranches(true));
+  document.querySelectorAll<HTMLButtonElement>("[data-orphan-scope]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setOrphanOnlyMine(button.dataset.orphanScope === "mine");
+    });
+  });
+  document
+    .querySelector<HTMLInputElement>("[data-orphan-group-by-author]")
+    ?.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      if (target instanceof HTMLInputElement) setOrphanGroupByAuthor(target.checked);
+    });
+  document
+    .querySelector<HTMLInputElement>("[data-orphan-filter-internal]")
+    ?.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      if (!(target instanceof HTMLInputElement)) return;
+      // Refused when it would untick the last author type — put the tick back.
+      if (!setOrphanAuthorType("internal", target.checked)) target.checked = true;
+    });
+  document
+    .querySelector<HTMLInputElement>("[data-orphan-filter-collaborator]")
+    ?.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!setOrphanAuthorType("collaborator", target.checked)) target.checked = true;
+    });
 
   // ── Global click delegation ─────────────────────────────────────────────────
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+
+    const orphanRow = target.closest<HTMLElement>("[data-orphan-open]");
+    const orphanUrl = orphanRow?.dataset.orphanOpen;
+    if (orphanUrl) { void openExternal(orphanUrl); return; }
 
     const prButton = target.closest<HTMLElement>("[data-pr-link]");
     const prUrl = prButton?.dataset.prLink;
@@ -277,6 +332,8 @@ window.addEventListener("DOMContentLoaded", () => {
         renderListBoard(applyListFilters(state.currentDashboard));
         renderToolbarRepoFilters(state.currentDashboard);
       }
+      // The orphan scan is scoped to the same selection, so it has to follow it.
+      if (state.currentView === "orphans") void loadOrphanBranches();
       void persistListFilters();
       return;
     }
@@ -313,6 +370,17 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.addEventListener("keydown", (e) => {
     const mod = isMac ? e.metaKey : e.ctrlKey;
+
+    // Orphan rows are focusable, so Enter/Space must open them like a click does.
+    if (e.key === "Enter" || e.key === " ") {
+      const url = (e.target as Element | null)
+        ?.closest<HTMLElement>("[data-orphan-open]")?.dataset.orphanOpen;
+      if (url) {
+        e.preventDefault();
+        void openExternal(url);
+        return;
+      }
+    }
 
     if (mod && e.key === "f") {
       e.preventDefault();
@@ -352,6 +420,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   // ── Init ────────────────────────────────────────────────────────────────────
+  restoreOrphanFilter();
   syncSettingsSaveButton();
   setView(state.currentView);
   void bootstrap();

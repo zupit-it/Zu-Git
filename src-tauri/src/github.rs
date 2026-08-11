@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{ApiError, AppSettings, DraftPrInfo, PipelineState};
+use crate::models::{
+    ApiError, AppSettings, DraftPrInfo, OrphanBranch, OrphanBranchesResult, PipelineState,
+};
 
 // ── GraphQL query ─────────────────────────────────────────────────────────────
 
@@ -1563,4 +1565,310 @@ pub async fn fetch_merged_prs_since_last_release(
 
     let since_tag = since_tags.join(" · ");
     (result, since_tag)
+}
+
+// ── Orphan branches ───────────────────────────────────────────────────────────
+
+/// Head and base refs of every open PR in the repo. A branch that is the base of
+/// an open PR is a shared integration branch, not an abandoned one, so both sides
+/// are excluded.
+const OPEN_PR_REFS_QUERY: &str = r#"
+query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(states: OPEN, first: 100, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { headRefName baseRefName }
+    }
+  }
+}
+"#;
+
+/// Branch refs oldest-commit-first, so the scan can stop as soon as it reaches
+/// branches that are still recent.
+const BRANCH_REFS_QUERY: &str = r#"
+query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    url
+    defaultBranchRef { name }
+    refs(
+      refPrefix: "refs/heads/"
+      first: 100
+      after: $cursor
+      orderBy: { field: TAG_COMMIT_DATE, direction: ASC }
+    ) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        name
+        branchProtectionRule { id }
+        target {
+          ... on Commit {
+            oid
+            committedDate
+            messageHeadline
+            author { name user { login avatarUrl } }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+/// Safety net for repos with thousands of branches: 100 per page.
+const MAX_BRANCH_PAGES: usize = 20;
+
+/// Internal covers both ways the app knows a colleague — the author marker and
+/// the explicit team list — because this view only offers a two-way filter.
+/// A commit with no linked GitHub account has no login to match, so it lands in
+/// `Collaborator`.
+fn classify_branch_author(login: &str, settings: &AppSettings) -> crate::models::AuthorType {
+    let lower = login.to_lowercase();
+    let is_team_member = settings
+        .team_member_github_users
+        .iter()
+        .any(|user| user.to_lowercase() == lower);
+    let marker_match = !settings.internal_author_marker.is_empty()
+        && lower.contains(&settings.internal_author_marker.to_lowercase());
+
+    if !login.is_empty() && (is_team_member || marker_match) {
+        crate::models::AuthorType::Internal
+    } else {
+        crate::models::AuthorType::Collaborator
+    }
+}
+
+/// Like `graphql_request_raw`, but takes variables and reports failures instead
+/// of swallowing them — the orphan view surfaces per-repo errors as warnings.
+async fn graphql_data(
+    query: &str,
+    variables: serde_json::Value,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<serde_json::Value, ApiError> {
+    let url = graphql_url(settings);
+    let body = serde_json::json!({ "query": query, "variables": variables });
+
+    let response = client
+        .post(&url)
+        .headers(github_headers(settings))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| ApiError::Other(format!("GraphQL request failed: {e}")))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ApiError::from_status(
+            status.as_u16(),
+            format!("GitHub GraphQL API returned {status}"),
+        ));
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+
+    if let Some(message) = json["errors"][0]["message"].as_str() {
+        return Err(ApiError::Other(message.to_string()));
+    }
+
+    Ok(json["data"].clone())
+}
+
+async fn fetch_open_pr_refs(
+    owner: &str,
+    name: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<std::collections::HashSet<String>, ApiError> {
+    let mut refs = std::collections::HashSet::new();
+    let mut cursor: Option<String> = None;
+
+    loop {
+        let data = graphql_data(
+            OPEN_PR_REFS_QUERY,
+            serde_json::json!({ "owner": owner, "repo": name, "cursor": cursor }),
+            settings,
+            client,
+        )
+        .await?;
+
+        let connection = &data["repository"]["pullRequests"];
+        for node in connection["nodes"].as_array().unwrap_or(&vec![]) {
+            for key in ["headRefName", "baseRefName"] {
+                if let Some(value) = node[key].as_str() {
+                    refs.insert(value.to_string());
+                }
+            }
+        }
+
+        if connection["pageInfo"]["hasNextPage"].as_bool() != Some(true) {
+            return Ok(refs);
+        }
+        cursor = connection["pageInfo"]["endCursor"].as_str().map(String::from);
+        if cursor.is_none() {
+            return Ok(refs);
+        }
+    }
+}
+
+async fn fetch_repo_orphan_branches(
+    repo: &str,
+    cutoff: chrono::DateTime<chrono::Utc>,
+    ignored_prefixes: &[String],
+    viewer_login: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<Vec<OrphanBranch>, ApiError> {
+    let (owner, name) = repo
+        .split_once('/')
+        .ok_or_else(|| ApiError::Other(format!("\"{repo}\" is not in owner/name form")))?;
+
+    let excluded_refs = fetch_open_pr_refs(owner, name, settings, client).await?;
+
+    let now = chrono::Utc::now();
+    let mut orphans: Vec<OrphanBranch> = Vec::new();
+    let mut cursor: Option<String> = None;
+
+    for _ in 0..MAX_BRANCH_PAGES {
+        let data = graphql_data(
+            BRANCH_REFS_QUERY,
+            serde_json::json!({ "owner": owner, "repo": name, "cursor": cursor }),
+            settings,
+            client,
+        )
+        .await?;
+
+        let repository = &data["repository"];
+        let repo_url = repository["url"].as_str().unwrap_or("").to_string();
+        let default_branch = repository["defaultBranchRef"]["name"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let connection = &repository["refs"];
+        let nodes = connection["nodes"].as_array().cloned().unwrap_or_default();
+
+        // Refs come oldest-commit-first, so once a page ends on a recent branch
+        // every later page is recent too and the scan can stop there.
+        let mut reached_recent = false;
+
+        for node in &nodes {
+            let branch = node["name"].as_str().unwrap_or("").to_string();
+            let commit = &node["target"];
+            let committed_date = match commit["committedDate"].as_str() {
+                Some(value) => value,
+                None => continue, // annotated tag or unreachable object — not a branch tip we can date
+            };
+            let committed_at = match chrono::DateTime::parse_from_rfc3339(committed_date) {
+                Ok(value) => value.with_timezone(&chrono::Utc),
+                Err(_) => continue,
+            };
+
+            if committed_at > cutoff {
+                reached_recent = true;
+                continue;
+            }
+            if branch.is_empty() || branch == default_branch || excluded_refs.contains(&branch) {
+                continue;
+            }
+            let branch_lower = branch.to_lowercase();
+            if ignored_prefixes
+                .iter()
+                .any(|prefix| branch_lower.starts_with(&prefix.to_lowercase()))
+            {
+                continue;
+            }
+            // Protected branches are long-lived by design (release trains, staging…).
+            if !node["branchProtectionRule"].is_null() {
+                continue;
+            }
+
+            let author_login = commit["author"]["user"]["login"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+
+            orphans.push(OrphanBranch {
+                repo: repo.to_string(),
+                branch: branch.clone(),
+                url: format!("{repo_url}/tree/{branch}"),
+                last_commit_at: committed_at.to_rfc3339(),
+                last_commit_message: commit["messageHeadline"].as_str().unwrap_or("").to_string(),
+                last_commit_sha: commit["oid"].as_str().unwrap_or("").to_string(),
+                is_mine: !author_login.is_empty()
+                    && author_login.eq_ignore_ascii_case(viewer_login),
+                author_type: classify_branch_author(&author_login, settings),
+                author_login,
+                author_name: commit["author"]["name"].as_str().unwrap_or("").to_string(),
+                author_avatar_url: commit["author"]["user"]["avatarUrl"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
+                age_days: (now - committed_at).num_days().max(0) as u32,
+            });
+        }
+
+        if reached_recent || connection["pageInfo"]["hasNextPage"].as_bool() != Some(true) {
+            break;
+        }
+        cursor = connection["pageInfo"]["endCursor"].as_str().map(String::from);
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    Ok(orphans)
+}
+
+/// Remote branches with no open PR whose last commit predates `stale_days`.
+/// Repos that fail are reported as warnings rather than failing the whole scan.
+pub async fn fetch_orphan_branches(
+    repos: &[String],
+    stale_days: u32,
+    ignored_prefixes: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<OrphanBranchesResult, ApiError> {
+    let viewer_login = fetch_viewer_login(settings, client).await?;
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(stale_days as i64);
+
+    let results = futures::future::join_all(repos.iter().map(|repo| {
+        let viewer_login = viewer_login.as_str();
+        async move {
+            (
+                repo.clone(),
+                fetch_repo_orphan_branches(
+                    repo,
+                    cutoff,
+                    ignored_prefixes,
+                    viewer_login,
+                    settings,
+                    client,
+                )
+                .await,
+            )
+        }
+    }))
+    .await;
+
+    let mut branches = Vec::new();
+    let mut warnings = Vec::new();
+
+    for (repo, result) in results {
+        match result {
+            Ok(found) => branches.extend(found),
+            Err(error) => warnings.push(format!("{repo}: {error}")),
+        }
+    }
+
+    // Ascending by last commit — the most obvious deletion candidates lead the list.
+    branches.sort_by(|a, b| a.last_commit_at.cmp(&b.last_commit_at));
+
+    Ok(OrphanBranchesResult {
+        branches,
+        viewer_login,
+        warnings,
+        stale_days,
+    })
 }

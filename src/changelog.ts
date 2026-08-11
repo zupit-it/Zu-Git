@@ -20,6 +20,16 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Orphan branches — find what everyone forgot to delete",
+        body: "Turn it on in <strong>Settings → Orphan branches</strong> and a tab appears next to <em>Status</em>, listing the remote branches with <strong>no open PR</strong> that nobody has pushed to in more than <strong>15 days</strong> — the threshold is yours to change, and so is the list of ignored prefixes (<strong>release</strong> out of the box). The default branch, protected branches and anything that is the head or the base of an open PR never show up. What is left is sorted oldest commit first, scoped to the repositories you have selected in the toolbar, and can be filtered by <strong>Internal / Collaborator</strong> or narrowed to <strong>Only mine</strong> — branches whose last commit is yours, the only owner GitHub records for a ref. <strong>Group by author</strong> turns it into one section per person, so you know who to ask. It is read-only: a row opens the branch on GitHub, ZuGit never deletes anything.",
+        imgs: ["/assets/changelog/orphan.png"],
+      },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
+      {
         title: "Toggl — fill your timesheet from the day you actually had",
         body: "Turn it on in <strong>Settings → Toggl</strong> and a <strong>Toggl</strong> button appears next to Refresh. It reads the entries you already have, finds the free slots of your working range (default <strong>08:00–14:00</strong>) and fills them with the Jira stories assigned to you — using <em>when</em> each story changed status to split the day: the one you moved to merge request at 10:30 gets the morning, the one you picked up then gets the afternoon. Project, tags and the billable flag come from your own Toggl history. When two stories are equally plausible the row asks which one, or splits the slot between them. Nothing is written until you press <strong>Create in Toggl</strong>.",
         imgs: ["/assets/changelog/toggl.png"],
@@ -28,11 +38,6 @@ const VERSIONS: VersionBlock[] = [
         title: "Meetings from Google Calendar, in the same plan",
         body: "Connect your calendar in <strong>Settings → Google Calendar</strong> (read-only) and the meetings inside your working range become rows of their own, taking their slot before the stories are placed — the retro lands on the project and tags you always give it. Declined invitations, all-day entries and anything already tracked are skipped.",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "Stories across multiple releases",
         body: "A story/PR can now belong to several Jira fix versions at once. The dashboard groups it under its <strong>primary</strong> (most imminent) release with a <strong>+N release</strong> badge listing the others, and the release diff finally classifies it correctly — <strong>Done/Missing instead of Extra</strong> — whenever any of its versions matches. <strong>Move, Defer, Adopt and Drop</strong> now act only on the current release, preserving the story's other version assignments instead of overwriting them.",

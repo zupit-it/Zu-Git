@@ -21,6 +21,7 @@ A desktop app for monitoring GitHub pull requests enriched with Jira data, built
 - Native notifications for new review requests and changes requested
 - Auto-refresh on a configurable interval
 - Toggl timesheet autofill — fills the free slots of your working day from the Jira stories you have in progress
+- Orphan branches — remote branches with no open PR that nobody has pushed to in weeks, for cleanup
 - Tokens stored in the system vault (macOS Keychain, Windows Credential Manager)
 
 ## Notifications
@@ -298,6 +299,52 @@ code exchange uses PKCE (S256) with a random `state`, both verified before the c
 | `GET /api/v9/me/time_entries` | entries for the day, and the history window for learning |
 | `POST /api/v9/workspaces/{id}/time_entries` | entry creation, one at a time |
 | `GET /calendar/v3/calendars/{id}/events` | calendar meetings for the day (read-only) |
+
+## Orphan branches
+
+Off by default: enable **Orphan branches** in Settings and a tab appears next to *Status*.
+
+The scan covers the repositories the toolbar's **repositories selected** dropdown keeps visible — the
+same scope as the PR list, not every repository in Settings. Changing the selection while the tab is
+open rescans; deselecting them all says so instead of showing an empty list.
+
+A branch is listed when **all** of these hold:
+
+- it is not the repository's default branch, and has no branch protection rule
+- it is neither the head nor the base of an open PR
+- its name does not start with one of the **Ignored branch prefixes** (`release` out of the box —
+  release branches are long-lived by convention, not by protection rule). One prefix per line, the
+  match is case-insensitive on the start of the name
+- its last commit is older than the **Stale after** threshold (15 days by default, 7–365 allowed)
+
+Branches whose PR was merged are not a special case — they are simply gone if the repository deletes
+them on merge, and listed like any other otherwise.
+
+The list is sorted ascending by last commit — the most stale branch first. **Group by author** breaks
+it into one section per person, each headed by the branch count and the age of that person's oldest
+branch; groups keep the same ordering, so whoever owns the oldest branch comes first.
+
+The **Only mine** filter matches branches whose *last commit* is yours. GitHub records no creator for
+a ref, so this is the only ownership information available; a branch you started and someone else
+last pushed to counts as theirs — and the same rule decides which group a branch lands in.
+
+**Internal** (on by default) and **Collaborator** filter by who that author is. Unlike the PR list,
+which splits three ways, this view splits two: *internal* is any login matching the internal marker
+**or** listed among the team members, *collaborator* is everyone else — including commits with no
+linked GitHub account, since an unlinked commit has no login to match. At least one of the two stays
+ticked: unticking both would show an empty list that reads like "nothing to clean up".
+
+The view is read-only. A row opens the branch on GitHub — ZuGit never deletes a ref.
+
+### Cost
+
+Two paginated GraphQL queries per repository: the open PRs' head and base refs, then the branch refs
+themselves (100 per page, oldest commit first, stopping at the first page that reaches recent
+branches — capped at 20 pages). That is why the scan runs on demand — opening the tab, or **Rescan**
+— and never on the auto-refresh. The result is kept for the session, so switching tabs is free; it is
+dropped only when the repository selection changes, which makes it wrong rather than merely old.
+
+Repositories that fail to scan are listed as warnings above the results; the others still render.
 
 ## What's new modal
 
