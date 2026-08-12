@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.11.2] - 2026-08-12
+
 ### Changed
 - **"Orphan branches" is now "Stale branches"** — in Git an *orphan branch* is one created with
   `git checkout --orphan`, with no shared history: a different thing from a branch nobody has touched
