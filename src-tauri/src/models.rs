@@ -41,12 +41,12 @@ pub struct AppSettings {
     pub google_client_secret: String,
     /// Calendar to read; empty means the account's primary one.
     pub google_calendar_id: String,
-    /// Shows the "Orphan branches" tab.
-    pub orphan_branches_enabled: bool,
-    /// Days without a push after which a branch with no open PR counts as orphan.
-    pub orphan_branch_stale_days: u32,
-    /// Branch name prefixes never reported as orphan (release trains, long-lived lines…).
-    pub orphan_ignored_branch_prefixes: Vec<String>,
+    /// Shows the "Stale branches" tab.
+    pub stale_branches_enabled: bool,
+    /// Days without a push after which a branch with no open PR counts as stale.
+    pub stale_branch_days: u32,
+    /// Branch name prefixes never reported as stale (release trains, long-lived lines…).
+    pub stale_branch_ignored_prefixes: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -82,9 +82,9 @@ impl Default for AppSettings {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_calendar_id: String::new(),
-            orphan_branches_enabled: false,
-            orphan_branch_stale_days: 15,
-            orphan_ignored_branch_prefixes: vec!["release".to_string()],
+            stale_branches_enabled: false,
+            stale_branch_days: 15,
+            stale_branch_ignored_prefixes: vec!["release".to_string()],
         }
     }
 }
@@ -130,9 +130,9 @@ pub struct SettingsFormValues {
     pub google_client_id: String,
     pub google_client_secret: String,
     pub google_calendar_id: String,
-    pub orphan_branches_enabled: String,                  // "on" | ""
-    pub orphan_branch_stale_days: String,
-    pub orphan_ignored_branch_prefixes: String,
+    pub stale_branches_enabled: String,                  // "on" | ""
+    pub stale_branch_days: String,
+    pub stale_branch_ignored_prefixes: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -508,14 +508,14 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         google_client_id: values.google_client_id.trim().to_string(),
         google_client_secret: values.google_client_secret.trim().to_string(),
         google_calendar_id: values.google_calendar_id.trim().to_string(),
-        orphan_branches_enabled: values.orphan_branches_enabled.trim() == "on",
+        stale_branches_enabled: values.stale_branches_enabled.trim() == "on",
         // Below a week the list fills with branches that are simply in progress.
-        orphan_branch_stale_days: match values.orphan_branch_stale_days.trim().parse::<u32>() {
+        stale_branch_days: match values.stale_branch_days.trim().parse::<u32>() {
             Ok(days) if (7..=365).contains(&days) => days,
             _ => 15,
         },
-        orphan_ignored_branch_prefixes: split_multiline_list(
-            &values.orphan_ignored_branch_prefixes,
+        stale_branch_ignored_prefixes: split_multiline_list(
+            &values.stale_branch_ignored_prefixes,
         ),
     }
 }
@@ -578,9 +578,9 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         google_client_id: settings.google_client_id.clone(),
         google_client_secret: settings.google_client_secret.clone(),
         google_calendar_id: settings.google_calendar_id.clone(),
-        orphan_branches_enabled: if settings.orphan_branches_enabled { "on".to_string() } else { String::new() },
-        orphan_branch_stale_days: settings.orphan_branch_stale_days.to_string(),
-        orphan_ignored_branch_prefixes: settings.orphan_ignored_branch_prefixes.join("\n"),
+        stale_branches_enabled: if settings.stale_branches_enabled { "on".to_string() } else { String::new() },
+        stale_branch_days: settings.stale_branch_days.to_string(),
+        stale_branch_ignored_prefixes: settings.stale_branch_ignored_prefixes.join("\n"),
     }
 }
 
@@ -594,13 +594,13 @@ pub fn settings_ready_for_jira(settings: &AppSettings) -> bool {
         && !settings.jira_token.is_empty()
 }
 
-// ── Orphan branches ───────────────────────────────────────────────────────────
+// ── Stale branches ───────────────────────────────────────────────────────────
 
 /// A remote branch with no open pull request whose last commit is older than the
 /// configured staleness threshold — i.e. a branch someone opened and forgot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OrphanBranch {
+pub struct StaleBranch {
     pub repo: String,
     pub branch: String,
     /// Web URL of the branch (not the API one) — what the row links to.
@@ -624,8 +624,8 @@ pub struct OrphanBranch {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OrphanBranchesResult {
-    pub branches: Vec<OrphanBranch>,
+pub struct StaleBranchesResult {
+    pub branches: Vec<StaleBranch>,
     pub viewer_login: String,
     /// Repos that could not be scanned, one message each — the rest still render.
     pub warnings: Vec<String>,

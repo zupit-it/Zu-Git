@@ -28,8 +28,8 @@
           <button class="view-tab" data-view-tab="status" type="button">
             Status
           </button>
-          <button class="view-tab" data-view-tab="orphans" type="button" hidden>
-            Orphan branches
+          <button class="view-tab" data-view-tab="stale" type="button" hidden>
+            Stale branches
           </button>
           <button class="view-tab" data-view-tab="settings" type="button">
             Settings
@@ -185,43 +185,43 @@
           </div>
         </section>
 
-        <!-- Orphan branches view -->
-        <section class="view-panel" data-view-panel="orphans" hidden>
-          <div class="orphan-shell">
-            <header class="orphan-header">
+        <!-- Stale branches view -->
+        <section class="view-panel" data-view-panel="stale" hidden>
+          <div class="stale-shell">
+            <header class="stale-header">
               <div>
-                <p class="section-kicker">Orphan branches</p>
-                <h1 class="orphan-title">Remote branches with no open PR</h1>
-                <p class="orphan-summary" data-orphan-summary></p>
+                <p class="section-kicker">Stale branches</p>
+                <h1 class="stale-title">Remote branches with no open PR</h1>
+                <p class="stale-summary" data-stale-summary></p>
               </div>
-              <div class="orphan-actions">
+              <div class="stale-actions">
                 <label class="filter-pill">
-                  <input data-orphan-filter-internal type="checkbox" checked />
+                  <input data-stale-filter-internal type="checkbox" checked />
                   <span>Internal</span>
                 </label>
                 <label class="filter-pill">
-                  <input data-orphan-filter-collaborator type="checkbox" />
+                  <input data-stale-filter-collaborator type="checkbox" />
                   <span>Collaborator</span>
                 </label>
                 <div class="filter-divider"></div>
                 <label class="filter-pill">
-                  <input data-orphan-group-by-author type="checkbox" />
+                  <input data-stale-group-by-author type="checkbox" />
                   <span>Group by author</span>
                 </label>
-                <div class="orphan-scope" role="group" aria-label="Branch owner filter">
-                  <button class="orphan-scope-btn" data-orphan-scope="mine" type="button">Only mine</button>
-                  <button class="orphan-scope-btn is-active" data-orphan-scope="all" type="button">Everyone</button>
+                <div class="stale-scope" role="group" aria-label="Branch owner filter">
+                  <button class="stale-scope-btn" data-stale-scope="mine" type="button">Only mine</button>
+                  <button class="stale-scope-btn is-active" data-stale-scope="all" type="button">Everyone</button>
                 </div>
-                <button class="secondary-button" data-orphan-refresh type="button">
+                <button class="secondary-button" data-stale-refresh type="button">
                   <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7a5 5 0 1 1-1.5-3.5M12 2v3h-3"/></svg>
                   Rescan
                 </button>
               </div>
             </header>
 
-            <ul class="orphan-warnings" data-orphan-warnings hidden></ul>
+            <ul class="stale-warnings" data-stale-warnings hidden></ul>
 
-            <div class="orphan-list" data-orphan-list></div>
+            <div class="stale-list" data-stale-list></div>
           </div>
         </section>
 
@@ -405,25 +405,25 @@
                 </div>
               </div>
 
-              <!-- Orphan branches card -->
+              <!-- Stale branches card -->
               <div class="settings-card">
                 <div class="settings-card-header">
                   <span class="settings-card-icon">
                     <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="3" cy="3" r="1.4"/><circle cx="3" cy="9" r="1.4"/><circle cx="9" cy="3" r="1.4"/><path d="M3 4.4v3.2M9 4.4v1.2"/></svg>
                   </span>
                   <div>
-                    <div class="settings-card-label">Orphan branches</div>
+                    <div class="settings-card-label">Stale branches</div>
                     <div class="settings-card-title">Abandoned branch cleanup</div>
                   </div>
                 </div>
                 <div class="settings-card-grid">
                   <div class="settings-field settings-field-wide">
-                    <label class="field-label">Orphan branches tab</label>
+                    <label class="field-label">Stale branches tab</label>
                     <label class="filter-pill">
-                      <input id="orphanBranchesEnabled" name="orphanBranchesEnabled" type="checkbox" />
+                      <input id="staleBranchesEnabled" name="staleBranchesEnabled" type="checkbox" />
                       <span>Show the tab listing remote branches with no open PR that nobody has pushed to in a while</span>
                     </label>
-                    <p class="field-hint" data-orphan-hint hidden>
+                    <p class="field-hint" data-stale-hint hidden>
                       La scansione legge tutti i branch dei repository configurati ed esclude il branch di default,
                       i branch protetti e quelli coinvolti in una PR aperta (come head o come base). È sola lettura:
                       ZuGit non cancella nulla, ogni riga apre il branch su GitHub. Gira su richiesta — aprendo il
@@ -431,12 +431,12 @@
                     </p>
                   </div>
                   <div class="settings-field">
-                    <label class="field-label" for="orphanBranchStaleDays">Stale after (days)</label>
-                    <input id="orphanBranchStaleDays" name="orphanBranchStaleDays" type="number" min="7" max="365" step="1" placeholder="15" />
+                    <label class="field-label" for="staleBranchDays">Stale after (days)</label>
+                    <input id="staleBranchDays" name="staleBranchDays" type="number" min="7" max="365" step="1" placeholder="15" />
                   </div>
                   <div class="settings-field">
-                    <label class="field-label" for="orphanIgnoredBranchPrefixes">Ignored branch prefixes</label>
-                    <textarea id="orphanIgnoredBranchPrefixes" name="orphanIgnoredBranchPrefixes" rows="3" placeholder="release"></textarea>
+                    <label class="field-label" for="staleBranchIgnoredPrefixes">Ignored branch prefixes</label>
+                    <textarea id="staleBranchIgnoredPrefixes" name="staleBranchIgnoredPrefixes" rows="3" placeholder="release"></textarea>
                     <p class="field-hint">
                       Uno per riga. Confronto sull'inizio del nome, senza distinzione di maiuscole:
                       <code>release</code> esclude sia <code>release/2026.06</code> sia <code>Release-hotfix</code>.

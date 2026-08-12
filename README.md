@@ -21,7 +21,7 @@ A desktop app for monitoring GitHub pull requests enriched with Jira data, built
 - Native notifications for new review requests and changes requested
 - Auto-refresh on a configurable interval
 - Toggl timesheet autofill — fills the free slots of your working day from the Jira stories you have in progress
-- Orphan branches — remote branches with no open PR that nobody has pushed to in weeks, for cleanup
+- Stale branches — remote branches with no open PR that nobody has pushed to in weeks, for cleanup
 - Tokens stored in the system vault (macOS Keychain, Windows Credential Manager)
 
 ## Notifications
@@ -300,9 +300,9 @@ code exchange uses PKCE (S256) with a random `state`, both verified before the c
 | `POST /api/v9/workspaces/{id}/time_entries` | entry creation, one at a time |
 | `GET /calendar/v3/calendars/{id}/events` | calendar meetings for the day (read-only) |
 
-## Orphan branches
+## Stale branches
 
-Off by default: enable **Orphan branches** in Settings and a tab appears next to *Status*.
+Off by default: enable **Stale branches** in Settings and a tab appears next to *Status*.
 
 The scan covers the repositories the toolbar's **repositories selected** dropdown keeps visible — the
 same scope as the PR list, not every repository in Settings. Changing the selection while the tab is

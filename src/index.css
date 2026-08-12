@@ -4967,12 +4967,12 @@ img.avatar { object-fit: cover; }
 }
 .cl-entry-desc a { color: var(--accent); text-decoration: underline; cursor: pointer; }
 
-/* ── Orphan branches ──────────────────────────────────────── */
-.orphan-shell {
+/* ── Stale branches ──────────────────────────────────────── */
+.stale-shell {
   max-width: 100%;
 }
 
-.orphan-header {
+.stale-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -4980,7 +4980,7 @@ img.avatar { object-fit: cover; }
   margin-bottom: 16px;
 }
 
-.orphan-title {
+.stale-title {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
@@ -4988,19 +4988,19 @@ img.avatar { object-fit: cover; }
   letter-spacing: -0.3px;
 }
 
-.orphan-summary {
+.stale-summary {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--ink-muted);
 }
 
-.orphan-actions {
+.stale-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.orphan-scope {
+.stale-scope {
   display: inline-flex;
   background: var(--surface-alt);
   border: 1px solid var(--border);
@@ -5008,7 +5008,7 @@ img.avatar { object-fit: cover; }
   padding: 2px;
 }
 
-.orphan-scope-btn {
+.stale-scope-btn {
   border: 0;
   background: transparent;
   border-radius: calc(var(--r) - 3px);
@@ -5020,15 +5020,15 @@ img.avatar { object-fit: cover; }
   cursor: pointer;
 }
 
-.orphan-scope-btn:hover { color: var(--ink-soft); }
+.stale-scope-btn:hover { color: var(--ink-soft); }
 
-.orphan-scope-btn.is-active {
+.stale-scope-btn.is-active {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   color: var(--ink);
 }
 
-.orphan-warnings {
+.stale-warnings {
   margin: 0 0 12px;
   padding: 10px 14px 10px 30px;
   list-style: disc;
@@ -5039,14 +5039,14 @@ img.avatar { object-fit: cover; }
   color: var(--ink-soft);
 }
 
-.orphan-list {
+.stale-list {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   overflow: hidden;
 }
 
-.orphan-row {
+.stale-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 170px 90px 16px;
   align-items: center;
@@ -5056,28 +5056,28 @@ img.avatar { object-fit: cover; }
   cursor: pointer;
 }
 
-.orphan-row:last-child { border-bottom: 0; }
-.orphan-row:hover { background: var(--surface-alt); }
-.orphan-row:focus-visible {
+.stale-row:last-child { border-bottom: 0; }
+.stale-row:hover { background: var(--surface-alt); }
+.stale-row:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.orphan-row-main { min-width: 0; }
+.stale-row-main { min-width: 0; }
 
-.orphan-row-title {
+.stale-row-title {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.orphan-branch-icon {
+.stale-branch-icon {
   display: inline-flex;
   color: var(--ink-faint);
 }
 
-.orphan-branch-name {
+.stale-branch-name {
   font-family: var(--font-mono);
   font-size: 12.5px;
   font-weight: 600;
@@ -5087,7 +5087,7 @@ img.avatar { object-fit: cover; }
   white-space: nowrap;
 }
 
-.orphan-repo {
+.stale-repo {
   flex: none;
   font-size: 10.5px;
   font-weight: 600;
@@ -5098,7 +5098,7 @@ img.avatar { object-fit: cover; }
   padding: 1px 8px;
 }
 
-.orphan-row-commit {
+.stale-row-commit {
   margin-top: 3px;
   font-size: 12px;
   color: var(--ink-muted);
@@ -5107,14 +5107,14 @@ img.avatar { object-fit: cover; }
   white-space: nowrap;
 }
 
-.orphan-row-author {
+.stale-row-author {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.orphan-author-name {
+.stale-author-name {
   font-size: 12px;
   color: var(--ink-soft);
   overflow: hidden;
@@ -5122,42 +5122,42 @@ img.avatar { object-fit: cover; }
   white-space: nowrap;
 }
 
-.orphan-row-age {
+.stale-row-age {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
 }
 
-.orphan-age-days {
+.stale-age-days {
   font-size: 12.5px;
   font-weight: 700;
   color: var(--warn);
 }
 
-.orphan-age-rel {
+.stale-age-rel {
   font-size: 10.5px;
   color: var(--ink-faint);
 }
 
-.orphan-row-ext {
+.stale-row-ext {
   display: inline-flex;
   color: var(--ink-faint);
 }
 
-.orphan-empty {
+.stale-empty {
   padding: 28px 16px;
   text-align: center;
   font-size: 12.5px;
   color: var(--ink-muted);
 }
 
-.orphan-empty--danger { color: var(--fail); }
+.stale-empty--danger { color: var(--fail); }
 
 /* Grouped by author — the per-row author column becomes redundant */
-.orphan-group + .orphan-group { border-top: 1px solid var(--border); }
+.stale-group + .stale-group { border-top: 1px solid var(--border); }
 
-.orphan-group-header {
+.stale-group-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -5166,13 +5166,13 @@ img.avatar { object-fit: cover; }
   border-bottom: 1px solid var(--border);
 }
 
-.orphan-group-name {
+.stale-group-name {
   font-size: 12.5px;
   font-weight: 700;
   color: var(--ink);
 }
 
-.orphan-group-count {
+.stale-group-count {
   font-size: 10.5px;
   font-weight: 600;
   color: var(--ink-muted);
@@ -5182,17 +5182,17 @@ img.avatar { object-fit: cover; }
   padding: 1px 8px;
 }
 
-.orphan-group-oldest {
+.stale-group-oldest {
   margin-left: auto;
   font-size: 11px;
   color: var(--ink-muted);
 }
 
-.orphan-list--grouped .orphan-row {
+.stale-list--grouped .stale-row {
   grid-template-columns: minmax(0, 1fr) 90px 16px;
 }
 
-.orphan-list--grouped .orphan-row-author { display: none; }
+.stale-list--grouped .stale-row-author { display: none; }
 
 /* ── What's new / update modal — spacing & footer ─────────── */
 /* One horizontal inset for every row of the modal, with a wider right side so

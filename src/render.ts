@@ -203,15 +203,15 @@ export function renderSettings(values: SettingsFormValues) {
   if (togglSaveFirst) togglSaveFirst.hidden = true;
   const togglButton = document.querySelector<HTMLElement>("[data-toggl-button]");
   if (togglButton) togglButton.hidden = !state.togglReady;
-  state.orphanBranchesEnabled = values.orphanBranchesEnabled === "on";
-  state.orphanBranchStaleDays =
-    Number.parseInt(values.orphanBranchStaleDays, 10) || defaultSettings.orphanBranchStaleDays;
-  const orphanTab = document.querySelector<HTMLElement>('[data-view-tab="orphans"]');
-  if (orphanTab) orphanTab.hidden = !state.orphanBranchesEnabled;
-  const orphanHint = document.querySelector<HTMLElement>("[data-orphan-hint]");
-  if (orphanHint) orphanHint.hidden = !state.orphanBranchesEnabled;
+  state.staleBranchesEnabled = values.staleBranchesEnabled === "on";
+  state.staleBranchDays =
+    Number.parseInt(values.staleBranchDays, 10) || defaultSettings.staleBranchDays;
+  const staleTab = document.querySelector<HTMLElement>('[data-view-tab="stale"]');
+  if (staleTab) staleTab.hidden = !state.staleBranchesEnabled;
+  const staleHint = document.querySelector<HTMLElement>("[data-stale-hint]");
+  if (staleHint) staleHint.hidden = !state.staleBranchesEnabled;
   // Turning the tab off while looking at it would leave the app on a hidden view.
-  if (!state.orphanBranchesEnabled && state.currentView === "orphans") setView("list");
+  if (!state.staleBranchesEnabled && state.currentView === "stale") setView("list");
   void refreshGoogleStatus();
   setSettingsDirtyState(false);
 }

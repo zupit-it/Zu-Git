@@ -66,7 +66,7 @@ export interface SaveSettingsResult {
 }
 
 /** A remote branch with no open PR, untouched for longer than the threshold. */
-export interface OrphanBranch {
+export interface StaleBranch {
   repo: string;
   branch: string;
   /** Web URL of the branch — where the row links to. */
@@ -89,8 +89,8 @@ export interface OrphanBranch {
   authorType: "internal" | "collaborator";
 }
 
-export interface OrphanBranchesResult {
-  branches: OrphanBranch[];
+export interface StaleBranchesResult {
+  branches: StaleBranch[];
   viewerLogin: string;
   /** Repos that could not be scanned; the rest still render. */
   warnings: string[];

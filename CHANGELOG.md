@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **"Orphan branches" is now "Stale branches"** — in Git an *orphan branch* is one created with
+  `git checkout --orphan`, with no shared history: a different thing from a branch nobody has touched
+  in months. *Stale* is both accurate and the term GitHub and Bitbucket use for exactly these
+  branches, and it already matched the **Stale after (days)** setting. The tab, the settings card and
+  the stored keys were renamed; the old setting keys are still read, so an existing configuration
+  survives the upgrade untouched.
+
 ---
 
 ## [0.11.1] - 2026-08-11

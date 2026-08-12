@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::models::{
-    ApiError, AppSettings, DraftPrInfo, OrphanBranch, OrphanBranchesResult, PipelineState,
+    ApiError, AppSettings, DraftPrInfo, StaleBranch, StaleBranchesResult, PipelineState,
 };
 
 // ── GraphQL query ─────────────────────────────────────────────────────────────
@@ -1567,7 +1567,7 @@ pub async fn fetch_merged_prs_since_last_release(
     (result, since_tag)
 }
 
-// ── Orphan branches ───────────────────────────────────────────────────────────
+// ── Stale branches ───────────────────────────────────────────────────────────
 
 /// Head and base refs of every open PR in the repo. A branch that is the base of
 /// an open PR is a shared integration branch, not an abandoned one, so both sides
@@ -1638,7 +1638,7 @@ fn classify_branch_author(login: &str, settings: &AppSettings) -> crate::models:
 }
 
 /// Like `graphql_request_raw`, but takes variables and reports failures instead
-/// of swallowing them — the orphan view surfaces per-repo errors as warnings.
+/// of swallowing them — the stale-branches view surfaces per-repo errors as warnings.
 async fn graphql_data(
     query: &str,
     variables: serde_json::Value,
@@ -1713,14 +1713,14 @@ async fn fetch_open_pr_refs(
     }
 }
 
-async fn fetch_repo_orphan_branches(
+async fn fetch_repo_stale_branches(
     repo: &str,
     cutoff: chrono::DateTime<chrono::Utc>,
     ignored_prefixes: &[String],
     viewer_login: &str,
     settings: &AppSettings,
     client: &reqwest::Client,
-) -> Result<Vec<OrphanBranch>, ApiError> {
+) -> Result<Vec<StaleBranch>, ApiError> {
     let (owner, name) = repo
         .split_once('/')
         .ok_or_else(|| ApiError::Other(format!("\"{repo}\" is not in owner/name form")))?;
@@ -1728,7 +1728,7 @@ async fn fetch_repo_orphan_branches(
     let excluded_refs = fetch_open_pr_refs(owner, name, settings, client).await?;
 
     let now = chrono::Utc::now();
-    let mut orphans: Vec<OrphanBranch> = Vec::new();
+    let mut stale: Vec<StaleBranch> = Vec::new();
     let mut cursor: Option<String> = None;
 
     for _ in 0..MAX_BRANCH_PAGES {
@@ -1789,7 +1789,7 @@ async fn fetch_repo_orphan_branches(
                 .unwrap_or("")
                 .to_string();
 
-            orphans.push(OrphanBranch {
+            stale.push(StaleBranch {
                 repo: repo.to_string(),
                 branch: branch.clone(),
                 url: format!("{repo_url}/tree/{branch}"),
@@ -1818,18 +1818,18 @@ async fn fetch_repo_orphan_branches(
         }
     }
 
-    Ok(orphans)
+    Ok(stale)
 }
 
 /// Remote branches with no open PR whose last commit predates `stale_days`.
 /// Repos that fail are reported as warnings rather than failing the whole scan.
-pub async fn fetch_orphan_branches(
+pub async fn fetch_stale_branches(
     repos: &[String],
     stale_days: u32,
     ignored_prefixes: &[String],
     settings: &AppSettings,
     client: &reqwest::Client,
-) -> Result<OrphanBranchesResult, ApiError> {
+) -> Result<StaleBranchesResult, ApiError> {
     let viewer_login = fetch_viewer_login(settings, client).await?;
     let cutoff = chrono::Utc::now() - chrono::Duration::days(stale_days as i64);
 
@@ -1838,7 +1838,7 @@ pub async fn fetch_orphan_branches(
         async move {
             (
                 repo.clone(),
-                fetch_repo_orphan_branches(
+                fetch_repo_stale_branches(
                     repo,
                     cutoff,
                     ignored_prefixes,
@@ -1865,7 +1865,7 @@ pub async fn fetch_orphan_branches(
     // Ascending by last commit — the most obvious deletion candidates lead the list.
     branches.sort_by(|a, b| a.last_commit_at.cmp(&b.last_commit_at));
 
-    Ok(OrphanBranchesResult {
+    Ok(StaleBranchesResult {
         branches,
         viewer_login,
         warnings,

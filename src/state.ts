@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, OrphanBranchesResult } from "./shared/rpc";
+import type { DashboardSnapshot, StaleBranchesResult } from "./shared/rpc";
 import { defaultListFilterPreferences, defaultSettings } from "./shared/settings";
 
 export interface CommitSummary {
@@ -27,7 +27,7 @@ export interface ChecklistItem {
   done: boolean;
 }
 
-export type AppView = "status" | "list" | "settings" | "orphans";
+export type AppView = "status" | "list" | "settings" | "stale";
 
 export const state = {
   // ── Dashboard ──────────────────────────────────────────────────────────────
@@ -70,22 +70,22 @@ export const state = {
   togglDayEnd: defaultSettings.togglDayEnd,
   togglSlotMinutes: defaultSettings.togglSlotMinutes,
 
-  // ── Orphan branches ────────────────────────────────────────────────────────
-  orphanBranchesEnabled: defaultSettings.orphanBranchesEnabled,
-  orphanBranchStaleDays: defaultSettings.orphanBranchStaleDays,
+  // ── Stale branches ────────────────────────────────────────────────────────
+  staleBranchesEnabled: defaultSettings.staleBranchesEnabled,
+  staleBranchDays: defaultSettings.staleBranchDays,
   /** Last scan result — kept so re-opening the tab doesn't re-scan every repo. */
-  orphanBranches: null as OrphanBranchesResult | null,
-  orphanLoading: false,
-  orphanError: null as string | null,
+  staleBranches: null as StaleBranchesResult | null,
+  staleLoading: false,
+  staleError: null as string | null,
   /** Non-error message shown in place of the list (e.g. no repository selected). */
-  orphanNotice: null as string | null,
+  staleNotice: null as string | null,
   /** Repositories the cached scan covered; null = every configured one. */
-  orphanScannedRepos: null as string[] | null,
-  orphanOnlyMine: false,
-  orphanGroupByAuthor: false,
+  staleScannedRepos: null as string[] | null,
+  staleOnlyMine: false,
+  staleGroupByAuthor: false,
   /** Internal-only by default: outside contributors' branches are rarely ours to chase. */
-  orphanShowInternal: true,
-  orphanShowCollaborator: false,
+  staleShowInternal: true,
+  staleShowCollaborator: false,
 
   // ── Merge queue ────────────────────────────────────────────────────────────
   // "repo/id" of PRs at the head of their queue, auto-merge-enabled, and conflicting.

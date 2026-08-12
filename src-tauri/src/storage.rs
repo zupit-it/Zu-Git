@@ -79,12 +79,17 @@ struct PersistedSettings {
     google_client_id: String,
     #[serde(default)]
     google_calendar_id: String,
-    #[serde(default)]
-    orphan_branches_enabled: bool,
-    #[serde(default = "default_orphan_stale_days")]
-    orphan_branch_stale_days: u32,
-    #[serde(default = "default_orphan_ignored_prefixes")]
-    orphan_ignored_branch_prefixes: Vec<String>,
+    // The aliases are the keys written while the feature was called "orphan
+    // branches" — without them the rename would silently reset the setting.
+    #[serde(default, alias = "orphanBranchesEnabled")]
+    stale_branches_enabled: bool,
+    #[serde(default = "default_stale_branch_days", alias = "orphanBranchStaleDays")]
+    stale_branch_days: u32,
+    #[serde(
+        default = "default_stale_ignored_prefixes",
+        alias = "orphanIgnoredBranchPrefixes"
+    )]
+    stale_branch_ignored_prefixes: Vec<String>,
     // Legacy/fallback field. New fallback writes are only produced when they can
     // be protected by the platform (currently DPAPI on Windows).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,12 +135,12 @@ fn default_slot_minutes() -> u32 {
 fn default_history_days() -> u32 {
     60
 }
-fn default_orphan_stale_days() -> u32 {
+fn default_stale_branch_days() -> u32 {
     15
 }
 /// Release branches are long-lived by convention, not by protection rule, so they
 /// are the one prefix worth excluding out of the box.
-fn default_orphan_ignored_prefixes() -> Vec<String> {
+fn default_stale_ignored_prefixes() -> Vec<String> {
     vec!["release".to_string()]
 }
 
@@ -304,9 +309,9 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         google_client_id: persisted.google_client_id,
         google_client_secret,
         google_calendar_id: persisted.google_calendar_id,
-        orphan_branches_enabled: if persisted.orphan_branches_enabled { "on".to_string() } else { String::new() },
-        orphan_branch_stale_days: persisted.orphan_branch_stale_days.to_string(),
-        orphan_ignored_branch_prefixes: persisted.orphan_ignored_branch_prefixes.join("\n"),
+        stale_branches_enabled: if persisted.stale_branches_enabled { "on".to_string() } else { String::new() },
+        stale_branch_days: persisted.stale_branch_days.to_string(),
+        stale_branch_ignored_prefixes: persisted.stale_branch_ignored_prefixes.join("\n"),
     };
 
     Ok(normalize_settings(&form))
@@ -367,9 +372,9 @@ pub async fn save_settings(
         google_calendar_enabled: normalized.google_calendar_enabled,
         google_client_id: normalized.google_client_id.clone(),
         google_calendar_id: normalized.google_calendar_id.clone(),
-        orphan_branches_enabled: normalized.orphan_branches_enabled,
-        orphan_branch_stale_days: normalized.orphan_branch_stale_days,
-        orphan_ignored_branch_prefixes: normalized.orphan_ignored_branch_prefixes.clone(),
+        stale_branches_enabled: normalized.stale_branches_enabled,
+        stale_branch_days: normalized.stale_branch_days,
+        stale_branch_ignored_prefixes: normalized.stale_branch_ignored_prefixes.clone(),
         github_token: github_token_fallback,
         jira_token: jira_token_fallback,
         toggl_token: toggl_token_fallback,

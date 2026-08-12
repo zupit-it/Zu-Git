@@ -198,20 +198,20 @@ pub async fn fetch_branch_stats(
 /// threshold. Not part of the dashboard refresh: scanning every branch of every
 /// repo is expensive, so the view asks for it on demand.
 #[tauri::command]
-pub async fn fetch_orphan_branches(
+pub async fn fetch_stale_branches(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     active_repos: Option<Vec<String>>,
-) -> Result<crate::models::OrphanBranchesResult, String> {
+) -> Result<crate::models::StaleBranchesResult, String> {
     let settings = storage::load_settings(&app).await?;
     if !crate::models::settings_ready_for_github(&settings) {
         return Err("Configure the GitHub token and at least one repository first.".to_string());
     }
     let repos = active_repos.unwrap_or_else(|| settings.github_repos.clone());
-    crate::github::fetch_orphan_branches(
+    crate::github::fetch_stale_branches(
         &repos,
-        settings.orphan_branch_stale_days,
-        &settings.orphan_ignored_branch_prefixes,
+        settings.stale_branch_days,
+        &settings.stale_branch_ignored_prefixes,
         &settings,
         &state.http_client,
     )

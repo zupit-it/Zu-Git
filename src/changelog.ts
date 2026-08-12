@@ -20,9 +20,9 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
-        title: "Orphan branches — find what everyone forgot to delete",
-        body: "Turn it on in <strong>Settings → Orphan branches</strong> and a tab appears next to <em>Status</em>, listing the remote branches with <strong>no open PR</strong> that nobody has pushed to in more than <strong>15 days</strong> — the threshold is yours to change, and so is the list of ignored prefixes (<strong>release</strong> out of the box). The default branch, protected branches and anything that is the head or the base of an open PR never show up. What is left is sorted oldest commit first, scoped to the repositories you have selected in the toolbar, and can be filtered by <strong>Internal / Collaborator</strong> or narrowed to <strong>Only mine</strong> — branches whose last commit is yours, the only owner GitHub records for a ref. <strong>Group by author</strong> turns it into one section per person, so you know who to ask. It is read-only: a row opens the branch on GitHub, ZuGit never deletes anything.",
-        imgs: ["/assets/changelog/orphan.png"],
+        title: "Stale branches — find what everyone forgot to delete",
+        body: "Turn it on in <strong>Settings → Stale branches</strong> and a tab appears next to <em>Status</em>, listing the remote branches with <strong>no open PR</strong> that nobody has pushed to in more than <strong>15 days</strong> — the threshold is yours to change, and so is the list of ignored prefixes (<strong>release</strong> out of the box). The default branch, protected branches and anything that is the head or the base of an open PR never show up. What is left is sorted oldest commit first, scoped to the repositories you have selected in the toolbar, and can be filtered by <strong>Internal / Collaborator</strong> or narrowed to <strong>Only mine</strong> — branches whose last commit is yours, the only owner GitHub records for a ref. <strong>Group by author</strong> turns it into one section per person, so you know who to ask. It is read-only: a row opens the branch on GitHub, ZuGit never deletes anything.",
+        imgs: ["/assets/changelog/stale-branches.png"],
       },
     ],
   },

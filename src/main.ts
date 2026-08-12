@@ -14,9 +14,9 @@ import {
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
 import {
-  loadOrphanBranches, restoreOrphanFilter,
-  setOrphanAuthorType, setOrphanGroupByAuthor, setOrphanOnlyMine,
-} from "./orphan-branches";
+  loadStaleBranches, restoreStaleFilters,
+  setStaleAuthorType, setStaleGroupByAuthor, setStaleOnlyMine,
+} from "./stale-branches";
 import {
   openTogglPanel, startTogglReminder, testTogglConnection,
   connectGoogleCalendar, disconnectGoogleCalendar,
@@ -79,11 +79,11 @@ window.addEventListener("DOMContentLoaded", () => {
   // The hint explains what the scan does, so show it while the box is ticked —
   // not only after the save that makes the tab appear.
   document
-    .querySelector<HTMLInputElement>("#orphanBranchesEnabled")
+    .querySelector<HTMLInputElement>("#staleBranchesEnabled")
     ?.addEventListener("change", (event) => {
       const checkbox = event.currentTarget;
       if (!(checkbox instanceof HTMLInputElement)) return;
-      const hint = document.querySelector<HTMLElement>("[data-orphan-hint]");
+      const hint = document.querySelector<HTMLElement>("[data-stale-hint]");
       if (hint) hint.hidden = !checkbox.checked;
     });
   document
@@ -221,44 +221,44 @@ window.addEventListener("DOMContentLoaded", () => {
     tab.addEventListener("click", () => {
       const view = tab.dataset.viewTab;
       if (view === "status" || view === "list" || view === "settings") setView(view);
-      if (view === "orphans") {
-        setView("orphans");
+      if (view === "stale") {
+        setView("stale");
         // Scanning every branch is expensive, so the first visit pays for it and
         // later ones reuse the result until Rescan is pressed.
-        void loadOrphanBranches();
+        void loadStaleBranches();
       }
     });
   });
 
-  // ── Orphan branches ─────────────────────────────────────────────────────────
+  // ── Stale branches ─────────────────────────────────────────────────────────
   document
-    .querySelector<HTMLButtonElement>("[data-orphan-refresh]")
-    ?.addEventListener("click", () => void loadOrphanBranches(true));
-  document.querySelectorAll<HTMLButtonElement>("[data-orphan-scope]").forEach((button) => {
+    .querySelector<HTMLButtonElement>("[data-stale-refresh]")
+    ?.addEventListener("click", () => void loadStaleBranches(true));
+  document.querySelectorAll<HTMLButtonElement>("[data-stale-scope]").forEach((button) => {
     button.addEventListener("click", () => {
-      setOrphanOnlyMine(button.dataset.orphanScope === "mine");
+      setStaleOnlyMine(button.dataset.staleScope === "mine");
     });
   });
   document
-    .querySelector<HTMLInputElement>("[data-orphan-group-by-author]")
+    .querySelector<HTMLInputElement>("[data-stale-group-by-author]")
     ?.addEventListener("change", (event) => {
       const target = event.currentTarget;
-      if (target instanceof HTMLInputElement) setOrphanGroupByAuthor(target.checked);
+      if (target instanceof HTMLInputElement) setStaleGroupByAuthor(target.checked);
     });
   document
-    .querySelector<HTMLInputElement>("[data-orphan-filter-internal]")
+    .querySelector<HTMLInputElement>("[data-stale-filter-internal]")
     ?.addEventListener("change", (event) => {
       const target = event.currentTarget;
       if (!(target instanceof HTMLInputElement)) return;
       // Refused when it would untick the last author type — put the tick back.
-      if (!setOrphanAuthorType("internal", target.checked)) target.checked = true;
+      if (!setStaleAuthorType("internal", target.checked)) target.checked = true;
     });
   document
-    .querySelector<HTMLInputElement>("[data-orphan-filter-collaborator]")
+    .querySelector<HTMLInputElement>("[data-stale-filter-collaborator]")
     ?.addEventListener("change", (event) => {
       const target = event.currentTarget;
       if (!(target instanceof HTMLInputElement)) return;
-      if (!setOrphanAuthorType("collaborator", target.checked)) target.checked = true;
+      if (!setStaleAuthorType("collaborator", target.checked)) target.checked = true;
     });
 
   // ── Global click delegation ─────────────────────────────────────────────────
@@ -266,9 +266,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const target = event.target;
     if (!(target instanceof Element)) return;
 
-    const orphanRow = target.closest<HTMLElement>("[data-orphan-open]");
-    const orphanUrl = orphanRow?.dataset.orphanOpen;
-    if (orphanUrl) { void openExternal(orphanUrl); return; }
+    const staleRow = target.closest<HTMLElement>("[data-stale-open]");
+    const staleUrl = staleRow?.dataset.staleOpen;
+    if (staleUrl) { void openExternal(staleUrl); return; }
 
     const prButton = target.closest<HTMLElement>("[data-pr-link]");
     const prUrl = prButton?.dataset.prLink;
@@ -332,8 +332,8 @@ window.addEventListener("DOMContentLoaded", () => {
         renderListBoard(applyListFilters(state.currentDashboard));
         renderToolbarRepoFilters(state.currentDashboard);
       }
-      // The orphan scan is scoped to the same selection, so it has to follow it.
-      if (state.currentView === "orphans") void loadOrphanBranches();
+      // The stale-branch scan is scoped to the same selection, so it has to follow it.
+      if (state.currentView === "stale") void loadStaleBranches();
       void persistListFilters();
       return;
     }
@@ -371,10 +371,10 @@ window.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("keydown", (e) => {
     const mod = isMac ? e.metaKey : e.ctrlKey;
 
-    // Orphan rows are focusable, so Enter/Space must open them like a click does.
+    // Stale-branch rows are focusable, so Enter/Space must open them like a click does.
     if (e.key === "Enter" || e.key === " ") {
       const url = (e.target as Element | null)
-        ?.closest<HTMLElement>("[data-orphan-open]")?.dataset.orphanOpen;
+        ?.closest<HTMLElement>("[data-stale-open]")?.dataset.staleOpen;
       if (url) {
         e.preventDefault();
         void openExternal(url);
@@ -420,7 +420,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   // ── Init ────────────────────────────────────────────────────────────────────
-  restoreOrphanFilter();
+  restoreStaleFilters();
   syncSettingsSaveButton();
   setView(state.currentView);
   void bootstrap();
