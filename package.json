@@ -1,6 +1,6 @@
 {
   "name": "zugit",
-  "version": "0.11.2",
+  "version": "0.12.0",
   "description": "Desktop app per visualizzare PR GitHub arricchite con dati Jira.",
   "scripts": {
     "vite:dev": "vite",

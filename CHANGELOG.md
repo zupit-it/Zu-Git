@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.12.0] - 2026-08-13
+
 ### Added
 - **Release notes: manual include / exclude** — every story in the release diff now carries a control
   in its last column showing whether it will end up in the notes. Clicking it offers **Include
