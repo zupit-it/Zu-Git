@@ -27,6 +27,19 @@ Jira is then queried for:
 
 This lets ZuGit classify stories as done, missing, or extra.
 
+## Release Notes
+
+By default only *Done* stories reach the generated notes. That rule can be overridden per story from
+the diff list — **Include anyway** / **Exclude anyway** / **Auto** — so scope that Jira and git
+disagree about can still be announced (or held back) without editing Jira first. Overrides are keyed
+by release name and Jira key and persist in `release-notes.json` in the app data directory.
+
+Notes always lead with the issue type (POWER / BUG). The Epic grouping adds a per-epic section under
+each type heading, never the other way round: the type is what readers scan for first. The epic is
+Jira's *Principale* field — ZuGit resolves it by name through `/rest/api/3/field` and falls back to
+the built-in `parent` field, which is what Italian Jira sites label "Principale". Stories with no
+epic are grouped last.
+
 ## Minor Releases
 
 Minor releases are intentionally not fully modeled yet.

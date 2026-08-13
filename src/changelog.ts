@@ -20,15 +20,20 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
-        title: "Stale branches — find what everyone forgot to delete",
-        body: "Turn it on in <strong>Settings → Stale branches</strong> and a tab appears next to <em>Status</em>, listing the remote branches with <strong>no open PR</strong> that nobody has pushed to in more than <strong>15 days</strong> — the threshold is yours to change, and so is the list of ignored prefixes (<strong>release</strong> out of the box). The default branch, protected branches and anything that is the head or the base of an open PR never show up. What is left is sorted oldest commit first, scoped to the repositories you have selected in the toolbar, and can be filtered by <strong>Internal / Collaborator</strong> or narrowed to <strong>Only mine</strong> — branches whose last commit is yours, the only owner GitHub records for a ref. <strong>Group by author</strong> turns it into one section per person, so you know who to ask. It is read-only: a row opens the branch on GitHub, ZuGit never deletes anything.",
-        imgs: ["/assets/changelog/stale-branches.png"],
+        title: "Release notes — you decide what goes in, grouped by epic",
+        body: "Every row of the release diff now says whether it will end up in the notes — <strong>In notes</strong> or <strong>Skipped</strong> — and one click on it offers <strong>Include anyway</strong> / <strong>Exclude anyway</strong> / <strong>Auto (default)</strong>. A story sitting in <em>Missing</em> that shipped anyway can finally be announced, and a <em>Done</em> one can be kept quiet, without editing Jira first. Everything left on <em>Auto</em> keeps following the usual rule — only Done goes in — and your decisions are saved per release, surviving a refresh, a version switch and a restart. The notes panel also gained an <strong>Epic</strong> grouping: <em>POWER</em> and <em>BUG</em> still lead, and under each one the stories are split into per-epic sections read from Jira's <strong>Principale</strong> field, with anything without an epic last.",
+        imgs: ["/assets/changelog/override-release-notes-logic.png"],
       },
     ],
   },
   {
     label: "Older news",
     entries: [
+      {
+        title: "Stale branches — find what everyone forgot to delete",
+        body: "Turn it on in <strong>Settings → Stale branches</strong> and a tab appears next to <em>Status</em>, listing the remote branches with <strong>no open PR</strong> that nobody has pushed to in more than <strong>15 days</strong> — the threshold is yours to change, and so is the list of ignored prefixes (<strong>release</strong> out of the box). The default branch, protected branches and anything that is the head or the base of an open PR never show up. What is left is sorted oldest commit first, scoped to the repositories you have selected in the toolbar, and can be filtered by <strong>Internal / Collaborator</strong> or narrowed to <strong>Only mine</strong> — branches whose last commit is yours, the only owner GitHub records for a ref. <strong>Group by author</strong> turns it into one section per person, so you know who to ask. It is read-only: a row opens the branch on GitHub, ZuGit never deletes anything.",
+        imgs: ["/assets/changelog/stale-branches.png"],
+      },
       {
         title: "Toggl — fill your timesheet from the day you actually had",
         body: "Turn it on in <strong>Settings → Toggl</strong> and a <strong>Toggl</strong> button appears next to Refresh. It reads the entries you already have, finds the free slots of your working range (default <strong>08:00–14:00</strong>) and fills them with the Jira stories assigned to you — using <em>when</em> each story changed status to split the day: the one you moved to merge request at 10:30 gets the morning, the one you picked up then gets the afternoon. Project, tags and the billable flag come from your own Toggl history. When two stories are equally plausible the row asks which one, or splits the slot between them. Nothing is written until you press <strong>Create in Toggl</strong>.",

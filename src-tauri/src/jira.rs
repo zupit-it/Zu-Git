@@ -19,6 +19,15 @@ pub struct FixVersion {
     pub release_date: Option<String>,
 }
 
+/// The issue's parent story/epic — the field Italian Jira sites label
+/// "Principale". `key` is absent when the value comes from a plain-text or
+/// option custom field rather than an issue link.
+#[derive(Debug, Clone)]
+pub struct EpicRef {
+    pub key: Option<String>,
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct JiraIssueSummary {
     pub key: String,
@@ -30,6 +39,8 @@ pub struct JiraIssueSummary {
     /// version with the most imminent release date; undated ones go last).
     pub releases: Vec<FixVersion>,
     pub assignee: Option<String>,
+    /// Parent epic, when the epic field was requested and the issue has one.
+    pub epic: Option<EpicRef>,
 }
 
 impl JiraIssueSummary {
@@ -127,6 +138,12 @@ struct JiraFields {
     issuetype: Option<JiraIssueTypeField>,
     #[serde(rename = "fixVersions")]
     fix_versions: Option<Vec<JiraFixVersion>>,
+    #[serde(default)]
+    parent: Option<serde_json::Value>,
+    /// Everything else Jira returned — the epic field id is discovered at
+    /// runtime, so it can't be named statically.
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,7 +174,50 @@ struct JiraFixVersion {
     release_date: Option<String>,
 }
 
+/// Reads an epic reference out of a raw Jira field value. Tolerant by design —
+/// depending on the site the "Principale" field is an issue link (`{key, fields:
+/// {summary}}`), a select option (`{value}`), or plain text.
+fn epic_from_value(value: &serde_json::Value) -> Option<EpicRef> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) => {
+            let s = s.trim();
+            (!s.is_empty()).then(|| EpicRef { key: None, name: s.to_string() })
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(epic_from_value),
+        serde_json::Value::Object(_) => {
+            let key = value["key"].as_str().map(|s| s.to_string());
+            let name = ["summary", "name", "value", "displayName", "text"]
+                .iter()
+                .find_map(|f| value["fields"][f].as_str().or_else(|| value[*f].as_str()))
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            match (name, key) {
+                (Some(name), key) => Some(EpicRef { key, name }),
+                // An issue link with no summary requested: fall back to the key.
+                (None, Some(key)) => Some(EpicRef { name: key.clone(), key: Some(key) }),
+                (None, None) => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Picks the epic from the discovered field id, falling back to the standard
+/// `parent` field (which is what "Principale" resolves to on Italian sites).
+fn extract_epic(fields: &JiraFields, epic_field_id: Option<&str>) -> Option<EpicRef> {
+    epic_field_id
+        .filter(|id| *id != "parent")
+        .and_then(|id| fields.extra.get(id))
+        .and_then(epic_from_value)
+        .or_else(|| fields.parent.as_ref().and_then(epic_from_value))
+}
+
 fn map_issue(issue: &JiraIssueResponse) -> JiraIssueSummary {
+    map_issue_with_epic(issue, None)
+}
+
+fn map_issue_with_epic(issue: &JiraIssueResponse, epic_field_id: Option<&str>) -> JiraIssueSummary {
     // Keep every fix version, sorted "primary first": dated versions ascending
     // (most imminent release first), undated ones last. Mirrors the ordering
     // used by `fetch_project_versions`.
@@ -211,6 +271,7 @@ fn map_issue(issue: &JiraIssueResponse) -> JiraIssueSummary {
             .assignee
             .as_ref()
             .and_then(|a| a.display_name.clone()),
+        epic: extract_epic(&issue.fields, epic_field_id),
     }
 }
 
@@ -459,6 +520,67 @@ async fn discover_checklist_field(
 
     let cache_key = format!("{}::{}", CHECKLIST_CACHE_VERSION, settings.jira_base_url);
     CHECKLIST_FIELD_CACHE.lock().insert(cache_key, found.clone());
+    found
+}
+
+// ── Epic ("Principale") field discovery ───────────────────────────────────────
+
+static EPIC_FIELD_CACHE: Lazy<Mutex<HashMap<String, Option<String>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Resolves the field that holds the story's epic. Italian Jira sites label the
+/// built-in `parent` field "Principale", but a site may also define a custom
+/// field with that name — so we match by name first and only then fall back to
+/// `parent`, which is always present.
+pub async fn discover_epic_field(
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Option<String> {
+    {
+        let cache = EPIC_FIELD_CACHE.lock();
+        if let Some(cached) = cache.get(&settings.jira_base_url) {
+            return cached.clone();
+        }
+    }
+
+    let url = format!("{}/rest/api/3/field", settings.jira_base_url);
+    let fields: Vec<JiraField> = match client
+        .get(&url)
+        .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+        .send()
+        .await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[zugit][jira] discover_epic_field: failed to parse field list: {e}");
+                return Some("parent".to_string());
+            }
+        },
+        Err(e) => {
+            eprintln!("[zugit][jira] discover_epic_field: request failed: {e}");
+            return Some("parent".to_string());
+        }
+    };
+
+    // Preference order: the exact site label, its longer variant, the English
+    // equivalents, then the built-in parent field.
+    let by_name = |wanted: &str| -> Option<String> {
+        fields
+            .iter()
+            .find(|f| f.name.trim().eq_ignore_ascii_case(wanted))
+            .map(|f| f.id.clone())
+    };
+    let found = by_name("Principale")
+        .or_else(|| by_name("Elemento principale"))
+        .or_else(|| by_name("Parent"))
+        .or_else(|| by_name("Epic Link"))
+        .or_else(|| by_name("Collegamento epica"))
+        .or(Some("parent".to_string()));
+
+    EPIC_FIELD_CACHE
+        .lock()
+        .insert(settings.jira_base_url.clone(), found.clone());
     found
 }
 
@@ -779,11 +901,20 @@ pub async fn fetch_release_issues(
         format!("fixVersion = \"{}\" OR issueKey in ({})", escaped, keys_list)
     };
 
+    // Release notes group by epic, so the "Principale" field travels with every issue.
+    let epic_field = discover_epic_field(settings, client).await;
+    let epic_field_id = epic_field.as_deref();
+    let mut requested_fields = vec!["summary", "status", "fixVersions", "issuetype", "parent"];
+    if let Some(id) = epic_field_id.filter(|id| *id != "parent") {
+        requested_fields.push(id);
+    }
+    let map = |issue: &JiraIssueResponse| map_issue_with_epic(issue, epic_field_id);
+
     let search_jql_url = format!("{}/rest/api/3/search/jql", settings.jira_base_url);
     let max_results = 100;
     let first_body = serde_json::json!({
         "jql": jql,
-        "fields": ["summary", "status", "fixVersions", "issuetype"],
+        "fields": requested_fields,
         "maxResults": max_results,
     });
 
@@ -804,7 +935,7 @@ pub async fn fetch_release_issues(
         loop {
             let body2 = serde_json::json!({
                 "jql": jql,
-                "fields": ["summary", "status", "fixVersions", "issuetype"],
+                "fields": requested_fields,
                 "maxResults": max_results,
                 "startAt": start_at,
             });
@@ -820,7 +951,7 @@ pub async fn fetch_release_issues(
             }
             let parsed: JiraSearchResponse = resp2.json().await.map_err(|e| e.to_string())?;
             let count = parsed.issues.len();
-            all.extend(parsed.issues.iter().map(map_issue));
+            all.extend(parsed.issues.iter().map(map));
             if count < max_results {
                 break;
             }
@@ -836,7 +967,7 @@ pub async fn fetch_release_issues(
     let mut all = Vec::new();
     let mut parsed: JiraSearchResponse = resp.json().await.map_err(|e| e.to_string())?;
     loop {
-        all.extend(parsed.issues.iter().map(map_issue));
+        all.extend(parsed.issues.iter().map(map));
 
         let Some(next_page_token) = parsed.next_page_token.clone() else {
             break;
@@ -847,7 +978,7 @@ pub async fn fetch_release_issues(
 
         let body = serde_json::json!({
             "jql": jql,
-            "fields": ["summary", "status", "fixVersions", "issuetype"],
+            "fields": requested_fields,
             "maxResults": max_results,
             "nextPageToken": next_page_token,
         });

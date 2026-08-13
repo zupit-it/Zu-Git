@@ -460,6 +460,63 @@ pub async fn save_list_filter_preferences(
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
+// ── Release notes overrides ───────────────────────────────────────────────────
+
+fn release_notes_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("release-notes.json"))
+}
+
+/// Manual "always include" / "always exclude" decisions, keyed by release name
+/// and then by Jira key. They outlive a refresh so a release can be curated
+/// across several sessions; a missing or corrupt file just means "no overrides".
+type ReleaseNoteOverrides = std::collections::HashMap<String, std::collections::HashMap<String, String>>;
+
+fn load_all_release_note_overrides(app: &tauri::AppHandle) -> ReleaseNoteOverrides {
+    release_notes_path(app)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or_default()
+}
+
+pub fn load_release_note_overrides(
+    app: &tauri::AppHandle,
+    release_name: &str,
+) -> std::collections::HashMap<String, String> {
+    load_all_release_note_overrides(app)
+        .remove(release_name)
+        .unwrap_or_default()
+}
+
+/// Sets (`Some("include" | "exclude")`) or clears (`None`) one issue's override
+/// and returns the release's resulting map.
+pub fn set_release_note_override(
+    app: &tauri::AppHandle,
+    release_name: &str,
+    issue_key: &str,
+    mode: Option<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut all = load_all_release_note_overrides(app);
+    let entry = all.entry(release_name.to_string()).or_default();
+    match mode {
+        Some(mode) => {
+            entry.insert(issue_key.to_string(), mode);
+        }
+        None => {
+            entry.remove(issue_key);
+        }
+    }
+    let current = entry.clone();
+    all.retain(|_, keys| !keys.is_empty());
+
+    ensure_data_dir(app)?;
+    let path = release_notes_path(app)?;
+    let json = serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(current)
+}
+
 // ── Toggl learned rules ───────────────────────────────────────────────────────
 
 fn toggl_rules_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {

@@ -18,7 +18,14 @@ interface ReleaseDiffItem {
   avatarUrl?: string;
   isPreview: boolean;
   flag?: string; // "no-pr" | "no-jira"
+  epicKey?: string;
+  epicName?: string;
 }
+
+type ItemKind = "done" | "missing" | "extra";
+
+/** Manual decision that wins over the automatic "Done goes in the notes" rule. */
+type NoteOverride = "include" | "exclude";
 
 interface ReleaseDiffResult {
   done: ReleaseDiffItem[];
@@ -57,6 +64,8 @@ const I = {
   info:    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v4M8 5h.01"/></svg>`,
   arrow:   `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h8M7 3l3 3-3 3"/></svg>`,
   close:   `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>`,
+  pin:     `<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 1.5h3l-.4 2.2 1.7 1.6H3.2l1.7-1.6L4.5 1.5Z"/><path d="M6 5.3v5.2"/></svg>`,
+  auto:    `<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6a4 4 0 1 1-1.2-2.8M10 1.6v2.2H7.8"/></svg>`,
   bug:     `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5a3 3 0 0 1-3-3V5a3 3 0 0 1 6 0v1.5a3 3 0 0 1-3 3Z"/><path d="M3.5 3.5 2 2M8.5 3.5 10 2M3 6H1M9 6h2M4 9.2 2.5 10.5M8 9.2l1.5 1.3"/></svg>`,
 };
 
@@ -81,27 +90,57 @@ function cleanTitle(summary: string): string {
   return summary.replace(/\[.*?\]/g, "").replace(/\s+/g, " ").trim();
 }
 
-function buildReleaseNotes(done: ReleaseDiffItem[]): string {
-  const power: ReleaseDiffItem[] = [];
-  const bugs: ReleaseDiffItem[] = [];
-  for (const item of done) {
-    (item.issueType.toLowerCase() === "bug" ? bugs : power).push(item);
+/** Label for stories whose "Principale" (epic) field is empty. */
+const NO_EPIC = "Senza epica";
+
+/** The automatic rule: only what actually landed on main goes in the notes. */
+function autoIncluded(kind: ItemKind): boolean {
+  return kind === "done";
+}
+
+function noteLine(item: ReleaseDiffItem): string {
+  const preview = item.status.toLowerCase() !== "verified" ? " `PREVIEW`" : "";
+  return `• \`${item.key}\`${preview} ${cleanTitle(item.summary)}`;
+}
+
+interface NoteGroup { header: string; items: ReleaseDiffItem[]; }
+
+/** The POWER / BUG split the notes have always led with. */
+function byType(items: ReleaseDiffItem[]): NoteGroup[] {
+  return [
+    { header: "⚡ *POWER*:", items: items.filter(it => it.issueType.toLowerCase() !== "bug") },
+    { header: "🐛 *BUG*:",   items: items.filter(it => it.issueType.toLowerCase() === "bug") },
+  ].filter(group => group.items.length > 0);
+}
+
+/** Epics alphabetically, with the "no epic" bucket last. */
+function byEpic(items: ReleaseDiffItem[]): NoteGroup[] {
+  const groups = new Map<string, ReleaseDiffItem[]>();
+  for (const item of items) {
+    const epic = item.epicName?.trim() || NO_EPIC;
+    const bucket = groups.get(epic);
+    if (bucket) bucket.push(item);
+    else groups.set(epic, [item]);
   }
+  return [...groups.keys()]
+    .sort((a, b) => (a === NO_EPIC ? 1 : b === NO_EPIC ? -1 : a.localeCompare(b)))
+    .map(name => ({ header: `📦 *${name}*`, items: groups.get(name) ?? [] }));
+}
+
+/** Type always leads; "epic" adds a per-epic section under each type heading. */
+function buildReleaseNotes(items: ReleaseDiffItem[], groupBy: "type" | "epic"): string {
   const lines: string[] = [];
-  if (power.length > 0) {
-    lines.push("⚡ *POWER*:");
-    for (const item of power) {
-      const preview = item.status.toLowerCase() !== "verified" ? " `PREVIEW`" : "";
-      lines.push(`• \`${item.key}\`${preview} ${cleanTitle(item.summary)}`);
-    }
-  }
-  if (bugs.length > 0) {
+  for (const type of byType(items)) {
     if (lines.length > 0) lines.push("");
-    lines.push("🐛 *BUG*:");
-    for (const item of bugs) {
-      const preview = item.status.toLowerCase() !== "verified" ? " `PREVIEW`" : "";
-      lines.push(`• \`${item.key}\`${preview} ${cleanTitle(item.summary)}`);
+    lines.push(type.header);
+    if (groupBy === "type") {
+      lines.push(...type.items.map(noteLine));
+      continue;
     }
+    byEpic(type.items).forEach((epic, index) => {
+      if (index > 0) lines.push("");
+      lines.push(epic.header, ...epic.items.map(noteLine));
+    });
   }
   return lines.join("\n");
 }
@@ -119,6 +158,29 @@ interface ModalState {
   applyStatus: string;
   repos: string[];
   projectKey: string | undefined;
+  /** Persisted per-issue include/exclude decisions for this release's notes. */
+  overrides: Record<string, NoteOverride>;
+  /** Jira key whose note-override menu is open, if any. */
+  noteMenuKey: string | null;
+  /** Resolved on first open: "epic" when the release carries epic data. */
+  notesGroupBy: "type" | "epic" | null;
+}
+
+/** Whether the story ends up in the notes, override first, rule second. */
+function inNotes(st: ModalState, item: ReleaseDiffItem, kind: ItemKind): boolean {
+  const override = st.overrides[item.key];
+  if (override) return override === "include";
+  return autoIncluded(kind);
+}
+
+/** Everything that goes in the notes, done first, then forced-in stories. */
+function noteItems(st: ModalState): ReleaseDiffItem[] {
+  const kinds: Array<[ItemKind, ReleaseDiffItem[]]> = [
+    ["done", st.result.done],
+    ["missing", st.result.missing],
+    ["extra", st.result.extra],
+  ];
+  return kinds.flatMap(([kind, items]) => items.filter(it => inNotes(st, it, kind)));
 }
 
 /** Fix versions other than the current release / Unscheduled — the divergent ones. */
@@ -162,7 +224,43 @@ function renderFlagChip(flag: string): string {
   return `<span class="rd-flag-chip" title="${escHtml(c.hint)}">${I.warn} ${escHtml(c.label)}</span>`;
 }
 
-function renderItem(item: ReleaseDiffItem, kind: "done" | "missing" | "extra", selected: boolean, currentVersion: string): string {
+/** Note include/exclude pill + its menu, in the row's action column. */
+function renderNoteControl(st: ModalState, item: ReleaseDiffItem, kind: ItemKind): string {
+  const override = st.overrides[item.key];
+  const included = inNotes(st, item, kind);
+  const forced = !!override;
+  const label = included ? "In notes" : "Skipped";
+  const title = forced
+    ? `Forced: this story is always ${included ? "included in" : "excluded from"} the release notes.`
+    : `Automatic: ${kind === "done" ? "merged stories go in the notes" : "only Done stories go in the notes"}. Click to override.`;
+
+  const cls = [
+    "rd-note-btn",
+    included ? "rd-note-btn--in" : "rd-note-btn--out",
+    forced ? "rd-note-btn--forced" : "",
+  ].join(" ");
+
+  const options: Array<{ mode: string; label: string; current: boolean }> = [
+    { mode: "include", label: "Include anyway", current: override === "include" },
+    { mode: "exclude", label: "Exclude anyway", current: override === "exclude" },
+    { mode: "auto",    label: "Auto (default)", current: !override },
+  ];
+  const menu = st.noteMenuKey === item.key
+    ? `<div class="rd-note-menu" data-rd-note-menu>
+        ${options.map(o => `<button class="rd-note-opt ${o.current ? "rd-note-opt--current" : ""}" data-rd-note-set="${o.mode}" data-rd-note-key="${escHtml(item.key)}">
+          <span class="rd-note-opt-tick">${o.current ? I.check : ""}</span>${escHtml(o.label)}
+        </button>`).join("")}
+       </div>`
+    : "";
+
+  return `<button class="${cls}" data-rd-note-toggle="${escHtml(item.key)}" title="${escHtml(title)}">
+      ${forced ? I.pin : I.auto}${label}
+    </button>${menu}`;
+}
+
+function renderItem(st: ModalState, item: ReleaseDiffItem, kind: ItemKind): string {
+  const selected = st.selected.has(item.key);
+  const currentVersion = st.releaseName;
   const selectable = kind !== "done" || item.status.toLowerCase() === "merge request";
   const cbCol = selectable
     ? `<div class="rd-item-cb-col">
@@ -185,12 +283,18 @@ function renderItem(item: ReleaseDiffItem, kind: "done" | "missing" | "extra", s
     ? `<img class="rd-avatar rd-avatar--img" src="${escHtml(item.avatarUrl)}" alt="${escHtml(item.author)}" width="14" height="14" />`
     : `<span class="rd-avatar" style="background:${escHtml(item.avatarColor)}">${escHtml(item.initials)}</span>`;
 
+  const metaEpic = item.epicName
+    ? `<span class="rd-dot-sep">·</span>
+       <span class="rd-epic" title="Principale: ${escHtml(item.epicName)}">${escHtml(item.epicName)}</span>`
+    : "";
+
   const summaryCol = `<div class="rd-summary-col">
     <div class="rd-summary-title" title="${escHtml(item.summary)}">${escHtml(item.summary)}</div>
     <div class="rd-meta-row">
       ${item.author ? avatarEl : ""}
       ${item.author ? `<span class="rd-author">${escHtml(item.author)}</span>` : ""}
       ${metaBranch}
+      ${metaEpic}
     </div>
   </div>`;
 
@@ -221,7 +325,7 @@ function renderItem(item: ReleaseDiffItem, kind: "done" | "missing" | "extra", s
     ${divergenceCol}
     ${statusCol}
     ${prCol}
-    <div class="rd-action-col"></div>
+    <div class="rd-action-col">${renderNoteControl(st, item, kind)}</div>
   </div>`;
 }
 
@@ -232,8 +336,9 @@ const SECTION_CFG: Record<string, SectionCfg> = {
   extra:   { icon: I.plus,  label: "Extra",   fg: T.warn, bg: T.warnSoft, bd: T.warnBd, hint: "Merged into main but Jira target version differs" },
 };
 
-function renderSection(kind: "done" | "missing" | "extra", items: ReleaseDiffItem[], selected: Set<string>, currentVersion: string): string {
+function renderSection(kind: ItemKind, items: ReleaseDiffItem[], st: ModalState): string {
   const cfg = SECTION_CFG[kind];
+  const selected = st.selected;
   const selectableItems = kind === "done"
     ? items.filter(it => it.status.toLowerCase() === "merge request")
     : items;
@@ -260,7 +365,7 @@ function renderSection(kind: "done" | "missing" | "extra", items: ReleaseDiffIte
 
   const rows = items.length === 0
     ? `<div class="rd-empty-section">No items</div>`
-    : items.map(it => renderItem(it, kind, selected.has(it.key), currentVersion)).join("");
+    : items.map(it => renderItem(st, it, kind)).join("");
 
   return `<div class="rd-section" data-rd-section="${kind}">${header}<div>${rows}</div></div>`;
 }
@@ -309,7 +414,7 @@ function renderProgressBar(counts: ReturnType<typeof computeCounts>): string {
 }
 
 function renderBody(st: ModalState): string {
-  const { result, tab, selected } = st;
+  const { result, tab } = st;
   const ver = st.releaseName;
 
   const all = [...result.done, ...result.missing, ...result.extra];
@@ -321,9 +426,9 @@ function renderBody(st: ModalState): string {
   const extraItems   = isFlaggedTab ? flagged.filter(it => result.extra.includes(it))   : (tab === "all" || tab === "extra")   ? result.extra   : [];
 
   const parts: string[] = [];
-  if (tab === "all" || tab === "done"    || (isFlaggedTab && doneItems.length > 0))    parts.push(renderSection("done",    doneItems,    selected, ver));
-  if (tab === "all" || tab === "missing" || (isFlaggedTab && missingItems.length > 0)) parts.push(renderSection("missing", missingItems, selected, ver));
-  if (tab === "all" || tab === "extra"   || (isFlaggedTab && extraItems.length > 0))   parts.push(renderSection("extra",   extraItems,   selected, ver));
+  if (tab === "all" || tab === "done"    || (isFlaggedTab && doneItems.length > 0))    parts.push(renderSection("done",    doneItems,    st));
+  if (tab === "all" || tab === "missing" || (isFlaggedTab && missingItems.length > 0)) parts.push(renderSection("missing", missingItems, st));
+  if (tab === "all" || tab === "extra"   || (isFlaggedTab && extraItems.length > 0))   parts.push(renderSection("extra",   extraItems,   st));
 
   return parts.length > 0 ? parts.join("") : `<div class="rd-empty-section" style="padding:32px 20px;text-align:center">No items in this view.</div>`;
 }
@@ -407,6 +512,9 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     applyStatus: "",
     repos,
     projectKey,
+    overrides: {},
+    noteMenuKey: null,
+    notesGroupBy: null,
   };
 
   const counts = computeCounts(result, releaseName);
@@ -445,6 +553,15 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
 
       <!-- Notes panel (hidden by default) -->
       <div class="rd-body rd-notes-panel" data-rd-notes-panel hidden>
+        <div class="rd-notes-hd">
+          <span class="rd-notes-count" data-rd-notes-count></span>
+          <div class="rd-spacer"></div>
+          <span class="rd-notes-group-label">Group by</span>
+          <div class="rd-seg">
+            <button class="rd-seg-btn" data-rd-group="type">Type</button>
+            <button class="rd-seg-btn" data-rd-group="epic">Epic</button>
+          </div>
+        </div>
         <textarea class="rd-notes-textarea" data-rd-notes-text readonly spellcheck="false"></textarea>
         <button class="rd-notes-copy" data-rd-notes-copy>Copy</button>
       </div>
@@ -479,9 +596,26 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     const bodyEl   = overlay.querySelector<HTMLElement>("[data-rd-body]");
     const footerEl = overlay.querySelector<HTMLElement>("[data-rd-footer]");
     if (tabsEl)   tabsEl.innerHTML   = renderTabs(st.tab, freshCounts);
-    if (bodyEl)   bodyEl.innerHTML   = renderBody(st);
+    if (bodyEl) {
+      // Re-rendering the list must not scroll the row the user just acted on away.
+      const scroll = bodyEl.scrollTop;
+      bodyEl.innerHTML = renderBody(st);
+      bodyEl.scrollTop = scroll;
+    }
     if (footerEl) footerEl.innerHTML = renderFooter(st, freshCounts);
     footerEl?.classList.toggle("rd-footer--active", st.selected.size > 0);
+    flipNoteMenuIfClipped();
+  }
+
+  /** Opens the note menu upwards when the row sits near the bottom of the list. */
+  function flipNoteMenuIfClipped() {
+    const menu   = overlay.querySelector<HTMLElement>("[data-rd-note-menu]");
+    const bodyEl = overlay.querySelector<HTMLElement>("[data-rd-body]");
+    if (!menu || !bodyEl) return;
+    menu.classList.toggle(
+      "rd-note-menu--up",
+      menu.getBoundingClientRect().bottom > bodyEl.getBoundingClientRect().bottom,
+    );
   }
 
   // ── Close ─────────────────────────────────────────────────────────────────
@@ -531,6 +665,33 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     if (target.closest("[data-rd-notes-toggle]")) {
       toggleNotes(!st.notesOpen); return;
     }
+
+    // Notes grouping (type / epic)
+    const groupBtn = target.closest<HTMLElement>("[data-rd-group]");
+    if (groupBtn?.dataset.rdGroup) {
+      st.notesGroupBy = groupBtn.dataset.rdGroup as "type" | "epic";
+      refreshNotes(); return;
+    }
+
+    // Note override menu — pick an option
+    const noteOpt = target.closest<HTMLElement>("[data-rd-note-set]");
+    if (noteOpt?.dataset.rdNoteSet && noteOpt.dataset.rdNoteKey) {
+      void setOverride(noteOpt.dataset.rdNoteKey, noteOpt.dataset.rdNoteSet);
+      return;
+    }
+
+    // Note override menu — open / close
+    const noteBtn = target.closest<HTMLElement>("[data-rd-note-toggle]");
+    if (noteBtn?.dataset.rdNoteToggle) {
+      const key = noteBtn.dataset.rdNoteToggle;
+      st.noteMenuKey = st.noteMenuKey === key ? null : key;
+      rerender(); return;
+    }
+
+    // Anything else dismisses an open note menu. The branches below re-render
+    // on their own; `dismissed` covers the paths that don't.
+    const dismissed = st.noteMenuKey !== null;
+    st.noteMenuKey = null;
 
     // Checkbox toggle (item)
     const cbReal = target.closest<HTMLInputElement>("[data-rd-key]");
@@ -599,9 +760,9 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     if (prLink?.dataset.prLink) {
       e.preventDefault();
       invoke("open_external", { url: prLink.dataset.prLink }).catch(console.error);
-      return;
     }
 
+    if (dismissed) rerender();
   });
 
   async function handleMoveSelectedToDeveloped() {
@@ -666,11 +827,66 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     const notesEl = overlay.querySelector<HTMLElement>("[data-rd-notes-panel]");
     if (bodyEl)  bodyEl.hidden  = open;
     if (notesEl) notesEl.hidden = !open;
-    if (open) {
-      const ta = overlay.querySelector<HTMLTextAreaElement>("[data-rd-notes-text]");
-      if (ta && !ta.value) ta.value = buildReleaseNotes(st.result.done);
+    // Closing re-renders because the tab may have changed while notes were up.
+    if (open) refreshNotes();
+    else rerender();
+  }
+
+  /** Rebuilds the notes preview from the current overrides and grouping. */
+  function refreshNotes() {
+    const items = noteItems(st);
+    // Default to epic grouping when the release actually carries epic data.
+    const groupBy = st.notesGroupBy ?? (items.some(it => it.epicName) ? "epic" : "type");
+    st.notesGroupBy = groupBy;
+    const ta = overlay.querySelector<HTMLTextAreaElement>("[data-rd-notes-text]");
+    if (ta) ta.value = buildReleaseNotes(items, groupBy);
+
+    const forced = items.filter(it => st.overrides[it.key] === "include").length;
+    const excluded = Object.values(st.overrides).filter(m => m === "exclude").length;
+    const extras = [
+      forced > 0 ? `${forced} forced in` : "",
+      excluded > 0 ? `${excluded} excluded` : "",
+    ].filter(Boolean).join(" · ");
+    const countEl = overlay.querySelector<HTMLElement>("[data-rd-notes-count]");
+    if (countEl) {
+      countEl.textContent = `${items.length} ${items.length === 1 ? "story" : "stories"}${extras ? ` — ${extras}` : ""}`;
+    }
+
+    overlay.querySelectorAll<HTMLElement>("[data-rd-group]").forEach(btn => {
+      btn.classList.toggle("rd-seg-btn--active", btn.dataset.rdGroup === groupBy);
+    });
+  }
+
+  // ── Note overrides ────────────────────────────────────────────────────────
+
+  async function loadOverrides() {
+    try {
+      st.overrides = await invoke<Record<string, NoteOverride>>("fetch_release_note_overrides", {
+        releaseName: st.releaseName,
+      });
+      rerender();
+      if (st.notesOpen) refreshNotes();
+    } catch (err) {
+      console.error("Release note overrides load error:", err);
     }
   }
+
+  async function setOverride(key: string, mode: string) {
+    st.noteMenuKey = null;
+    try {
+      st.overrides = await invoke<Record<string, NoteOverride>>("set_release_note_override", {
+        releaseName: st.releaseName,
+        issueKey: key,
+        mode: mode === "auto" ? null : mode,
+      });
+    } catch (err) {
+      console.error("Release note override error:", err);
+    }
+    rerender();
+    if (st.notesOpen) refreshNotes();
+  }
+
+  void loadOverrides();
 
   // Notes copy button
   overlay.querySelector("[data-rd-notes-copy]")?.addEventListener("click", async () => {
@@ -767,6 +983,8 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
       });
       st.result = fresh;
       st.selected.clear();
+      // The version may have changed — overrides are stored per release.
+      await loadOverrides();
       const syncedEl = overlay.querySelector<HTMLElement>(".rd-synced strong");
       if (syncedEl) syncedEl.textContent = fresh.syncedAt;
       const progressEl = overlay.querySelector<HTMLElement>("[data-rd-progress]");

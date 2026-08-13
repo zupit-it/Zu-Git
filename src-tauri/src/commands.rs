@@ -539,6 +539,8 @@ pub async fn fetch_release_diff(
                 && !is_terminal(&issue.status)
                 && issue.status.to_lowercase() != "developed",
             flag,
+            epic_key: issue.epic.as_ref().and_then(|e| e.key.clone()),
+            epic_name: issue.epic.as_ref().map(|e| e.name.clone()),
         }
     };
 
@@ -623,6 +625,8 @@ pub async fn fetch_release_diff(
                 avatar_url,
                 is_preview: false,
                 flag: Some("no-jira".to_string()),
+                epic_key: None,
+                epic_name: None,
             });
         }
     }
@@ -999,6 +1003,34 @@ pub async fn toggl_submit_entries(
     }
 
     Ok(results)
+}
+
+// ── Release notes overrides ───────────────────────────────────────────────────
+
+/// Manual include/exclude decisions for one release's notes, keyed by Jira key.
+#[tauri::command]
+pub async fn fetch_release_note_overrides(
+    app: tauri::AppHandle,
+    release_name: String,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    Ok(storage::load_release_note_overrides(&app, &release_name))
+}
+
+/// `mode` is "include", "exclude", or `None` to go back to the automatic rule.
+#[tauri::command]
+pub async fn set_release_note_override(
+    app: tauri::AppHandle,
+    release_name: String,
+    issue_key: String,
+    mode: Option<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let mode = match mode.as_deref() {
+        Some("include") => Some("include".to_string()),
+        Some("exclude") => Some("exclude".to_string()),
+        Some(other) => return Err(format!("Unknown release note override '{other}'")),
+        None => None,
+    };
+    storage::set_release_note_override(&app, &release_name, &issue_key, mode)
 }
 
 #[tauri::command]

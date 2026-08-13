@@ -683,6 +683,9 @@ pub struct ReleaseDiffItem {
     pub is_preview: bool,
     /// Typed sync divergence flag: "no-pr" | "no-jira" | None
     pub flag: Option<String>,
+    /// Parent epic ("Principale" in Jira), used to group the release notes.
+    pub epic_key: Option<String>,
+    pub epic_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -7,11 +7,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Release notes: manual include / exclude** — every story in the release diff now carries a control
+  in its last column showing whether it will end up in the notes. Clicking it offers **Include
+  anyway** / **Exclude anyway** / **Auto (default)**, so a Missing story that shipped anyway can be
+  announced and a Done one can be kept quiet. The automatic rule (only *Done* goes in) still applies
+  to everything left on *Auto*. Decisions are stored per release in `release-notes.json` and survive
+  a refresh, a version switch and a restart.
+- **Release notes grouped by epic** — the notes panel groups by **Type** or by **Epic**. Both keep
+  the POWER / BUG headings on top; Epic adds a per-epic section under each of them, read from Jira's
+  *Principale* field — resolved by name at runtime, falling back to the built-in `parent` field —
+  with stories without an epic grouped last. Grouping defaults to Epic when the release carries epic
+  data. Each row also shows its epic next to the branch.
 ---
 
 ## [0.11.2] - 2026-08-12
 
-### Changed
 - **"Orphan branches" is now "Stale branches"** — in Git an *orphan branch* is one created with
   `git checkout --orphan`, with no shared history: a different thing from a branch nobody has touched
   in months. *Stale* is both accurate and the term GitHub and Bitbucket use for exactly these

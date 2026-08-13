@@ -98,6 +98,8 @@ pub fn run() {
             commands::move_jira_fix_versions,
             commands::drop_jira_fix_versions,
             commands::move_to_developed,
+            commands::fetch_release_note_overrides,
+            commands::set_release_note_override,
             commands::create_pull_request,
             commands::fetch_draft_checklist,
             commands::update_jira_checklist,
