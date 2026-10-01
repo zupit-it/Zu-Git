@@ -811,7 +811,8 @@ using the suggestion (description/project) when there is one.\n\
 3. Split the remaining freeTime between the stories in proportion to the evidence: activity spans \
 (AI sessions mean the story was being worked on right then; commits and '→ Developed'/'→ Merge Request' \
 mean work happened before them; '→ In Progress' means work after; '(in blocco)' moves were made \
-together with others and say little). Use blocks of at least one hour, as few as possible; never \
+together with others and say little; '(senza tuoi commit o sessioni)' moves past merge request are \
+likely a review/merge of someone else's work, not time spent on the story). Use blocks of at least one hour, as few as possible; never \
 split every gap in half. Stories with no evidence get time only if nothing else explains the gap; \
 if gapFilling is enabled, share that unexplained time by gapFilling weight instead. Ignore \
 experimental work outside the stories listed.\n\

@@ -20,6 +20,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ![Editing the Toggl planner](public/assets/changelog/toggl-editing.png)
 
 ### Fixed
+- **Toggl planner: merging someone else's MR is not your work** — moving a story to Developed (or
+  any status past merge request) counted as the end of an hour of work on it, even when you had only
+  reviewed and merged a colleague's MR. Such a move now counts in full only if you also have commits
+  or AI sessions on that story the same day; otherwise it barely weighs ("senza tuoi commit o
+  sessioni"). Moves to Merge Request, your own hand-off, are unchanged.
 - **PR list: stories stuck in their old release** — Jira data was cached for the whole session and
   only re-read for keys never seen before, so a story moved to another fix version on Jira kept being
   grouped under the old one until the cache happened to be cleared (settings saved, release diff

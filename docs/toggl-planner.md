@@ -25,6 +25,8 @@ Keys come from the commit subject or the branch name (`PENT-5755/rass`, case-ins
 
 Jira moves made in the same minute share one unit of weight ("→ Developed (in blocco)"): dragging five stories across the board is tidying, not five pieces of work.
 
+A move past merge request (Developed, Done…) is as often the reviewer merging someone else's MR as the end of one's own work. When local signals are on and the story has no commit or AI session of the user that day, the move keeps a tenth of its weight ("→ Developed (senza tuoi commit o sessioni)"): the story still joins the candidates, but the move no longer claims the hour before it. Moves into merge request are the developer's own hand-off and count in full.
+
 ## Allocation (`planStories` in `toggl-plan.ts`)
 
 1. Free time is cut into slot-sized cells (meetings and booked entries removed).

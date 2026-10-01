@@ -159,6 +159,17 @@ fn evidence_window(day: chrono::NaiveDate, range_end: &str) -> (DateTime<Local>,
     (from, to)
 }
 
+/// What a move past merge request is worth when no commit or AI session of the
+/// user backs it: next to nothing. Moving a story to Developed is as often the
+/// reviewer merging someone else's MR as the end of one's own work.
+const UNBACKED_HANDOVER: f64 = 0.1;
+
+/// A move that closes work *and* is not the developer's own hand-off to review:
+/// Developed, Done, Verified… — anything but "in progress" and merge request.
+fn is_handover(to_status: &str, kind: &str, merge_names: &HashSet<String>) -> bool {
+    kind == "end" && !merge_names.contains(&to_status.trim().to_lowercase())
+}
+
 /// Moving a story into "in progress" starts work on it; every other status it
 /// is moved into (Developed, Merge Request, Done…) marks work that just ended.
 ///
@@ -362,25 +373,46 @@ pub async fn build_context(req: DayRequest<'_>) -> Result<TogglDayContext, Strin
         .filter(|issue| issue.stage == "in-progress")
         .map(|issue| issue.status.trim().to_lowercase())
         .collect();
+    let merge_names: HashSet<String> = issues
+        .iter()
+        .filter(|issue| issue.stage == "merge-request")
+        .map(|issue| issue.status.trim().to_lowercase())
+        .chain([settings.jira_merge_transition.trim().to_lowercase()])
+        .collect();
+    // Stories with commits or AI sessions of the user today. Only meaningful
+    // when local signals are read at all; otherwise nothing can be checked.
+    let backed: Option<HashSet<String>> = settings
+        .toggl_activity_signals
+        .then(|| activity.iter().map(|event| event.key.clone()).collect());
 
     // Stories the user moved during the day join the candidates, whatever
     // status they ended up in — and each move is a piece of evidence.
     match transitions {
         Some(Ok((touched, moves))) => {
             let mut last_move: HashMap<&str, &str> = HashMap::new();
-            for (transition, weight) in moves.iter().zip(bulk_weights(&moves)) {
+            for (transition, bulk) in moves.iter().zip(bulk_weights(&moves)) {
                 last_move.insert(&transition.key, &transition.at);
+                let kind = transition_kind(&transition.to_status, &in_progress_names);
+                let unbacked = is_handover(&transition.to_status, kind, &merge_names)
+                    && backed.as_ref().is_some_and(|keys| !keys.contains(&transition.key));
+                let mut notes: Vec<&str> = vec![];
+                if bulk < 1.0 {
+                    notes.push("in blocco");
+                }
+                if unbacked {
+                    notes.push("senza tuoi commit o sessioni");
+                }
                 activity.push(ActivityEvent {
                     key: transition.key.clone(),
                     at: transition.at.clone(),
                     source: "jira".to_string(),
-                    kind: transition_kind(&transition.to_status, &in_progress_names).to_string(),
-                    detail: if weight < 1.0 {
-                        format!("→ {} (in blocco)", transition.to_status)
-                    } else {
+                    kind: kind.to_string(),
+                    detail: if notes.is_empty() {
                         format!("→ {}", transition.to_status)
+                    } else {
+                        format!("→ {} ({})", transition.to_status, notes.join(", "))
                     },
-                    weight,
+                    weight: if unbacked { bulk * UNBACKED_HANDOVER } else { bulk },
                 });
             }
             for issue in touched {
@@ -653,6 +685,15 @@ mod tests {
         assert_eq!(transition_kind("In corso", &names), "start");
         assert_eq!(transition_kind("Developed", &names), "end");
         assert_eq!(transition_kind("Merge Request", &names), "end");
+    }
+
+    #[test]
+    fn only_moves_past_merge_request_are_handovers() {
+        let merge: HashSet<String> = ["merge request".to_string()].into();
+        assert!(is_handover("Developed", "end", &merge));
+        assert!(is_handover("Done", "end", &merge));
+        assert!(!is_handover(" Merge Request ", "end", &merge));
+        assert!(!is_handover("In corso", "start", &merge));
     }
 
     #[test]
