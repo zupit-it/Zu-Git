@@ -19,6 +19,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   ![Editing the Toggl planner](public/assets/changelog/toggl-editing.png)
 
+### Changed
+- **Settings: compact, collapsible sections** — the settings page is grouped into Connections,
+  Dashboard features, Time tracking and General, and every section folds down to one line showing its
+  state (Configured / Needs setup, On / Off). Open only the one you need, or use Expand all /
+  Collapse all; ZuGit remembers which ones you left open. A dot marks sections with unsaved edits,
+  and a field that fails validation opens its section on save.
+
 ### Fixed
 - **Toggl planner: merging someone else's MR is not your work** — moving a story to Developed (or
   any status past merge request) counted as the end of an hour of work on it, even when you had only

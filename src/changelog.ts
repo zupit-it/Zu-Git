@@ -44,6 +44,10 @@ const VERSIONS: VersionBlock[] = [
         title: "Refresh picks up release changes from Jira",
         body: "Moved a story to another fix version on Jira? The next <strong>refresh</strong> now groups its PR under the <strong>new release</strong>. Before, ZuGit could keep showing it under the old one, because tickets it had already seen were served from memory instead of being read again. Every refresh now re-reads all linked tickets; if Jira does not answer, the last known data is kept.",
       },
+      {
+        title: "Settings — compact, open only what you need",
+        body: "The settings page is now grouped into <strong>Connections</strong>, <strong>Dashboard features</strong>, <strong>Time tracking</strong> and <strong>General</strong>, and every section folds down to a single line with its state at a glance — <em>Configured</em> / <em>Needs setup</em>, <em>On</em> / <em>Off</em>. Open just the one you need, or use <strong>Expand all</strong> / <strong>Collapse all</strong>; ZuGit remembers which ones you left open. A dot next to a title marks unsaved edits, even when the section is closed.",
+      },
     ],
   },
   {

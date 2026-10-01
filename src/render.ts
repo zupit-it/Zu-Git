@@ -17,6 +17,7 @@ import {
   getAvailableRepos,
 } from "./filters";
 import { computeMyScore } from "./reaction-score";
+import { clearSettingsSectionsDirty, openUnconfiguredSections, syncSettingsSections } from "./settings-sections";
 import type { MyScore, MyScoreItem } from "./shared/pr-model";
 
 // ── Status bar ────────────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ export function syncSettingsSaveButton() {
 export function setSettingsDirtyState(isDirty: boolean) {
   state.settingsDirty = isDirty;
   syncSettingsSaveButton();
+  if (!isDirty) clearSettingsSectionsDirty();
 
   if (state.settingsSaving) return;
 
@@ -213,6 +215,8 @@ export function renderSettings(values: SettingsFormValues) {
   // Turning the tab off while looking at it would leave the app on a hidden view.
   if (!state.staleBranchesEnabled && state.currentView === "stale") setView("list");
   void refreshGoogleStatus();
+  syncSettingsSections();
+  openUnconfiguredSections();
   setSettingsDirtyState(false);
 }
 

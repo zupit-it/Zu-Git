@@ -231,482 +231,512 @@
 
             <!-- Page header -->
             <div class="settings-page-header">
-              <div class="settings-page-kicker">Settings <span class="settings-version" data-app-version></span></div>
-              <h1 class="settings-page-title">Configure GitHub, Jira &amp; author rules</h1>
-              <p class="settings-page-subtitle">
-                Secrets stay local to the machine. Changes are saved only when you click <strong>Save settings &amp; sync</strong>.
-              </p>
-            </div>
-
-            <!-- Notice banner -->
-            <div class="settings-notice" data-settings-notice data-tone="neutral">
-              Changes are saved only when you click <strong>Save settings and sync</strong>.
-            </div>
-
-            <!-- Token storage card (outside form, info only) -->
-            <div class="settings-card" data-secret-store-card>
-              <div class="settings-card-header">
-                <span class="settings-card-icon">
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5"/></svg>
-                </span>
-                <div>
-                  <div class="settings-card-label">Token storage</div>
-                  <div class="settings-card-title" data-secret-store-provider>Loading…</div>
-                </div>
-                <div class="settings-card-spacer"></div>
+              <div>
+                <div class="settings-page-kicker">Settings <span class="settings-version" data-app-version></span></div>
+                <h1 class="settings-page-title">Configure GitHub, Jira &amp; integrations</h1>
+              </div>
+              <div class="settings-card-spacer"></div>
+              <!-- Token storage (info only) -->
+              <div class="settings-secret-store" data-secret-store-card title="Where tokens are stored">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5"/></svg>
+                <span data-secret-store-provider>Loading…</span>
                 <span class="settings-card-badge" data-secret-store-badge>Checking</span>
               </div>
             </div>
 
-            <!-- Settings form — GitHub + Jira cards inside -->
+            <!-- Notice banner + section controls -->
+            <div class="settings-toolbar">
+              <div class="settings-notice" data-settings-notice data-tone="neutral">
+                Changes are saved only when you click <strong>Save settings and sync</strong>.
+              </div>
+              <div class="settings-toolbar-actions">
+                <button class="secondary-button" type="button" data-settings-expand="all">Expand all</button>
+                <button class="secondary-button" type="button" data-settings-expand="none">Collapse all</button>
+              </div>
+            </div>
+
+            <!-- Settings form — grouped, collapsible sections -->
             <form id="settings-form" class="settings-form" data-settings-form>
 
-              <!-- GitHub card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 0 0-2.5 15.6c.4.1.5-.2.5-.4v-1.4c-2 .4-2.5-.8-2.5-.8-.4-1-1-1.2-1-1.2-.8-.5 0-.5 0-.5.9.1 1.4.9 1.4.9.8 1.3 2 1 2.5.7.1-.6.3-1 .6-1.2-1.6-.2-3.3-.8-3.3-3.6 0-.8.3-1.4.7-2-.1-.2-.3-.9.1-1.9 0 0 .6-.2 2 .7a7 7 0 0 1 3.6 0c1.4-1 2-.7 2-.7.4 1 .2 1.7.1 1.9.5.6.7 1.2.7 2 0 2.8-1.7 3.4-3.3 3.6.3.2.5.7.5 1.4v2.1c0 .2.1.5.5.4A8 8 0 0 0 8 0z"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">GitHub</div>
-                    <div class="settings-card-title">API &amp; repositories</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field">
-                    <div class="field-header">
-                      <label class="field-label" for="githubToken">GitHub token</label>
-                      <button class="field-action-button" data-github-token-link type="button">
-                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 2v8M2 6h8"/></svg>
-                        Create token
-                      </button>
+              <div class="settings-group">
+                <h2 class="settings-group-title">Connections</h2>
+                <!-- GitHub card -->
+                <details class="settings-card" data-settings-section="github">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 0 0-2.5 15.6c.4.1.5-.2.5-.4v-1.4c-2 .4-2.5-.8-2.5-.8-.4-1-1-1.2-1-1.2-.8-.5 0-.5 0-.5.9.1 1.4.9 1.4.9.8 1.3 2 1 2.5.7.1-.6.3-1 .6-1.2-1.6-.2-3.3-.8-3.3-3.6 0-.8.3-1.4.7-2-.1-.2-.3-.9.1-1.9 0 0 .6-.2 2 .7a7 7 0 0 1 3.6 0c1.4-1 2-.7 2-.7.4 1 .2 1.7.1 1.9.5.6.7 1.2.7 2 0 2.8-1.7 3.4-3.3 3.6.3.2.5.7.5 1.4v2.1c0 .2.1.5.5.4A8 8 0 0 0 8 0z"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">GitHub</div>
+                      <div class="settings-card-title">API &amp; repositories</div>
                     </div>
-                    <input id="githubToken" name="githubToken" type="password" placeholder="ghp_…" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="githubApiBaseUrl">API base URL</label>
-                    <input id="githubApiBaseUrl" name="githubApiBaseUrl" type="url" placeholder="https://api.github.com" />
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label" for="githubRepos">GitHub repos</label>
-                    <textarea id="githubRepos" name="githubRepos" rows="3" placeholder="owner/repo-one&#10;owner/repo-two"></textarea>
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="autoRefreshMinutes">Auto-refresh interval (minutes)</label>
-                    <input id="autoRefreshMinutes" name="autoRefreshMinutes" type="number" min="1" step="1" placeholder="5" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label">Notifications</label>
-                    <label class="filter-pill">
-                      <input id="notificationsEnabled" name="notificationsEnabled" type="checkbox" />
-                      <span>Enable native notifications</span>
-                    </label>
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="internalAuthorMarker">Internal author marker</label>
-                    <input id="internalAuthorMarker" name="internalAuthorMarker" type="text" placeholder="-zupit" />
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label" for="teamMemberGithubUsers">Team members GitHub usernames</label>
-                    <textarea id="teamMemberGithubUsers" name="teamMemberGithubUsers" rows="2" placeholder="team-member-one&#10;team-member-two"></textarea>
-                  </div>
-                </div>
-              </div>
-
-              <!-- My Score card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="5.5"/><path d="M7 4v3.5l2 1.5"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">My Score</div>
-                    <div class="settings-card-title">Reaction score settings</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field">
-                    <label class="field-label">Display</label>
-                    <label class="filter-pill">
-                      <input id="reactionScoreEnabled" name="reactionScoreEnabled" type="checkbox" />
-                      <span>Show My Reaction Score in the review bar</span>
-                    </label>
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label">Score rules</label>
-                    <div class="score-rules-panel">
-                      <div class="score-rules-checks">
-                        <label class="filter-pill">
-                          <input id="scoreRuleReviewsEnabled" name="scoreRuleReviewsEnabled" type="checkbox" />
-                          <span>Review requested from me</span>
-                        </label>
-                        <label class="filter-pill">
-                          <input id="scoreRuleChangesRequestedEnabled" name="scoreRuleChangesRequestedEnabled" type="checkbox" />
-                          <span>Changes requested on my PRs</span>
-                        </label>
-                        <label class="filter-pill">
-                          <input id="scoreRuleCiEnabled" name="scoreRuleCiEnabled" type="checkbox" />
-                          <span>CI failed on my PRs</span>
-                        </label>
-                        <label class="filter-pill">
-                          <input id="scoreRuleBehindEnabled" name="scoreRuleBehindEnabled" type="checkbox" />
-                          <span>Branch behind / conflicting</span>
-                        </label>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field">
+                      <div class="field-header">
+                        <label class="field-label" for="githubToken">GitHub token</label>
+                        <button class="field-action-button" data-github-token-link type="button">
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 2v8M2 6h8"/></svg>
+                          Create token
+                        </button>
                       </div>
-                      <div class="score-rules-legend">
-                        <div class="score-rules-legend-row score-rules-legend-header">
-                          <span>Rule</span><span>Activates</span><span>Penalty</span>
+                      <input id="githubToken" name="githubToken" type="password" placeholder="ghp_…" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="githubApiBaseUrl">API base URL</label>
+                      <input id="githubApiBaseUrl" name="githubApiBaseUrl" type="url" placeholder="https://api.github.com" />
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label" for="githubRepos">GitHub repos</label>
+                      <textarea id="githubRepos" name="githubRepos" rows="3" placeholder="owner/repo-one&#10;owner/repo-two"></textarea>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="autoRefreshMinutes">Auto-refresh interval (minutes)</label>
+                      <input id="autoRefreshMinutes" name="autoRefreshMinutes" type="number" min="1" step="1" placeholder="5" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label">Notifications</label>
+                      <label class="filter-pill">
+                        <input id="notificationsEnabled" name="notificationsEnabled" type="checkbox" />
+                        <span>Enable native notifications</span>
+                      </label>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="internalAuthorMarker">Internal author marker</label>
+                      <input id="internalAuthorMarker" name="internalAuthorMarker" type="text" placeholder="-zupit" />
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label" for="teamMemberGithubUsers">Team members GitHub usernames</label>
+                      <textarea id="teamMemberGithubUsers" name="teamMemberGithubUsers" rows="2" placeholder="team-member-one&#10;team-member-two"></textarea>
+                    </div>
+                  </div>
+                </details>
+                <!-- Jira card -->
+                <details class="settings-card" data-settings-section="jira">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor"><path d="M6.5 1L1 6.5l5.5 5.5 1.5-1.5L4 6.5 8 2.5z" opacity=".6"/><path d="M6.5 5.1l2.6 2.6L6.5 10.3V12l5.5-5.5L6.5 1z"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Jira</div>
+                      <div class="settings-card-title">Ticket enrichment</div>
+                    </div>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field">
+                      <label class="field-label" for="jiraBaseUrl">Jira base URL</label>
+                      <input id="jiraBaseUrl" name="jiraBaseUrl" type="url" placeholder="https://your-company.atlassian.net" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="jiraEmail">Jira email</label>
+                      <input id="jiraEmail" name="jiraEmail" type="email" placeholder="name@company.com" />
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <div class="field-header">
+                        <label class="field-label" for="jiraToken">Jira token</label>
+                        <button class="field-action-button" data-jira-token-link type="button">
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 2v8M2 6h8"/></svg>
+                          Create token
+                        </button>
+                      </div>
+                      <input id="jiraToken" name="jiraToken" type="password" placeholder="Atlassian API token" />
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label" for="jiraRepoBoards">Repo → Jira board mapping</label>
+                      <textarea id="jiraRepoBoards" name="jiraRepoBoards" rows="3" placeholder="Pentana-IT-Innovations/SipadPower = PENT"></textarea>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="jiraMergeTransition">Transition name on PR open</label>
+                      <input id="jiraMergeTransition" name="jiraMergeTransition" type="text" placeholder="MERGE REQUEST" />
+                    </div>
+
+                  </div>
+                </details>
+              </div>
+
+              <div class="settings-group">
+                <h2 class="settings-group-title">Dashboard features</h2>
+                <!-- My Score card -->
+                <details class="settings-card" data-settings-section="score">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="5.5"/><path d="M7 4v3.5l2 1.5"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">My Score</div>
+                      <div class="settings-card-title">Reaction score settings</div>
+                    </div>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field">
+                      <label class="field-label">Display</label>
+                      <label class="filter-pill">
+                        <input id="reactionScoreEnabled" name="reactionScoreEnabled" type="checkbox" />
+                        <span>Show My Reaction Score in the review bar</span>
+                      </label>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Score rules</label>
+                      <div class="score-rules-panel">
+                        <div class="score-rules-checks">
+                          <label class="filter-pill">
+                            <input id="scoreRuleReviewsEnabled" name="scoreRuleReviewsEnabled" type="checkbox" />
+                            <span>Review requested from me</span>
+                          </label>
+                          <label class="filter-pill">
+                            <input id="scoreRuleChangesRequestedEnabled" name="scoreRuleChangesRequestedEnabled" type="checkbox" />
+                            <span>Changes requested on my PRs</span>
+                          </label>
+                          <label class="filter-pill">
+                            <input id="scoreRuleCiEnabled" name="scoreRuleCiEnabled" type="checkbox" />
+                            <span>CI failed on my PRs</span>
+                          </label>
+                          <label class="filter-pill">
+                            <input id="scoreRuleBehindEnabled" name="scoreRuleBehindEnabled" type="checkbox" />
+                            <span>Branch behind / conflicting</span>
+                          </label>
                         </div>
-                        <div class="score-rules-legend-row">
-                          <span>Review requested</span><span>after 1h</span><span>−10 · −25 after 4h</span>
+                        <div class="score-rules-legend">
+                          <div class="score-rules-legend-row score-rules-legend-header">
+                            <span>Rule</span><span>Activates</span><span>Penalty</span>
+                          </div>
+                          <div class="score-rules-legend-row">
+                            <span>Review requested</span><span>after 1h</span><span>−10 · −25 after 4h</span>
+                          </div>
+                          <div class="score-rules-legend-row">
+                            <span>Changes requested</span><span>after 2h</span><span>−20</span>
+                          </div>
+                          <div class="score-rules-legend-row">
+                            <span>CI failed</span><span>after 1h</span><span>−15</span>
+                          </div>
+                          <div class="score-rules-legend-row">
+                            <span>Branch behind</span><span>after 2h</span><span>−10</span>
+                          </div>
+                          <div class="score-rules-legend-note">× 1.5 for High / Highest priority</div>
                         </div>
-                        <div class="score-rules-legend-row">
-                          <span>Changes requested</span><span>after 2h</span><span>−20</span>
-                        </div>
-                        <div class="score-rules-legend-row">
-                          <span>CI failed</span><span>after 1h</span><span>−15</span>
-                        </div>
-                        <div class="score-rules-legend-row">
-                          <span>Branch behind</span><span>after 2h</span><span>−10</span>
-                        </div>
-                        <div class="score-rules-legend-note">× 1.5 for High / Highest priority</div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
-
-              <!-- Merge queue card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 3h8M2 6h8M2 9h5"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">Merge queue</div>
-                    <div class="settings-card-title">Priority auto-rebase</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label">Queue automation</label>
-                    <label class="filter-pill">
-                      <input id="mergeQueueEnabled" name="mergeQueueEnabled" type="checkbox" />
-                      <span>Auto-rebase the top-priority auto-merge-enabled PR targeting the nearest release, per repo and base branch (not recommended)</span>
-                    </label>
-                    <p class="field-hint" data-merge-queue-warning hidden>
-                      Force-pusha il branch di una PR (riscrive gli SHA dei commit) quando è la PR con priorità Jira
-                      più alta, per quel repo + base branch, che ha già l'auto-merge attivo su GitHub, punta alla
-                      release più vicina, ed è solo indietro rispetto al base branch — non in conflitto. Nessun
-                      ordinamento manuale: l'ordine segue la priorità già assegnata su Jira, quindi è naturalmente
-                      lo stesso per chiunque apra la dashboard.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Stale branches card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="3" cy="3" r="1.4"/><circle cx="3" cy="9" r="1.4"/><circle cx="9" cy="3" r="1.4"/><path d="M3 4.4v3.2M9 4.4v1.2"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">Stale branches</div>
-                    <div class="settings-card-title">Abandoned branch cleanup</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label">Stale branches tab</label>
-                    <label class="filter-pill">
-                      <input id="staleBranchesEnabled" name="staleBranchesEnabled" type="checkbox" />
-                      <span>Show the tab listing remote branches with no open PR that nobody has pushed to in a while</span>
-                    </label>
-                    <p class="field-hint" data-stale-hint hidden>
-                      La scansione legge tutti i branch dei repository configurati ed esclude il branch di default,
-                      i branch protetti e quelli coinvolti in una PR aperta (come head o come base). È sola lettura:
-                      ZuGit non cancella nulla, ogni riga apre il branch su GitHub. Gira su richiesta — aprendo il
-                      tab o premendo <strong>Rescan</strong> — non a ogni refresh automatico.
-                    </p>
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="staleBranchDays">Stale after (days)</label>
-                    <input id="staleBranchDays" name="staleBranchDays" type="number" min="7" max="365" step="1" placeholder="15" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="staleBranchIgnoredPrefixes">Ignored branch prefixes</label>
-                    <textarea id="staleBranchIgnoredPrefixes" name="staleBranchIgnoredPrefixes" rows="3" placeholder="release"></textarea>
-                    <p class="field-hint">
-                      Uno per riga. Confronto sull'inizio del nome, senza distinzione di maiuscole:
-                      <code>release</code> esclude sia <code>release/2026.06</code> sia <code>Release-hotfix</code>.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Jira card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor"><path d="M6.5 1L1 6.5l5.5 5.5 1.5-1.5L4 6.5 8 2.5z" opacity=".6"/><path d="M6.5 5.1l2.6 2.6L6.5 10.3V12l5.5-5.5L6.5 1z"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">Jira</div>
-                    <div class="settings-card-title">Ticket enrichment</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field">
-                    <label class="field-label" for="jiraBaseUrl">Jira base URL</label>
-                    <input id="jiraBaseUrl" name="jiraBaseUrl" type="url" placeholder="https://your-company.atlassian.net" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="jiraEmail">Jira email</label>
-                    <input id="jiraEmail" name="jiraEmail" type="email" placeholder="name@company.com" />
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <div class="field-header">
-                      <label class="field-label" for="jiraToken">Jira token</label>
-                      <button class="field-action-button" data-jira-token-link type="button">
-                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 2v8M2 6h8"/></svg>
-                        Create token
-                      </button>
+                </details>
+                <!-- Merge queue card -->
+                <details class="settings-card" data-settings-section="merge-queue">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 3h8M2 6h8M2 9h5"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Merge queue</div>
+                      <div class="settings-card-title">Priority auto-rebase</div>
                     </div>
-                    <input id="jiraToken" name="jiraToken" type="password" placeholder="Atlassian API token" />
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Queue automation</label>
+                      <label class="filter-pill">
+                        <input id="mergeQueueEnabled" name="mergeQueueEnabled" type="checkbox" />
+                        <span>Auto-rebase the top-priority auto-merge-enabled PR targeting the nearest release, per repo and base branch (not recommended)</span>
+                      </label>
+                      <p class="field-hint" data-merge-queue-warning hidden>
+                        Force-pusha il branch di una PR (riscrive gli SHA dei commit) quando è la PR con priorità Jira
+                        più alta, per quel repo + base branch, che ha già l'auto-merge attivo su GitHub, punta alla
+                        release più vicina, ed è solo indietro rispetto al base branch — non in conflitto. Nessun
+                        ordinamento manuale: l'ordine segue la priorità già assegnata su Jira, quindi è naturalmente
+                        lo stesso per chiunque apra la dashboard.
+                      </p>
+                    </div>
                   </div>
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label" for="jiraRepoBoards">Repo → Jira board mapping</label>
-                    <textarea id="jiraRepoBoards" name="jiraRepoBoards" rows="3" placeholder="Pentana-IT-Innovations/SipadPower = PENT"></textarea>
+                </details>
+                <!-- Stale branches card -->
+                <details class="settings-card" data-settings-section="stale">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="3" cy="3" r="1.4"/><circle cx="3" cy="9" r="1.4"/><circle cx="9" cy="3" r="1.4"/><path d="M3 4.4v3.2M9 4.4v1.2"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Stale branches</div>
+                      <div class="settings-card-title">Abandoned branch cleanup</div>
+                    </div>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Stale branches tab</label>
+                      <label class="filter-pill">
+                        <input id="staleBranchesEnabled" name="staleBranchesEnabled" type="checkbox" />
+                        <span>Show the tab listing remote branches with no open PR that nobody has pushed to in a while</span>
+                      </label>
+                      <p class="field-hint" data-stale-hint hidden>
+                        La scansione legge tutti i branch dei repository configurati ed esclude il branch di default,
+                        i branch protetti e quelli coinvolti in una PR aperta (come head o come base). È sola lettura:
+                        ZuGit non cancella nulla, ogni riga apre il branch su GitHub. Gira su richiesta — aprendo il
+                        tab o premendo <strong>Rescan</strong> — non a ogni refresh automatico.
+                      </p>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="staleBranchDays">Stale after (days)</label>
+                      <input id="staleBranchDays" name="staleBranchDays" type="number" min="7" max="365" step="1" placeholder="15" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="staleBranchIgnoredPrefixes">Ignored branch prefixes</label>
+                      <textarea id="staleBranchIgnoredPrefixes" name="staleBranchIgnoredPrefixes" rows="3" placeholder="release"></textarea>
+                      <p class="field-hint">
+                        Uno per riga. Confronto sull'inizio del nome, senza distinzione di maiuscole:
+                        <code>release</code> esclude sia <code>release/2026.06</code> sia <code>Release-hotfix</code>.
+                      </p>
+                    </div>
                   </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="jiraMergeTransition">Transition name on PR open</label>
-                    <input id="jiraMergeTransition" name="jiraMergeTransition" type="text" placeholder="MERGE REQUEST" />
-                  </div>
-
-                </div>
+                </details>
               </div>
 
-              <!-- Toggl card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="8" r="5"/><path d="M7 5.5V8"/><path d="M5.5 1.5h3"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">Toggl</div>
-                    <div class="settings-card-title">Time entry autofill</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label">Timesheet autofill</label>
-                    <label class="filter-pill">
-                      <input id="togglEnabled" name="togglEnabled" type="checkbox" />
-                      <span>Fill the free slots of my working day from the Jira stories I have in progress</span>
-                    </label>
-                    <p class="field-hint" data-toggl-hint hidden>
-                      ZuGit legge le time entry già presenti nella fascia oraria e riempie solo i buchi, usando le
-                      story assegnate a te in <strong>In Progress</strong> o nello stato di merge request. Il progetto
-                      Toggl e i tag vengono dedotti dallo storico delle tue entry. Nulla viene scritto senza conferma.
-                    </p>
-                    <p class="field-hint" data-toggl-where hidden>
-                      Dopo il salvataggio compare il pulsante <strong>Toggl</strong> nella barra in alto, subito a
-                      sinistra di Refresh: apre il pannello con il piano della giornata da rivedere e confermare.
-                    </p>
-                    <p class="field-hint" data-toggl-save-first hidden>
-                      Salva le impostazioni per far comparire il pulsante <strong>Toggl</strong> nella barra in alto.
-                    </p>
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <div class="field-header">
-                      <label class="field-label" for="togglToken">Toggl API token</label>
-                      <button class="field-action-button" data-toggl-token-link type="button">
-                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 2H2v8h8V6M7 2h3v3M5.2 6.8l4.6-4.6"/></svg>
-                        Profile page
-                      </button>
+              <div class="settings-group">
+                <h2 class="settings-group-title">Time tracking</h2>
+                <!-- Toggl card -->
+                <details class="settings-card" data-settings-section="toggl">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="8" r="5"/><path d="M7 5.5V8"/><path d="M5.5 1.5h3"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Toggl</div>
+                      <div class="settings-card-title">Time entry autofill</div>
                     </div>
-                    <input id="togglToken" name="togglToken" type="password" placeholder="Toggl Track API token" />
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Timesheet autofill</label>
+                      <label class="filter-pill">
+                        <input id="togglEnabled" name="togglEnabled" type="checkbox" />
+                        <span>Fill the free slots of my working day from the Jira stories I have in progress</span>
+                      </label>
+                      <p class="field-hint" data-toggl-hint hidden>
+                        ZuGit legge le time entry già presenti nella fascia oraria e riempie solo i buchi, usando le
+                        story assegnate a te in <strong>In Progress</strong> o nello stato di merge request. Il progetto
+                        Toggl e i tag vengono dedotti dallo storico delle tue entry. Nulla viene scritto senza conferma.
+                      </p>
+                      <p class="field-hint" data-toggl-where hidden>
+                        Dopo il salvataggio compare il pulsante <strong>Toggl</strong> nella barra in alto, subito a
+                        sinistra di Refresh: apre il pannello con il piano della giornata da rivedere e confermare.
+                      </p>
+                      <p class="field-hint" data-toggl-save-first hidden>
+                        Salva le impostazioni per far comparire il pulsante <strong>Toggl</strong> nella barra in alto.
+                      </p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <div class="field-header">
+                        <label class="field-label" for="togglToken">Toggl API token</label>
+                        <button class="field-action-button" data-toggl-token-link type="button">
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 2H2v8h8V6M7 2h3v3M5.2 6.8l4.6-4.6"/></svg>
+                          Profile page
+                        </button>
+                      </div>
+                      <input id="togglToken" name="togglToken" type="password" placeholder="Toggl Track API token" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="togglWorkspaceId">Workspace id</label>
+                      <input id="togglWorkspaceId" name="togglWorkspaceId" type="text" inputmode="numeric" placeholder="Default workspace" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label">Connection</label>
+                      <button class="secondary-button" data-toggl-test type="button">Test connection</button>
+                      <p class="field-hint">Salva le impostazioni prima di testare: il token viene letto dal portachiavi.</p>
+                      <p class="field-hint" data-toggl-test-result hidden></p>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="togglDayStart">Day starts at</label>
+                      <input id="togglDayStart" name="togglDayStart" type="time" step="300" placeholder="08:00" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="togglDayEnd">Day ends at</label>
+                      <input id="togglDayEnd" name="togglDayEnd" type="time" step="300" placeholder="14:00" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="togglSlotMinutes">Rounding (minutes)</label>
+                      <input id="togglSlotMinutes" name="togglSlotMinutes" type="number" min="5" max="120" step="5" placeholder="15" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="togglHistoryDays">History to learn from (days)</label>
+                      <input id="togglHistoryDays" name="togglHistoryDays" type="number" min="7" max="90" step="1" placeholder="60" />
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Activity</label>
+                      <label class="filter-pill">
+                        <input id="togglActivitySignals" name="togglActivitySignals" type="checkbox" />
+                        <span>Usa commit git e sessioni AI locali per capire su quale story hai lavorato</span>
+                      </label>
+                      <p class="field-hint">
+                        Legge in locale i tuoi commit (tutti i branch, anche non pushati) e le sessioni di Claude Code e Codex:
+                        solo orari e nome del branch, da cui ricava la chiave Jira (<code>PENT-123/…</code>). Si aggiunge alle
+                        story che hai spostato tu su Jira durante la giornata (Developed, Merge Request…). Nulla lascia il Mac
+                        tranne le chiavi Jira, cercate su Jira.
+                      </p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Gap filling</label>
+                      <label class="filter-pill">
+                        <input id="togglFillGaps" name="togglFillGaps" type="checkbox" />
+                        <span>Riempi i buchi in proporzione al peso delle story dello sprint</span>
+                      </label>
+                      <p class="field-hint">
+                        Il tempo che nessuna attività spiega va alle story del tuo sprint in proporzione alle ore che il
+                        loro peso lascia ancora libere: story point × il tuo ritmo (minuti per punto, calcolato dallo storico
+                        Toggl) meno quanto ci hai già prenotato. Bug e sottotask senza punti valgono 1 punto e non restano
+                        mai a zero. A blocchi di almeno un'ora, su poche story; le righe sono marcate "Riempimento".
+                      </p>
+                    </div>
                   </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="togglWorkspaceId">Workspace id</label>
-                    <input id="togglWorkspaceId" name="togglWorkspaceId" type="text" inputmode="numeric" placeholder="Default workspace" />
+                </details>
+                <!-- Google Calendar card -->
+                <details class="settings-card" data-settings-section="calendar">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="11" height="10" rx="1.5"/><path d="M1.5 5.5h11M4.5 1.5v2M9.5 1.5v2"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Google Calendar</div>
+                      <div class="settings-card-title">Meeting import</div>
+                    </div>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Calendar</label>
+                      <label class="filter-pill">
+                        <input id="googleCalendarEnabled" name="googleCalendarEnabled" type="checkbox" />
+                        <span>Proponi anche gli eventi del calendario nella fascia oraria</span>
+                      </label>
+                      <p class="field-hint">
+                        Sola lettura (scope <code>calendar.readonly</code>). Gli eventi diventano righe del piano, con
+                        progetto e tag presi dalle tue entry ricorrenti; le story riempiono solo quello che resta.
+                        Eventi rifiutati, tutto-il-giorno e segnati come "libero" vengono ignorati.
+                      </p>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="googleClientId">OAuth client id</label>
+                      <input id="googleClientId" name="googleClientId" type="text" placeholder="…apps.googleusercontent.com" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="googleClientSecret">OAuth client secret</label>
+                      <input id="googleClientSecret" name="googleClientSecret" type="password" placeholder="GOCSPX-…" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="googleCalendarId">Calendar id</label>
+                      <input id="googleCalendarId" name="googleCalendarId" type="text" placeholder="primary" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label">Autorizzazione</label>
+                      <div class="field-row">
+                        <button class="secondary-button" data-google-connect type="button">Collega account</button>
+                        <button class="secondary-button" data-google-disconnect type="button" hidden>Scollega</button>
+                      </div>
+                      <p class="field-hint" data-google-status></p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Redirect URI usato da ZuGit</label>
+                      <input class="field-readonly" data-google-redirect type="text" readonly value="http://127.0.0.1:43117" />
+                      <p class="field-hint">
+                        Con un client di tipo <strong>Desktop app</strong> non devi registrarlo: Google accetta da sé i
+                        redirect su <code>127.0.0.1</code>, e nella console quel campo non esiste nemmeno. Serve solo se
+                        il client è di tipo <strong>Web application</strong>: in quel caso aggiungi esattamente questo URI
+                        fra gli URI di reindirizzamento autorizzati.
+                      </p>
+                    </div>
                   </div>
-                  <div class="settings-field">
-                    <label class="field-label">Connection</label>
-                    <button class="secondary-button" data-toggl-test type="button">Test connection</button>
-                    <p class="field-hint">Salva le impostazioni prima di testare: il token viene letto dal portachiavi.</p>
-                    <p class="field-hint" data-toggl-test-result hidden></p>
+                </details>
+                <!-- AI assistants (MCP) card -->
+                <details class="settings-card" data-settings-section="mcp">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1.5v2M7 10.5v2M1.5 7h2M10.5 7h2M3.2 3.2l1.4 1.4M9.4 9.4l1.4 1.4M3.2 10.8l1.4-1.4M9.4 4.6l1.4-1.4"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Assistenti AI</div>
+                      <div class="settings-card-title">Connettore MCP</div>
+                    </div>
+                    <span class="settings-card-spacer"></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field settings-field-wide">
+                      <p class="field-hint">
+                        Collega ZuGit a Claude Code, Claude Desktop o Codex: l'assistente legge la giornata Toggl (call, story,
+                        commit, sessioni) e ti propone come compilarla. I token restano nel portachiavi di ZuGit e non passano
+                        mai in conversazione. Nulla viene scritto su Toggl dall'AI: la proposta si apre qui, la confermi tu.
+                      </p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <div class="field-header">
+                        <label class="field-label">Claude Code</label>
+                        <button class="field-action-button" data-mcp-copy="claude" type="button">Copia</button>
+                      </div>
+                      <code class="mcp-command" data-mcp-command="claude">…</code>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <div class="field-header">
+                        <label class="field-label">Codex</label>
+                        <button class="field-action-button" data-mcp-copy="codex" type="button">Copia</button>
+                      </div>
+                      <code class="mcp-command" data-mcp-command="codex">…</code>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <div class="field-header">
+                        <label class="field-label">Claude Desktop · <code>claude_desktop_config.json</code></label>
+                        <button class="field-action-button" data-mcp-copy="desktop" type="button">Copia</button>
+                      </div>
+                      <code class="mcp-command" data-mcp-command="desktop">…</code>
+                      <p class="field-hint">
+                        Poi chiedi per esempio “compila il mio Toggl di oggi”, oppure usa il prompt <code>fill_toggl_day</code>.
+                        Usa l'app installata (non una build di sviluppo): il comando punta a questo eseguibile.
+                      </p>
+                    </div>
                   </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="togglDayStart">Day starts at</label>
-                    <input id="togglDayStart" name="togglDayStart" type="time" step="300" placeholder="08:00" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="togglDayEnd">Day ends at</label>
-                    <input id="togglDayEnd" name="togglDayEnd" type="time" step="300" placeholder="14:00" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="togglSlotMinutes">Rounding (minutes)</label>
-                    <input id="togglSlotMinutes" name="togglSlotMinutes" type="number" min="5" max="120" step="5" placeholder="15" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="togglHistoryDays">History to learn from (days)</label>
-                    <input id="togglHistoryDays" name="togglHistoryDays" type="number" min="7" max="90" step="1" placeholder="60" />
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label">Activity</label>
-                    <label class="filter-pill">
-                      <input id="togglActivitySignals" name="togglActivitySignals" type="checkbox" />
-                      <span>Usa commit git e sessioni AI locali per capire su quale story hai lavorato</span>
-                    </label>
-                    <p class="field-hint">
-                      Legge in locale i tuoi commit (tutti i branch, anche non pushati) e le sessioni di Claude Code e Codex:
-                      solo orari e nome del branch, da cui ricava la chiave Jira (<code>PENT-123/…</code>). Si aggiunge alle
-                      story che hai spostato tu su Jira durante la giornata (Developed, Merge Request…). Nulla lascia il Mac
-                      tranne le chiavi Jira, cercate su Jira.
-                    </p>
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label">Gap filling</label>
-                    <label class="filter-pill">
-                      <input id="togglFillGaps" name="togglFillGaps" type="checkbox" />
-                      <span>Riempi i buchi in proporzione al peso delle story dello sprint</span>
-                    </label>
-                    <p class="field-hint">
-                      Il tempo che nessuna attività spiega va alle story del tuo sprint in proporzione alle ore che il
-                      loro peso lascia ancora libere: story point × il tuo ritmo (minuti per punto, calcolato dallo storico
-                      Toggl) meno quanto ci hai già prenotato. Bug e sottotask senza punti valgono 1 punto e non restano
-                      mai a zero. A blocchi di almeno un'ora, su poche story; le righe sono marcate "Riempimento".
-                    </p>
-                  </div>
-                </div>
+                </details>
               </div>
 
-              <!-- AI assistants (MCP) card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1.5v2M7 10.5v2M1.5 7h2M10.5 7h2M3.2 3.2l1.4 1.4M9.4 9.4l1.4 1.4M3.2 10.8l1.4-1.4M9.4 4.6l1.4-1.4"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">Assistenti AI</div>
-                    <div class="settings-card-title">Connettore MCP</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field settings-field-wide">
-                    <p class="field-hint">
-                      Collega ZuGit a Claude Code, Claude Desktop o Codex: l'assistente legge la giornata Toggl (call, story,
-                      commit, sessioni) e ti propone come compilarla. I token restano nel portachiavi di ZuGit e non passano
-                      mai in conversazione. Nulla viene scritto su Toggl dall'AI: la proposta si apre qui, la confermi tu.
-                    </p>
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <div class="field-header">
-                      <label class="field-label">Claude Code</label>
-                      <button class="field-action-button" data-mcp-copy="claude" type="button">Copia</button>
+              <div class="settings-group">
+                <h2 class="settings-group-title">General</h2>
+                <!-- Accessibility card -->
+                <details class="settings-card" data-settings-section="accessibility">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="8" r="1" fill="currentColor"/><path d="M9 12h3v5"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Accessibility</div>
+                      <div class="settings-card-title">Display preferences</div>
                     </div>
-                    <code class="mcp-command" data-mcp-command="claude">…</code>
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <div class="field-header">
-                      <label class="field-label">Codex</label>
-                      <button class="field-action-button" data-mcp-copy="codex" type="button">Copia</button>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field">
+                      <label class="field-label">Color vision</label>
+                      <label class="filter-pill">
+                        <input id="colorBlindMode" name="colorBlindMode" type="checkbox" />
+                        <span>Color-blind friendly mode</span>
+                      </label>
                     </div>
-                    <code class="mcp-command" data-mcp-command="codex">…</code>
                   </div>
-                  <div class="settings-field settings-field-wide">
-                    <div class="field-header">
-                      <label class="field-label">Claude Desktop · <code>claude_desktop_config.json</code></label>
-                      <button class="field-action-button" data-mcp-copy="desktop" type="button">Copia</button>
-                    </div>
-                    <code class="mcp-command" data-mcp-command="desktop">…</code>
-                    <p class="field-hint">
-                      Poi chiedi per esempio “compila il mio Toggl di oggi”, oppure usa il prompt <code>fill_toggl_day</code>.
-                      Usa l'app installata (non una build di sviluppo): il comando punta a questo eseguibile.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Google Calendar card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="11" height="10" rx="1.5"/><path d="M1.5 5.5h11M4.5 1.5v2M9.5 1.5v2"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">Google Calendar</div>
-                    <div class="settings-card-title">Meeting import</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label">Calendar</label>
-                    <label class="filter-pill">
-                      <input id="googleCalendarEnabled" name="googleCalendarEnabled" type="checkbox" />
-                      <span>Proponi anche gli eventi del calendario nella fascia oraria</span>
-                    </label>
-                    <p class="field-hint">
-                      Sola lettura (scope <code>calendar.readonly</code>). Gli eventi diventano righe del piano, con
-                      progetto e tag presi dalle tue entry ricorrenti; le story riempiono solo quello che resta.
-                      Eventi rifiutati, tutto-il-giorno e segnati come "libero" vengono ignorati.
-                    </p>
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="googleClientId">OAuth client id</label>
-                    <input id="googleClientId" name="googleClientId" type="text" placeholder="…apps.googleusercontent.com" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="googleClientSecret">OAuth client secret</label>
-                    <input id="googleClientSecret" name="googleClientSecret" type="password" placeholder="GOCSPX-…" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label" for="googleCalendarId">Calendar id</label>
-                    <input id="googleCalendarId" name="googleCalendarId" type="text" placeholder="primary" />
-                  </div>
-                  <div class="settings-field">
-                    <label class="field-label">Autorizzazione</label>
-                    <div class="field-row">
-                      <button class="secondary-button" data-google-connect type="button">Collega account</button>
-                      <button class="secondary-button" data-google-disconnect type="button" hidden>Scollega</button>
-                    </div>
-                    <p class="field-hint" data-google-status></p>
-                  </div>
-                  <div class="settings-field settings-field-wide">
-                    <label class="field-label">Redirect URI usato da ZuGit</label>
-                    <input class="field-readonly" data-google-redirect type="text" readonly value="http://127.0.0.1:43117" />
-                    <p class="field-hint">
-                      Con un client di tipo <strong>Desktop app</strong> non devi registrarlo: Google accetta da sé i
-                      redirect su <code>127.0.0.1</code>, e nella console quel campo non esiste nemmeno. Serve solo se
-                      il client è di tipo <strong>Web application</strong>: in quel caso aggiungi esattamente questo URI
-                      fra gli URI di reindirizzamento autorizzati.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Accessibility card -->
-              <div class="settings-card">
-                <div class="settings-card-header">
-                  <span class="settings-card-icon">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="8" r="1" fill="currentColor"/><path d="M9 12h3v5"/></svg>
-                  </span>
-                  <div>
-                    <div class="settings-card-label">Accessibility</div>
-                    <div class="settings-card-title">Display preferences</div>
-                  </div>
-                </div>
-                <div class="settings-card-grid">
-                  <div class="settings-field">
-                    <label class="field-label">Color vision</label>
-                    <label class="filter-pill">
-                      <input id="colorBlindMode" name="colorBlindMode" type="checkbox" />
-                      <span>Color-blind friendly mode</span>
-                    </label>
-                  </div>
-                </div>
+                </details>
               </div>
 
               <!-- Hidden submit (triggered by save bar button via form="settings-form") -->

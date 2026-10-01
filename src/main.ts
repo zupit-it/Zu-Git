@@ -21,6 +21,7 @@ import {
   initMcpSetup, openTogglPanel, startTogglReminder, testTogglConnection,
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
+import { initSettingsSections } from "./settings-sections";
 import { escHtml, avatarColor, loginInitials, errorMessage } from "./utils";
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -36,6 +37,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document
     .querySelector<HTMLButtonElement>("[data-discard-button]")
     ?.addEventListener("click", () => setSettingsDirtyState(false));
+  initSettingsSections();
 
   // ── Toolbar actions ─────────────────────────────────────────────────────────
   document
