@@ -7,7 +7,10 @@
  * past 1440 instead of needing a second date.
  */
 
-export type IssueStage = "in-progress" | "merge-request" | "other";
+/** "touched": not active in Jira, but moved by the user during the day or seen
+ *  in local activity (commits, AI sessions). "sprint": only in the sprint —
+ *  it can receive filled time, never compete for a slot. */
+export type IssueStage = "in-progress" | "merge-request" | "touched" | "sprint" | "other";
 
 export interface PlannerIssue {
   key: string;
@@ -40,12 +43,44 @@ export interface Candidate {
   rank: number;
 }
 
+/** A trace of work on a story (see `activity.rs`). */
+export interface PlannerActivity {
+  key: string;
+  /** RFC3339. */
+  at: string;
+  /** "ai-session" | "commit" | "jira" */
+  source: string;
+  /** "during": work was happening then · "end": work happened before it ·
+   *  "start": work happens after it. */
+  kind: string;
+  detail: string;
+  /** 1 by default; lower for Jira moves made in bulk. */
+  weight?: number;
+}
+
+/** A sprint story's claim on the time no evidence explains (see `toggl_day.rs`). */
+export interface FillStory {
+  key: string;
+  points: number;
+  pointsAssumed: boolean;
+  bookedMinutes: number;
+  budgetMinutes?: number | null;
+  weight: number;
+}
+
 export interface Assignment {
   from: number;
   to: number;
   chosen: Candidate | null;
-  /** Keys plausible for this slot — filled only when the pick was a toss-up. */
-  candidateKeys: string[];
+  /** Other stories plausible for this span, most plausible first — offered as
+   *  one-click swaps. */
+  alternatives: string[];
+  /** "activity" when work on the story was seen around this time; "status"
+   *  when only its Jira status backs the pick; "fill" when the time was shared
+   *  out by remaining estimate. */
+  basis: "activity" | "status" | "fill";
+  /** Short summary of the evidence, e.g. "2 commits · Claude Code". */
+  reason: string;
 }
 
 // ── Clock helpers ─────────────────────────────────────────────────────────────
@@ -169,7 +204,8 @@ export function freeGaps(range: Interval, busy: Interval[], slot: number): Inter
  * A story that moved *into* "in progress" during the day was picked up at that
  * moment, so it only covers the part of the day after it. One that moved *into*
  * the merge-request status covers the part before it — that is when the work on
- * it actually happened. Transitions from earlier days cover the whole range.
+ * it actually happened. Transitions from earlier days cover the whole range, and
+ * so do "touched" stories: their own activity says where they belong.
  */
 export function candidatesFor(
   issues: PlannerIssue[],
@@ -180,9 +216,11 @@ export function candidatesFor(
   return issues
     .filter((issue) => issue.stage !== "other")
     .map((issue) => {
-      const changedMin = issue.statusChangedAt
-        ? roundTo(minutesFromMidnight(issue.statusChangedAt, dateIso), slot)
-        : null;
+      const touched = issue.stage === "touched";
+      const changedMin =
+        issue.statusChangedAt && !touched
+          ? roundTo(minutesFromMidnight(issue.statusChangedAt, dateIso), slot)
+          : null;
       const changedToday = changedMin !== null && changedMin > range.from && changedMin < range.to;
       const inProgress = issue.stage === "in-progress";
 
@@ -193,10 +231,8 @@ export function candidatesFor(
         else toMin = changedMin;
       }
 
-      // A transition that happened today is the strongest evidence there is: the
-      // story you moved to merge request at 11:00 is what the morning went into,
-      // even if another story has been in progress for days.
-      const rank = changedToday ? (inProgress ? 0 : 1) : inProgress ? 2 : 3;
+      const rank =
+        issue.stage === "sprint" ? 5 : touched ? 4 : changedToday ? (inProgress ? 0 : 1) : inProgress ? 2 : 3;
       return {
         key: issue.key,
         summary: issue.summary,
@@ -211,71 +247,300 @@ export function candidatesFor(
     .sort((a, b) => a.rank - b.rank || b.fromMin - a.fromMin);
 }
 
-/**
- * The story to fall back on for a slot no activity window covers.
- *
- * Happens whenever the day's stories all stopped being "active" before the range
- * ends — the common case being a single story moved to merge request this
- * morning, which would otherwise leave the whole afternoon blank. Continuity is
- * the best guess available: the story worked on most recently before the slot,
- * or failing that the next one picked up after it.
- */
-function nearestCandidate(candidates: Candidate[], from: number, to: number): Candidate | null {
-  const before = candidates
-    .filter((candidate) => candidate.toMin <= from)
-    .sort((a, b) => b.toMin - a.toMin || a.rank - b.rank);
-  if (before.length > 0) return before[0];
+// ── Story allocation ──────────────────────────────────────────────────────────
 
-  const after = candidates
-    .filter((candidate) => candidate.fromMin >= to)
-    .sort((a, b) => a.fromMin - b.fromMin || a.rank - b.rank);
-  return after[0] ?? null;
+/** Baseline plausibility from the Jira status alone, by candidate rank: moved
+ *  to in progress today, moved to merge request today, in progress, in merge
+ *  request, touched. A story sitting in review is rarely worked on — unless
+ *  activity says otherwise, and then the activity carries it. */
+const RANK_PRIOR = [1.3, 1.15, 1, 0.15, 0.05];
+/** A story's prior outside its status window (before it was picked up, after it
+ *  was handed over) — unlikely, not impossible. */
+const OUTSIDE_WINDOW = 0.15;
+/** On a day with activity, statuses count for less: a story left "in progress"
+ *  for weeks must not outweigh the one that actually has commits today — but it
+ *  still owns the stretches nothing else explains. */
+const PRIOR_ON_ACTIVE_DAY = 0.5;
+/** Stories scoring at least this share of the best are plausible for a slot. */
+const PLAUSIBLE = 0.6;
+/** Evidence score above which a pick counts as backed by activity. */
+const EVIDENCE_FLOOR = 0.25;
+/** Shortest block worth a row: a timesheet in quarter-hour shreds is noise. */
+const MIN_BLOCK = 60;
+
+interface Signal {
+  key: string;
+  at: number;
+  source: string;
+  kind: string;
+  detail: string;
+  weight: number;
 }
 
-/** Splits the free gaps at every activity-window boundary, picks the best candidate
- *  for each piece, then merges neighbours that ended up on the same story. */
-export function assignSlots(gaps: Interval[], candidates: Candidate[]): Assignment[] {
-  const assignments: Assignment[] = [];
+/**
+ * How strongly one signal says "this story was being worked on at `minute`".
+ *
+ * An AI exchange is work happening right then, so it weighs symmetrically. A
+ * commit or a move to Developed / Merge Request closes work: it reaches back
+ * over the hour or so before it and barely forward. A move to In Progress opens
+ * work: it reaches forward.
+ */
+function signalWeight(signal: Signal, minute: number): number {
+  const delta = minute - signal.at;
+  if (signal.kind === "during") return signal.weight * Math.exp(-Math.abs(delta) / 25);
+  if (signal.kind === "start") return signal.weight * 2 * (delta >= 0 ? Math.exp(-delta / 90) : Math.exp(delta / 10));
+  const weight = signal.source === "jira" ? 2 : 1.5;
+  return signal.weight * weight * (delta <= 0 ? Math.exp(delta / 75) : Math.exp(-delta / 15));
+}
 
-  for (const gap of gaps) {
-    const points = new Set<number>([gap.from, gap.to]);
-    for (const candidate of candidates) {
-      if (candidate.fromMin > gap.from && candidate.fromMin < gap.to) points.add(candidate.fromMin);
-      if (candidate.toMin > gap.from && candidate.toMin < gap.to) points.add(candidate.toMin);
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+/** "2 commits · Claude Code · → Developed" for the signals around a span. */
+function describeSignals(signals: Signal[]): string {
+  const commits = signals.filter((s) => s.source === "commit").length;
+  const tools = new Set(signals.filter((s) => s.source === "ai-session").map((s) => s.detail || "AI session"));
+  const moves = new Set(signals.filter((s) => s.source === "jira").map((s) => s.detail));
+  return [commits ? plural(commits, "commit") : "", ...tools, ...moves].filter(Boolean).join(" · ");
+}
+
+interface Cell {
+  from: number;
+  to: number;
+  /** Index of the gap the cell belongs to — runs never cross a meeting. */
+  gap: number;
+  scores: Map<string, number>;
+  evidence: Map<string, number>;
+  /** No evidence explains the slot and filling is on: shared by estimate. */
+  fill: boolean;
+  pick: string | null;
+}
+
+/**
+ * Shares the free time between the candidate stories.
+ *
+ * Every slot of free time gets a score per story: a baseline from its Jira
+ * status, plus the activity seen around that moment. Each story is then given a
+ * share of the day in proportion to its total score, and the slots are handed
+ * out in time order, preferring to stay on the same story while it is still
+ * plausible and has share left. The result is a few contiguous blocks — the
+ * morning on the story with this morning's commits, the afternoon on the one
+ * moved to Developed at five — instead of every gap cut in equal halves.
+ */
+export function planStories(
+  gaps: Interval[],
+  candidates: Candidate[],
+  activity: PlannerActivity[],
+  dateIso: string,
+  slot: number,
+  fill: FillStory[] = [],
+): Assignment[] {
+  if (candidates.length === 0 || gaps.length === 0) return [];
+  const byKey = new Map(candidates.map((candidate) => [candidate.key, candidate]));
+
+  const signals: Signal[] = activity
+    .filter((event) => byKey.has(event.key))
+    .map((event) => ({ ...event, weight: event.weight ?? 1, at: minutesFromMidnight(event.at, dateIso) }));
+  const dayFrom = gaps[0].from;
+  const dayTo = gaps[gaps.length - 1].to;
+  const activeDay = signals.some((signal) => signal.at > dayFrom - 60 && signal.at < dayTo + 60);
+  const priorScale = activeDay ? PRIOR_ON_ACTIVE_DAY : 1;
+
+  const cells: Cell[] = [];
+  gaps.forEach((gap, gapIndex) => {
+    for (let from = gap.from; from < gap.to; from += slot) {
+      const to = Math.min(from + slot, gap.to);
+      const middle = (from + to) / 2;
+      const scores = new Map<string, number>();
+      const evidence = new Map<string, number>();
+      for (const candidate of candidates) {
+        const inside = middle >= candidate.fromMin && middle <= candidate.toMin;
+        const prior = (RANK_PRIOR[candidate.rank] ?? 0) * (inside ? 1 : OUTSIDE_WINDOW) * priorScale;
+        const seen = signals
+          .filter((signal) => signal.key === candidate.key)
+          .reduce((sum, signal) => sum + signalWeight(signal, middle), 0);
+        scores.set(candidate.key, prior + seen);
+        evidence.set(candidate.key, seen);
+      }
+      cells.push({ from, to, gap: gapIndex, scores, evidence, fill: false, pick: null });
     }
-    const bounds = [...points].sort((a, b) => a - b);
+  });
 
-    for (let i = 0; i < bounds.length - 1; i += 1) {
-      const from = bounds[i];
-      const to = bounds[i + 1];
-      const covering = candidates.filter((c) => c.fromMin <= from && c.toMin >= to);
-      const bestRank = covering.length > 0 ? Math.min(...covering.map((c) => c.rank)) : null;
-      const best = bestRank === null ? [] : covering.filter((c) => c.rank === bestRank);
+  applyFill(cells, fill, byKey);
 
-      assignments.push({
-        from,
-        to,
-        chosen: best[0] ?? nearestCandidate(candidates, from, to),
-        // Only a genuine toss-up is worth asking about: several stories with the
-        // same plausibility covering the same slot.
-        candidateKeys: best.length > 1 ? best.map((c) => c.key) : [],
-      });
+  const plausibleIn = (cell: Cell) => {
+    // Filled slots are shared by every story with a claim, in proportion to it.
+    if (cell.fill) return [...cell.scores].filter(([, score]) => score > 0).map(([key]) => key);
+    const best = Math.max(...cell.scores.values());
+    return candidates
+      .map((candidate) => candidate.key)
+      .filter((key) => (cell.scores.get(key) ?? 0) >= best * PLAUSIBLE);
+  };
+
+  // Each story's share of the free time: every slot is split between the
+  // stories plausible for it, in proportion to their scores. A story that is
+  // clearly ahead takes the slot whole; a genuine tie is shared.
+  const remaining = new Map(candidates.map((candidate) => [candidate.key, 0]));
+  for (const cell of cells) {
+    const plausible = plausibleIn(cell);
+    const total = plausible.reduce((sum, key) => sum + (cell.scores.get(key) ?? 0), 0) || 1;
+    for (const key of plausible) {
+      remaining.set(key, (remaining.get(key) ?? 0) + ((cell.to - cell.from) * (cell.scores.get(key) ?? 0)) / total);
     }
   }
 
-  const merged: Assignment[] = [];
-  for (const assignment of assignments) {
-    const last = merged[merged.length - 1];
-    const sameStory = last?.chosen?.key === assignment.chosen?.key;
-    const contiguous = last?.to === assignment.from;
-    const settled = (last?.candidateKeys.length ?? 0) === 0 && assignment.candidateKeys.length === 0;
-    if (last && sameStory && contiguous && settled) {
-      last.to = assignment.to;
+  const order = (a: string, b: string, cell: Cell) =>
+    (cell.scores.get(b) ?? 0) - (cell.scores.get(a) ?? 0) ||
+    (remaining.get(b) ?? 0) - (remaining.get(a) ?? 0) ||
+    (byKey.get(a)?.rank ?? 9) - (byKey.get(b)?.rank ?? 9) ||
+    a.localeCompare(b);
+
+  let previous: string | null = null;
+  for (const cell of cells) {
+    const plausible = plausibleIn(cell);
+    let pick: string;
+    if (previous && plausible.includes(previous) && (remaining.get(previous) ?? 0) > 0) {
+      pick = previous;
     } else {
-      merged.push({ ...assignment });
+      const withShare = plausible.filter((key) => (remaining.get(key) ?? 0) > 0);
+      pick = (withShare.length ? withShare : plausible).sort((a, b) => order(a, b, cell))[0];
     }
+    cell.pick = pick;
+    remaining.set(pick, (remaining.get(pick) ?? 0) - (cell.to - cell.from));
+    previous = pick;
   }
-  return merged;
+
+  smoothRuns(cells, Math.max(slot * 2, MIN_BLOCK));
+  return buildAssignments(cells, candidates, byKey, signals, fill);
+}
+
+/**
+ * Hands the slots no evidence explains over to the sprint's stories, by what
+ * their estimates leave unbooked. Only as many stories as can each get a block
+ * of at least an hour take part — the heaviest claims first — so the slack of
+ * a quiet afternoon becomes two solid blocks, not six slivers.
+ */
+function applyFill(cells: Cell[], fill: FillStory[], byKey: Map<string, Candidate>) {
+  const unexplained = cells.filter((cell) => Math.max(...cell.evidence.values()) < EVIDENCE_FLOOR);
+  const minutes = unexplained.reduce((sum, cell) => sum + (cell.to - cell.from), 0);
+  const claims = fill
+    .filter((story) => story.weight > 0 && byKey.has(story.key))
+    .sort((a, b) => b.weight - a.weight || a.key.localeCompare(b.key))
+    .slice(0, Math.max(1, Math.floor(minutes / MIN_BLOCK)));
+  if (claims.length === 0) return;
+
+  const top = claims[0].weight;
+  for (const cell of unexplained) {
+    cell.fill = true;
+    for (const key of cell.scores.keys()) cell.scores.set(key, 0);
+    for (const story of claims) cell.scores.set(story.key, story.weight / top);
+  }
+}
+
+interface Run {
+  key: string;
+  gap: number;
+  cells: Cell[];
+}
+
+function runsOf(cells: Cell[]): Run[] {
+  const runs: Run[] = [];
+  for (const cell of cells) {
+    const last = runs[runs.length - 1];
+    const contiguous = last && last.gap === cell.gap && last.cells[last.cells.length - 1].to === cell.from;
+    if (last && contiguous && last.key === cell.pick) last.cells.push(cell);
+    else runs.push({ key: cell.pick ?? "", gap: cell.gap, cells: [cell] });
+  }
+  return runs;
+}
+
+/** Folds runs shorter than `minRun` into the neighbour that fits them best —
+ *  a timesheet of half-hour shreds is noise. One run at a time, shortest
+ *  first, so two short neighbours merge instead of swapping places. */
+function smoothRuns(cells: Cell[], minRun: number) {
+  const length = (run: Run) => run.cells.reduce((sum, cell) => sum + (cell.to - cell.from), 0);
+  for (let guard = 0; guard < cells.length; guard += 1) {
+    const runs = runsOf(cells);
+    const short = runs
+      .map((run, index) => ({ run, index }))
+      .filter(({ run, index }) => {
+        if (length(run) >= minRun) return false;
+        const sameGap = (other: Run | undefined) => Boolean(other) && other?.gap === run.gap;
+        return sameGap(runs[index - 1]) || sameGap(runs[index + 1]);
+      })
+      .sort((a, b) => length(a.run) - length(b.run));
+    if (short.length === 0) return;
+
+    const { run, index } = short[0];
+    const fit = (key: string) => run.cells.reduce((sum, cell) => sum + (cell.scores.get(key) ?? 0), 0);
+    const target = [runs[index - 1], runs[index + 1]]
+      .filter((other): other is Run => Boolean(other) && other.gap === run.gap)
+      .sort((a, b) => fit(b.key) - fit(a.key) || length(b) - length(a))[0];
+    for (const cell of run.cells) cell.pick = target.key;
+  }
+}
+
+function hours(minutes: number): string {
+  const value = Math.round((minutes / 60) * 10) / 10;
+  return `${value}h`;
+}
+
+/** "Riempimento · 8 pt · 6h prenotate su 24h" */
+function describeFill(story: FillStory | undefined): string {
+  if (!story) return "Riempimento";
+  const points = `${story.points} pt${story.pointsAssumed ? " (stimato)" : ""}`;
+  const booked = story.budgetMinutes
+    ? `${hours(story.bookedMinutes)} prenotate su ${hours(story.budgetMinutes)}`
+    : `${hours(story.bookedMinutes)} prenotate`;
+  return `${points} · ${booked}`;
+}
+
+function buildAssignments(
+  cells: Cell[],
+  candidates: Candidate[],
+  byKey: Map<string, Candidate>,
+  signals: Signal[],
+  fill: FillStory[],
+): Assignment[] {
+  return runsOf(cells).map((run) => {
+    const from = run.cells[0].from;
+    const to = run.cells[run.cells.length - 1].to;
+    const mean = (key: string) =>
+      run.cells.reduce((sum, cell) => sum + (cell.scores.get(key) ?? 0), 0) / run.cells.length;
+    const evidence = Math.max(...run.cells.map((cell) => cell.evidence.get(run.key) ?? 0));
+    const filled = run.cells.every((cell) => cell.fill);
+    const basis: Assignment["basis"] = evidence >= EVIDENCE_FLOOR ? "activity" : filled ? "fill" : "status";
+
+    const chosenMean = mean(run.key);
+    // Filled time can go to any sprint story with estimate left, heaviest first.
+    const alternatives =
+      basis === "fill"
+        ? fill
+            .filter((story) => story.key !== run.key && story.weight > 0 && byKey.has(story.key))
+            .sort((a, b) => b.weight - a.weight)
+            .map((story) => story.key)
+            .slice(0, 3)
+        : candidates
+            .map((candidate) => candidate.key)
+            .filter((key) => key !== run.key)
+            .filter((key) => basis === "status" || mean(key) >= chosenMean * PLAUSIBLE)
+            .sort((a, b) => mean(b) - mean(a))
+            .slice(0, 3);
+
+    const chosen = byKey.get(run.key) ?? null;
+    const nearby = signals.filter((s) => s.key === run.key && s.at >= from - 90 && s.at <= to + 30);
+    const reason =
+      basis === "activity" && nearby.length > 0
+        ? describeSignals(nearby)
+        : basis === "fill"
+          ? describeFill(fill.find((story) => story.key === run.key))
+          : chosen
+            ? `Jira: ${chosen.status}`
+            : "";
+
+    return { from, to, chosen, alternatives, basis, reason };
+  });
 }
 
 // ── Calendar ──────────────────────────────────────────────────────────────────
@@ -288,6 +553,8 @@ export interface PlannerEvent {
   declined: boolean;
   transparent: boolean;
   eventType: string;
+  /** The recurring series this occurrence belongs to. */
+  recurringEventId?: string | null;
 }
 
 export interface CalendarBlock {
@@ -338,35 +605,27 @@ export function calendarBlocks(
   return blocks;
 }
 
-/** Mirrors the Rust-side normalisation, so a calendar event can be matched
- *  against the recurring rules learned from Toggl history. */
+/** Mirrors `normalize_description` in `toggl.rs`, so a calendar event can be
+ *  matched against the rules learned from Toggl history. Accented letters are
+ *  kept: "Attività" must not turn into "attivit" here and "attività" there. */
 export function normalizeDescription(description: string): string {
   return description
     .replace(/\b[A-Z][A-Z0-9]+-\d+\b/g, " ")
-    .split("")
-    .map((c) => (/[a-zA-Z\s]/.test(c) ? c.toLowerCase() : " "))
-    .join("")
+    .replace(/[^\p{L}\s]/gu, " ")
+    .toLowerCase()
     .split(/\s+/)
     .filter(Boolean)
     .join(" ");
 }
 
-/** Splits `[from, to)` into `parts` chunks aligned to the slot grid, dropping the
- *  chunks that would come out empty when the range is too short to go round. */
-export function splitRange(from: number, to: number, parts: number, slot: number): Interval[] {
-  const total = to - from;
-  if (parts < 2 || total <= 0) return [{ from, to }];
-
-  const bounds: Interval[] = [];
-  let cursor = from;
-  for (let i = 1; i <= parts; i += 1) {
-    const edge = i === parts ? to : from + floorTo((total * i) / parts, slot);
-    if (edge > cursor) {
-      bounds.push({ from: cursor, to: edge });
-      cursor = edge;
-    }
-  }
-  return bounds;
+/** Lookup keys for a calendar event, most specific first — mirrors `event_keys`
+ *  in `toggl.rs`: the recurring series, then the normalised title. */
+export function eventKeys(event: { recurringEventId?: string | null; summary: string }): string[] {
+  const keys: string[] = [];
+  if (event.recurringEventId) keys.push(`rec:${event.recurringEventId}`);
+  const normalized = normalizeDescription(event.summary);
+  if (normalized) keys.push(`title:${normalized}`);
+  return keys;
 }
 
 // ── End-of-day reminder ───────────────────────────────────────────────────────

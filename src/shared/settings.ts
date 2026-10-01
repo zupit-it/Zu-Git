@@ -29,6 +29,10 @@ export interface AppSettings {
   togglSlotMinutes: number;
   /** How far back the project/tag mapping is learned from (max 90 — Toggl's limit). */
   togglHistoryDays: number;
+  /** Read local git commits and AI coding sessions to tell which stories were worked on. */
+  togglActivitySignals: boolean;
+  /** Share unexplained time between the sprint's stories by remaining estimate. */
+  togglFillGaps: boolean;
   googleCalendarEnabled: boolean;
   googleClientId: string;
   googleClientSecret: string;
@@ -80,6 +84,8 @@ export interface SettingsFormValues {
   togglDayEnd: string;                    // "HH:MM"
   togglSlotMinutes: string;
   togglHistoryDays: string;
+  togglActivitySignals: string;           // "on" | ""
+  togglFillGaps: string;                  // "on" | ""
   googleCalendarEnabled: string;          // "on" | ""
   googleClientId: string;
   googleClientSecret: string;
@@ -116,6 +122,8 @@ export const defaultSettings: AppSettings = {
   togglDayEnd: "14:00",
   togglSlotMinutes: 15,
   togglHistoryDays: 60,
+  togglActivitySignals: true,
+  togglFillGaps: false,
   googleCalendarEnabled: false,
   googleClientId: "",
   googleClientSecret: "",
@@ -197,6 +205,8 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
     togglDayEnd: settings.togglDayEnd,
     togglSlotMinutes: String(settings.togglSlotMinutes),
     togglHistoryDays: String(settings.togglHistoryDays),
+    togglActivitySignals: settings.togglActivitySignals ? "on" : "",
+    togglFillGaps: settings.togglFillGaps ? "on" : "",
     googleCalendarEnabled: settings.googleCalendarEnabled ? "on" : "",
     googleClientId: settings.googleClientId,
     googleClientSecret: settings.googleClientSecret,
@@ -258,6 +268,8 @@ export function normalizeSettings(
     togglSlotMinutes: boundedInt(values.togglSlotMinutes, 5, 120, defaultSettings.togglSlotMinutes),
     // Capped at 90: the Toggl time-entries endpoint refuses wider windows.
     togglHistoryDays: boundedInt(values.togglHistoryDays, 7, 90, defaultSettings.togglHistoryDays),
+    togglActivitySignals: values.togglActivitySignals === "on",
+    togglFillGaps: values.togglFillGaps === "on",
     googleCalendarEnabled: values.googleCalendarEnabled === "on",
     googleClientId: values.googleClientId?.trim() ?? "",
     googleClientSecret: values.googleClientSecret?.trim() ?? "",

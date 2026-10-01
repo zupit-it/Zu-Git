@@ -4956,6 +4956,42 @@ img.avatar { object-fit: cover; }
 }
 .tg-band-btn:hover { background: var(--surface-alt); }
 
+/* ── Evidence line: why a story owns a slot, and what else it could be ── */
+
+.tg-why {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 10px 8px 33px;
+  font: 500 11px/1.4 var(--font);
+  color: var(--ink-muted);
+}
+.tg-why-label { font-weight: 650; }
+.tg-why--activity .tg-why-label { color: var(--ok); }
+.tg-why--ai .tg-why-label { color: var(--accent-ink); }
+.tg-why--status .tg-why-label { color: var(--warn); }
+.tg-why--fill .tg-why-label { color: var(--ink-soft); }
+.tg-why-text { color: var(--ink-soft); }
+.tg-why-swaps { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.tg-why-or { color: var(--ink-faint); }
+
+.tg-swap {
+  height: 20px;
+  padding: 0 7px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font: 600 10.5px/1 var(--font-mono);
+  cursor: pointer;
+}
+.tg-swap:hover { background: var(--surface-alt); color: var(--ink); border-style: solid; }
+
+.tg-banner--ai { background: var(--accent-soft); border-bottom: 1px solid var(--accent-bd); color: var(--accent-ink); }
+.tg-banner-note { display: block; font-weight: 500; opacity: 0.9; }
+.tg-banner-action--neutral { border-color: var(--accent-bd); color: var(--accent-ink); }
+
 /* ── Footer ── */
 
 .tg-footer { border-top: 1px solid var(--border); flex-shrink: 0; }
@@ -5372,4 +5408,19 @@ img.avatar { object-fit: cover; }
   padding: 0 16px;
   border-radius: var(--r);
   font-size: 12px;
+}
+
+/* ── MCP setup commands (Settings) ── */
+
+.mcp-command {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  color: var(--ink);
+  font: 500 11px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
 }

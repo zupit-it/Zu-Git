@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -8,9 +8,25 @@ use crate::secret_store::{
     decrypt_token_from_file, encrypt_token_for_file, get_secret, set_secret,
 };
 
+/// Bundle identifier from `tauri.conf.json` — Tauri names the data directory after it.
+const APP_IDENTIFIER: &str = "dev.giorgio.zugit";
+
+/// The app data directory, as resolved by the running Tauri app.
+pub fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| e.to_string())
+}
+
+/// The same directory without a running Tauri app — `zugit --mcp` reads the
+/// settings and caches the desktop app wrote. Tauri resolves it the same way:
+/// the platform data dir joined with the bundle identifier.
+pub fn standalone_data_dir() -> Result<PathBuf, String> {
+    dirs::data_dir()
+        .map(|dir| dir.join(APP_IDENTIFIER))
+        .ok_or_else(|| "Could not locate the application data directory.".to_string())
+}
+
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(dir.join("settings.json"))
+    Ok(data_dir(app)?.join("settings.json"))
 }
 
 fn filters_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -73,6 +89,10 @@ struct PersistedSettings {
     toggl_slot_minutes: u32,
     #[serde(default = "default_history_days")]
     toggl_history_days: u32,
+    #[serde(default = "default_true")]
+    toggl_activity_signals: bool,
+    #[serde(default)]
+    toggl_fill_gaps: bool,
     #[serde(default)]
     google_calendar_enabled: bool,
     #[serde(default)]
@@ -177,7 +197,12 @@ fn validate_token_persistence(
 }
 
 pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String> {
-    let path = settings_path(app)?;
+    Ok(load_settings_from(&data_dir(app)?))
+}
+
+/// Settings stored under `dir`, tokens included (read from the keychain).
+pub fn load_settings_from(dir: &Path) -> AppSettings {
+    let path = dir.join("settings.json");
 
     let persisted: PersistedSettings = match std::fs::read_to_string(&path) {
         Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
@@ -305,6 +330,8 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         toggl_day_end: persisted.toggl_day_end,
         toggl_slot_minutes: persisted.toggl_slot_minutes.to_string(),
         toggl_history_days: persisted.toggl_history_days.to_string(),
+        toggl_activity_signals: if persisted.toggl_activity_signals { "on".to_string() } else { String::new() },
+        toggl_fill_gaps: if persisted.toggl_fill_gaps { "on".to_string() } else { String::new() },
         google_calendar_enabled: if persisted.google_calendar_enabled { "on".to_string() } else { String::new() },
         google_client_id: persisted.google_client_id,
         google_client_secret,
@@ -314,7 +341,7 @@ pub async fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String
         stale_branch_ignored_prefixes: persisted.stale_branch_ignored_prefixes.join("\n"),
     };
 
-    Ok(normalize_settings(&form))
+    normalize_settings(&form)
 }
 
 /// Returns the normalised settings and whether both tokens were persisted to the system vault
@@ -369,6 +396,8 @@ pub async fn save_settings(
         toggl_day_end: normalized.toggl_day_end.clone(),
         toggl_slot_minutes: normalized.toggl_slot_minutes,
         toggl_history_days: normalized.toggl_history_days,
+        toggl_activity_signals: normalized.toggl_activity_signals,
+        toggl_fill_gaps: normalized.toggl_fill_gaps,
         google_calendar_enabled: normalized.google_calendar_enabled,
         google_client_id: normalized.google_client_id.clone(),
         google_calendar_id: normalized.google_calendar_id.clone(),
@@ -519,27 +548,133 @@ pub fn set_release_note_override(
 
 // ── Toggl learned rules ───────────────────────────────────────────────────────
 
-fn toggl_rules_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(dir.join("toggl-rules.json"))
-}
-
-/// Mapping rules learned from Toggl history. A missing or corrupt file simply
-/// means "nothing learned yet" — the planner then asks the user for the project.
-pub fn load_toggl_rules(app: &tauri::AppHandle) -> crate::toggl::LearnedRules {
-    toggl_rules_path(app)
+fn read_json<T: serde::de::DeserializeOwned + Default>(path: PathBuf) -> T {
+    std::fs::read_to_string(path)
         .ok()
-        .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|content| serde_json::from_str(&content).ok())
         .unwrap_or_default()
 }
 
-pub fn save_toggl_rules(
-    app: &tauri::AppHandle,
-    rules: &crate::toggl::LearnedRules,
-) -> Result<(), String> {
-    ensure_data_dir(app)?;
-    let path = toggl_rules_path(app)?;
-    let json = serde_json::to_string_pretty(rules).map_err(|e| e.to_string())?;
+fn write_json<T: Serialize>(path: PathBuf, value: &T) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Mapping rules learned from Toggl history. A missing or corrupt file simply
+/// means "nothing learned yet" — the planner then asks the user for the project.
+pub fn load_toggl_rules(dir: &Path) -> crate::toggl::LearnedRules {
+    read_json(dir.join("toggl-rules.json"))
+}
+
+pub fn save_toggl_rules(dir: &Path, rules: &crate::toggl::LearnedRules) -> Result<(), String> {
+    write_json(dir.join("toggl-rules.json"), rules)
+}
+
+/// What was booked for calendar events in the planner — see [`crate::toggl::EventMemory`].
+pub fn load_event_memory(dir: &Path) -> crate::toggl::EventMemory {
+    read_json(dir.join("toggl-event-memory.json"))
+}
+
+pub fn save_event_memory(dir: &Path, memory: &crate::toggl::EventMemory) -> Result<(), String> {
+    write_json(dir.join("toggl-event-memory.json"), memory)
+}
+
+// ── Toggl proposals (written by `zugit --mcp`) ────────────────────────────────
+
+fn proposals_dir(dir: &Path) -> PathBuf {
+    dir.join("toggl-proposals")
+}
+
+/// Only plain dates become file names — nothing an MCP client sends can climb
+/// out of the proposals folder.
+fn proposal_path(dir: &Path, date: &str) -> Result<PathBuf, String> {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map_err(|_| format!("Invalid date '{date}', expected YYYY-MM-DD."))?;
+    Ok(proposals_dir(dir).join(format!("{date}.json")))
+}
+
+pub fn save_toggl_proposal(dir: &Path, proposal: &crate::toggl_day::TogglProposal) -> Result<(), String> {
+    write_json(proposal_path(dir, &proposal.date)?, proposal)
+}
+
+pub fn load_toggl_proposal(dir: &Path, date: &str) -> Option<crate::toggl_day::TogglProposal> {
+    let content = std::fs::read_to_string(proposal_path(dir, date).ok()?).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+pub fn delete_toggl_proposal(dir: &Path, date: &str) -> Result<(), String> {
+    match std::fs::remove_file(proposal_path(dir, date)?) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Deletes proposals for days more than `keep_days` before `today`: the planner
+/// cannot go back that far, so they could only ever nag.
+pub fn prune_toggl_proposals(dir: &Path, today: chrono::NaiveDate, keep_days: i64) {
+    let Ok(entries) = std::fs::read_dir(proposals_dir(dir)) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(date) = name.strip_suffix(".json") else { continue };
+        let Ok(day) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") else { continue };
+        if (today - day).num_days() > keep_days {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Every pending proposal, as (date, created at).
+pub fn list_toggl_proposals(dir: &Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(proposals_dir(dir)) else {
+        return vec![];
+    };
+    let mut found: Vec<(String, String)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let date = name.strip_suffix(".json")?.to_string();
+            let proposal = load_toggl_proposal(dir, &date)?;
+            Some((date, proposal.created_at))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proposal(date: &str) -> crate::toggl_day::TogglProposal {
+        crate::toggl_day::TogglProposal {
+            date: date.into(),
+            created_at: "2026-10-01T10:00:00Z".into(),
+            source: "test".into(),
+            note: None,
+            entries: vec![],
+        }
+    }
+
+    #[test]
+    fn proposals_older_than_the_planner_reach_are_pruned() {
+        let dir = std::env::temp_dir().join(format!("zugit-proposals-{}", std::process::id()));
+        for date in ["2026-09-20", "2026-09-24", "2026-09-30", "2026-10-01"] {
+            save_toggl_proposal(&dir, &proposal(date)).unwrap();
+        }
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
+        prune_toggl_proposals(&dir, today, 7);
+
+        let left: Vec<String> = list_toggl_proposals(&dir).into_iter().map(|(date, _)| date).collect();
+        assert_eq!(left, vec!["2026-09-24", "2026-09-30", "2026-10-01"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn proposal_dates_cannot_escape_the_folder() {
+        assert!(proposal_path(Path::new("/tmp"), "../settings").is_err());
+    }
 }

@@ -33,6 +33,8 @@ sha2 = "0.10"
 rand = "0.8"
 url = "2"
 parking_lot = "0.12"
+# App data dir and home dir for `zugit --mcp`, which runs without a Tauri app.
+dirs = "6"
 
 # setsid(2) when handing secrets to the `security` CLI over stdin.
 [target.'cfg(target_os = "macos")'.dependencies]

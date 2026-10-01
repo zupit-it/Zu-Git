@@ -9,6 +9,7 @@
     "build": "tauri build",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.ts",
     "lint": "eslint src"
   },
   "type": "module",

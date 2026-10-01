@@ -285,6 +285,18 @@ pub struct NewTimeEntry {
     /// Echoed back in the result so the UI can mark the right row.
     #[serde(default)]
     pub client_ref: String,
+    /// Set when the row came from a calendar event: the choices made for it are
+    /// remembered against the event, so its next occurrence is pre-filled.
+    #[serde(default)]
+    pub calendar_event: Option<CalendarRef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarRef {
+    #[serde(default)]
+    pub recurring_event_id: Option<String>,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -377,7 +389,10 @@ pub struct RecurringHint {
 /// Bumped whenever a new field is learned from history. Rules cached under an
 /// older version are re-learned on the next open instead of silently answering
 /// with the default for the field that did not exist yet.
-pub const RULES_VERSION: u32 = 1;
+///
+/// 2: `by_event` (calendar ↔ entry matching) and Unicode-aware normalisation.
+/// 3: minutes booked per story, minutes per story point.
+pub const RULES_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -394,6 +409,22 @@ pub struct LearnedRules {
     /// Recurring non-story entries (retro, stima, daily…), most frequent first.
     #[serde(default)]
     pub recurring: Vec<RecurringHint>,
+    /// Calendar event → how it was booked, keyed by [`event_keys`]. Learned by
+    /// matching past events with the entries that overlap them, then overlaid
+    /// with the [`EventMemory`] of what was picked in the planner.
+    #[serde(default)]
+    pub by_event: HashMap<String, ProjectHint>,
+    /// Minutes booked per Jira key over the learned history (an entry naming
+    /// two keys counts half for each).
+    #[serde(default)]
+    pub minutes_by_key: HashMap<String, i64>,
+    /// How many minutes a story point usually takes this user — the median
+    /// over finished stories with an estimate. `None` until there are enough.
+    #[serde(default)]
+    pub minutes_per_point: Option<f64>,
+    /// Stories the median was taken over.
+    #[serde(default)]
+    pub points_sample: usize,
     #[serde(default)]
     pub entries_scanned: usize,
     #[serde(default)]
@@ -464,24 +495,51 @@ impl Votes {
 
 /// Strips keys, digits and punctuation so "Retro 12/05" and "retro sprint 34"
 /// collapse onto the same recurring rule.
-fn normalize_description(description: &str) -> String {
+///
+/// Must stay in step with `normalizeDescription` in `toggl-plan.ts`: calendar
+/// titles are normalised there and looked up in keys produced here. Accented
+/// letters are kept and lower-cased on both sides — "Attività" used to become
+/// "attività" here and "attivit" there, and never matched.
+pub fn normalize_description(description: &str) -> String {
     let without_keys = crate::jira::strip_jira_keys(description);
     let cleaned: String = without_keys
         .chars()
-        .map(|c| {
-            if c.is_alphabetic() || c.is_whitespace() {
-                c.to_ascii_lowercase()
-            } else {
-                ' '
-            }
-        })
-        .collect();
+        .map(|c| if c.is_alphabetic() || c.is_whitespace() { c } else { ' ' })
+        .collect::<String>()
+        .to_lowercase();
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Lookup keys for a calendar event, most specific first: the recurring series
+/// (stable even when the title changes) and the normalised title (shared by
+/// separate events with the same name).
+pub fn event_keys(recurring_event_id: Option<&str>, title: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Some(id) = recurring_event_id.filter(|id| !id.is_empty()) {
+        keys.push(format!("rec:{id}"));
+    }
+    let normalized = normalize_description(title);
+    if !normalized.is_empty() {
+        keys.push(format!("title:{normalized}"));
+    }
+    keys
 }
 
 /// Builds the mapping rules from past time entries: which project (and tags) each
 /// Jira key, key prefix and recurring meeting ended up on.
+/// Minutes of a settled entry, split evenly between the keys it names.
+fn add_minutes(minutes_by_key: &mut HashMap<String, i64>, entry: &TogglTimeEntry, keys: &[String]) {
+    if entry.duration <= 0 || keys.is_empty() {
+        return;
+    }
+    let share = entry.duration / 60 / keys.len() as i64;
+    for key in keys {
+        *minutes_by_key.entry(key.clone()).or_default() += share;
+    }
+}
+
 pub fn learn_from_entries(entries: &[TogglTimeEntry], learned_at: String) -> LearnedRules {
+    let mut minutes_by_key: HashMap<String, i64> = HashMap::new();
     let mut by_key: HashMap<String, Votes> = HashMap::new();
     let mut by_prefix: HashMap<String, Votes> = HashMap::new();
     let mut recurring: HashMap<String, Votes> = HashMap::new();
@@ -499,6 +557,7 @@ pub fn learn_from_entries(entries: &[TogglTimeEntry], learned_at: String) -> Lea
             }
             continue;
         }
+        add_minutes(&mut minutes_by_key, entry, &keys);
         for key in keys {
             by_key.entry(key.clone()).or_default().record(entry);
             if let Some((prefix, _)) = key.split_once('-') {
@@ -535,9 +594,127 @@ pub fn learn_from_entries(entries: &[TogglTimeEntry], learned_at: String) -> Lea
             .map(|(prefix, votes)| (prefix, votes.into_hint()))
             .collect(),
         recurring,
+        by_event: HashMap::new(),
+        minutes_by_key,
+        minutes_per_point: None,
+        points_sample: 0,
         entries_scanned: entries.len(),
         learned_at,
         version: RULES_VERSION,
+    }
+}
+
+fn parse_instant(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+}
+
+/// Learns how calendar events were booked by matching each past event with the
+/// entries that overlap it — whatever the entry was called.
+///
+/// Matching on the description alone misses the common case: the event is
+/// "Weekly sync Acme", the entry was booked as "Sync cliente", and next week's
+/// event never finds its project again.
+pub fn learn_from_calendar(
+    rules: &mut LearnedRules,
+    entries: &[TogglTimeEntry],
+    events: &[crate::google::CalendarEvent],
+) {
+    let spans: Vec<(&TogglTimeEntry, i64, i64)> = entries
+        .iter()
+        .filter(|entry| entry.duration >= 0)
+        .filter_map(|entry| {
+            let start = parse_instant(&entry.start)?.timestamp();
+            let stop = entry
+                .stop
+                .as_deref()
+                .and_then(parse_instant)
+                .map_or(start + entry.duration, |stop| stop.timestamp());
+            (stop > start).then_some((entry, start, stop))
+        })
+        .collect();
+
+    let mut votes: HashMap<String, Votes> = HashMap::new();
+    for event in events.iter().filter(|event| !event.declined && !event.transparent) {
+        let (Some(start), Some(end)) = (parse_instant(&event.start), parse_instant(&event.end)) else {
+            continue;
+        };
+        let (event_start, event_end) = (start.timestamp(), end.timestamp());
+        if event_end <= event_start {
+            continue;
+        }
+        let keys = event_keys(event.recurring_event_id.as_deref(), &event.summary);
+        for (entry, entry_start, entry_stop) in &spans {
+            let overlap = event_end.min(*entry_stop) - event_start.max(*entry_start);
+            if overlap <= 0 {
+                continue;
+            }
+            let (event_len, entry_len) = (event_end - event_start, entry_stop - entry_start);
+            // An entry mostly inside the event is about it. One that covers the
+            // event only counts when it is not much longer — a two-hour story
+            // entry that swallowed a 15-minute daily says nothing about the daily.
+            let entry_inside = overlap * 2 >= entry_len;
+            let event_inside = overlap * 2 >= event_len && entry_len <= event_len * 2;
+            if entry_inside || event_inside {
+                for key in &keys {
+                    votes.entry(key.clone()).or_default().record(entry);
+                }
+            }
+        }
+    }
+
+    rules.by_event = votes
+        .into_iter()
+        .map(|(key, votes)| (key, votes.into_hint()))
+        .collect();
+}
+
+/// The user's pace: median minutes per story point over stories that have an
+/// estimate and enough booked time to mean something. Needs three stories.
+pub fn minutes_per_point(samples: &[(f64, i64)]) -> Option<f64> {
+    let mut ratios: Vec<f64> = samples
+        .iter()
+        .filter(|(points, minutes)| *points > 0.0 && *minutes >= 30)
+        .map(|(points, minutes)| *minutes as f64 / points)
+        .collect();
+    if ratios.len() < 3 {
+        return None;
+    }
+    ratios.sort_by(|a, b| a.total_cmp(b));
+    let middle = ratios.len() / 2;
+    Some(if ratios.len() % 2 == 0 {
+        (ratios[middle - 1] + ratios[middle]) / 2.0
+    } else {
+        ratios[middle]
+    })
+}
+
+/// What the user picked in the planner for calendar events, keyed like
+/// [`LearnedRules::by_event`]. Kept in its own file and never expired: the
+/// learned rules are rebuilt from history every week, and a meeting booked
+/// once must not be forgotten by the time it comes round again.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventMemory {
+    #[serde(default)]
+    pub events: HashMap<String, ProjectHint>,
+}
+
+impl EventMemory {
+    /// The newest booking of an event wins — it is the most recent evidence of
+    /// what the user wants for it.
+    pub fn remember(&mut self, calendar: &CalendarRef, entry: &TogglTimeEntry) {
+        for key in event_keys(calendar.recurring_event_id.as_deref(), &calendar.title) {
+            reinforce_hint(self.events.entry(key).or_default(), entry);
+        }
+    }
+
+    /// Lays the remembered choices over the learned ones.
+    pub fn overlay(&self, rules: &mut LearnedRules) {
+        for (key, hint) in &self.events {
+            rules.by_event.insert(key.clone(), hint.clone());
+        }
     }
 }
 
@@ -571,6 +748,7 @@ pub fn reinforce_rules(rules: &mut LearnedRules, entries: &[TogglTimeEntry], lea
             }
             continue;
         }
+        add_minutes(&mut rules.minutes_by_key, entry, &keys);
         for key in keys {
             reinforce_hint(rules.by_key.entry(key.clone()).or_default(), entry);
             if let Some((prefix, _)) = key.split_once('-') {
@@ -690,6 +868,86 @@ mod tests {
             String::new(),
         );
         assert!(!rules.by_key["PENT-9"].billable);
+    }
+
+    fn event(summary: &str, recurring: Option<&str>, start: &str, end: &str) -> crate::google::CalendarEvent {
+        crate::google::CalendarEvent {
+            id: "e".into(),
+            summary: summary.into(),
+            start: start.into(),
+            end: end.into(),
+            declined: false,
+            transparent: false,
+            event_type: "default".into(),
+            recurring_event_id: recurring.map(String::from),
+        }
+    }
+
+    #[test]
+    fn calendar_events_learn_from_overlapping_entries_whatever_their_name() {
+        let entries = vec![
+            entry("Sync cliente", Some(77), &["meeting"]),
+            TogglTimeEntry {
+                start: "2026-07-01T12:00:00Z".into(),
+                stop: Some("2026-07-01T13:00:00Z".into()),
+                ..entry("PENT-1 work", Some(10), &[])
+            },
+        ];
+        let events = vec![event(
+            "Weekly sync Acme",
+            Some("series-1"),
+            "2026-07-01T08:00:00Z",
+            "2026-07-01T08:45:00Z",
+        )];
+        let mut rules = learn_from_entries(&entries, String::new());
+        learn_from_calendar(&mut rules, &entries, &events);
+
+        let by_series = &rules.by_event["rec:series-1"];
+        assert_eq!(by_series.project_id, Some(77));
+        assert_eq!(by_series.description.as_deref(), Some("Sync cliente"));
+        assert_eq!(rules.by_event["title:weekly sync acme"].project_id, Some(77));
+        assert_eq!(by_series.uses, 1, "the 12:00 entry does not overlap");
+    }
+
+    #[test]
+    fn remembered_event_choices_survive_a_relearn() {
+        let mut memory = EventMemory::default();
+        let calendar = CalendarRef {
+            recurring_event_id: Some("series-9".into()),
+            title: "Allineamento attività".into(),
+        };
+        memory.remember(&calendar, &entry("Allineamento", Some(5), &["call"]));
+
+        // A relearn from history starts from scratch…
+        let mut rules = learn_from_entries(&[], String::new());
+        assert!(rules.by_event.is_empty());
+        // …and the memory is laid back on top.
+        memory.overlay(&mut rules);
+        assert_eq!(rules.by_event["rec:series-9"].project_id, Some(5));
+        assert_eq!(rules.by_event["title:allineamento attività"].project_id, Some(5));
+    }
+
+    #[test]
+    fn minutes_are_tallied_per_key_and_split_between_keys() {
+        let entries = vec![
+            entry("PENT-1 a", Some(10), &[]),               // 60 min
+            entry("PENT-1 PENT-2 pairing", Some(10), &[]), // 30 + 30
+        ];
+        let rules = learn_from_entries(&entries, String::new());
+        assert_eq!(rules.minutes_by_key["PENT-1"], 90);
+        assert_eq!(rules.minutes_by_key["PENT-2"], 30);
+    }
+
+    #[test]
+    fn pace_is_the_median_over_enough_stories() {
+        assert_eq!(minutes_per_point(&[(1.0, 120), (2.0, 600)]), None, "two stories are not enough");
+        // 120/1, 300/2, 900/3 → 120, 150, 300 → median 150; the 10-minute one is noise.
+        assert_eq!(minutes_per_point(&[(1.0, 120), (2.0, 300), (3.0, 900), (5.0, 10)]), Some(150.0));
+    }
+
+    #[test]
+    fn normalisation_keeps_accents_and_lowercases_them() {
+        assert_eq!(normalize_description("ATTIVITÀ di stima PENT-12 #3"), "attività di stima");
     }
 
     #[test]

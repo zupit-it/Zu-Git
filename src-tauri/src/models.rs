@@ -36,6 +36,12 @@ pub struct AppSettings {
     pub toggl_slot_minutes: u32,
     /// How far back the project/tag mapping is learned from.
     pub toggl_history_days: u32,
+    /// Read local git commits and AI coding sessions to tell which stories were
+    /// actually worked on.
+    pub toggl_activity_signals: bool,
+    /// Share the time no evidence explains between the sprint's stories, in
+    /// proportion to what their estimate still leaves unbooked.
+    pub toggl_fill_gaps: bool,
     pub google_calendar_enabled: bool,
     pub google_client_id: String,
     pub google_client_secret: String,
@@ -78,6 +84,8 @@ impl Default for AppSettings {
             toggl_day_end: "14:00".to_string(),
             toggl_slot_minutes: 15,
             toggl_history_days: 60,
+            toggl_activity_signals: true,
+            toggl_fill_gaps: false,
             google_calendar_enabled: false,
             google_client_id: String::new(),
             google_client_secret: String::new(),
@@ -126,6 +134,10 @@ pub struct SettingsFormValues {
     pub toggl_day_end: String,                            // "HH:MM"
     pub toggl_slot_minutes: String,
     pub toggl_history_days: String,
+    #[serde(default)]
+    pub toggl_activity_signals: String,                   // "on" | ""
+    #[serde(default)]
+    pub toggl_fill_gaps: String,                          // "on" | ""
     pub google_calendar_enabled: String,                  // "on" | ""
     pub google_client_id: String,
     pub google_client_secret: String,
@@ -504,6 +516,8 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
             Ok(days) if (7..=90).contains(&days) => days,
             _ => 60,
         },
+        toggl_activity_signals: values.toggl_activity_signals.trim() == "on",
+        toggl_fill_gaps: values.toggl_fill_gaps.trim() == "on",
         google_calendar_enabled: values.google_calendar_enabled.trim() == "on",
         google_client_id: values.google_client_id.trim().to_string(),
         google_client_secret: values.google_client_secret.trim().to_string(),
@@ -574,6 +588,8 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         toggl_day_end: settings.toggl_day_end.clone(),
         toggl_slot_minutes: settings.toggl_slot_minutes.to_string(),
         toggl_history_days: settings.toggl_history_days.to_string(),
+        toggl_activity_signals: if settings.toggl_activity_signals { "on".to_string() } else { String::new() },
+        toggl_fill_gaps: if settings.toggl_fill_gaps { "on".to_string() } else { String::new() },
         google_calendar_enabled: if settings.google_calendar_enabled { "on".to_string() } else { String::new() },
         google_client_id: settings.google_client_id.clone(),
         google_client_secret: settings.google_client_secret.clone(),

@@ -1154,23 +1154,90 @@ pub struct ActiveIssues {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct JiraChangelogPage {
     #[serde(default)]
     values: Vec<JiraChangelogEntry>,
+    #[serde(default)]
+    total: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct JiraChangelogEntry {
     #[serde(default)]
     created: Option<String>,
     #[serde(default)]
+    author: Option<JiraChangelogAuthor>,
+    #[serde(default)]
     items: Vec<JiraChangelogItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JiraChangelogAuthor {
+    #[serde(default)]
+    account_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct JiraChangelogItem {
     #[serde(default)]
     field: Option<String>,
+    #[serde(default, rename = "toString")]
+    to_status: Option<String>,
+}
+
+impl JiraChangelogEntry {
+    fn status_item(&self) -> Option<&JiraChangelogItem> {
+        self.items
+            .iter()
+            .find(|item| item.field.as_deref() == Some("status"))
+    }
+}
+
+const CHANGELOG_PAGE: u32 = 100;
+
+/// The newest page of an issue's changelog (oldest-first within the page).
+///
+/// Long-lived stories easily pass 100 changes, and the first page alone would
+/// then miss exactly the recent transitions the planner cares about — so when
+/// the total says there is more, the last page is fetched instead.
+async fn fetch_changelog_tail(
+    key: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Option<Vec<JiraChangelogEntry>> {
+    let fetch = |start_at: u32| {
+        let url = format!(
+            "{}/rest/api/3/issue/{}/changelog?maxResults={CHANGELOG_PAGE}&startAt={start_at}",
+            settings.jira_base_url, key
+        );
+        client
+            .get(url)
+            .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+            .send()
+    };
+
+    let resp = fetch(0).await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let page: JiraChangelogPage = resp.json().await.ok()?;
+    let total = page.total.unwrap_or(0);
+    if total <= CHANGELOG_PAGE {
+        return Some(page.values);
+    }
+
+    let resp = fetch(total - CHANGELOG_PAGE).await.ok()?;
+    if !resp.status().is_success() {
+        return Some(page.values);
+    }
+    resp.json::<JiraChangelogPage>()
+        .await
+        .ok()
+        .map(|tail| tail.values)
+        .or(Some(page.values))
 }
 
 /// Timestamp of the most recent status transition for an issue, or `None` when
@@ -1180,31 +1247,294 @@ async fn fetch_last_status_change(
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Option<String> {
-    let url = format!(
-        "{}/rest/api/3/issue/{}/changelog?maxResults=100",
-        settings.jira_base_url, key
-    );
+    let entries = fetch_changelog_tail(key, settings, client).await?;
+    entries
+        .iter()
+        .filter(|entry| entry.status_item().is_some())
+        .filter_map(|entry| entry.created.clone())
+        .next_back()
+}
+
+/// The viewer's Atlassian account id — changelog authors are identified by it.
+async fn fetch_my_account_id(
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<String, ApiError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Myself {
+        account_id: String,
+    }
+
     let resp = client
-        .get(&url)
+        .get(format!("{}/rest/api/3/myself", settings.jira_base_url))
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
         .send()
         .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(ApiError::from_status(
+            status.as_u16(),
+            format!("Jira /myself failed ({status})"),
+        ));
     }
-    let page: JiraChangelogPage = resp.json().await.ok()?;
-    // The changelog is returned oldest-first; the last status item wins.
-    page.values
-        .iter()
-        .filter(|entry| {
-            entry
-                .items
-                .iter()
-                .any(|item| item.field.as_deref() == Some("status"))
+    resp.json::<Myself>()
+        .await
+        .map(|me| me.account_id)
+        .map_err(|e| ApiError::Other(e.to_string()))
+}
+
+/// A status change the viewer made by hand during the planned day.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MyTransition {
+    pub key: String,
+    /// RFC3339, as Jira returns it.
+    pub at: String,
+    /// Name of the status the story was moved into ("Developed", "Merge Request"…).
+    pub to_status: String,
+}
+
+/// Every story whose status the viewer changed during `[from, to)`, with the
+/// transitions themselves.
+///
+/// This is what catches the stories that never show up as "in progress": the
+/// one moved straight to Developed, the one dragged out of To Do at the end of
+/// the day, the merge request that got a quick fix and went back. Deliberately
+/// not limited to `assignee = currentUser()`: moving a story to Developed often
+/// hands it over to QA, and it would vanish from the search at that very moment.
+pub async fn fetch_my_transitions(
+    from: chrono::DateTime<chrono::Local>,
+    to: chrono::DateTime<chrono::Local>,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<(Vec<JiraIssueSummary>, Vec<MyTransition>), ApiError> {
+    // JQL dates are minute-precise and read in the Jira profile's timezone,
+    // which is the local one for practically everyone.
+    let jql = format!(
+        "status CHANGED BY currentUser() DURING (\"{}\", \"{}\") ORDER BY updated DESC",
+        from.format("%Y/%m/%d %H:%M"),
+        to.format("%Y/%m/%d %H:%M"),
+    );
+    let (issues, me) = futures::future::join(
+        search_issues(&jql, settings, client),
+        fetch_my_account_id(settings, client),
+    )
+    .await;
+    let issues = issues?;
+    let me = me?;
+
+    let changelogs = futures::future::join_all(
+        issues
+            .iter()
+            .map(|issue| fetch_changelog_tail(&issue.key, settings, client)),
+    )
+    .await;
+
+    let from_utc = from.with_timezone(&chrono::Utc);
+    let to_utc = to.with_timezone(&chrono::Utc);
+    let mut transitions = Vec::new();
+    for (issue, changelog) in issues.iter().zip(changelogs) {
+        for entry in changelog.unwrap_or_default() {
+            let Some(item) = entry.status_item() else { continue };
+            let by_me = entry
+                .author
+                .as_ref()
+                .and_then(|author| author.account_id.as_deref())
+                == Some(me.as_str());
+            let Some(created) = entry.created.as_deref() else { continue };
+            let Some(at) = parse_jira_datetime(created) else { continue };
+            if by_me && at >= from_utc && at < to_utc {
+                transitions.push(MyTransition {
+                    key: issue.key.clone(),
+                    at: at.to_rfc3339(),
+                    to_status: item.to_status.clone().unwrap_or_default(),
+                });
+            }
+        }
+    }
+
+    Ok((issues, transitions))
+}
+
+/// Jira writes offsets without the colon ("2026-10-01T11:02:33.120+0200"),
+/// which strict RFC3339 parsing rejects.
+pub fn parse_jira_datetime(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .or_else(|_| chrono::DateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f%z"))
+        .ok()
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+}
+
+// ── Story points (gap filling) ────────────────────────────────────────────────
+
+/// A story with its estimate, for filling the time no evidence explains.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PointedIssue {
+    pub key: String,
+    pub summary: String,
+    pub status: String,
+    /// Jira status category: "new" | "indeterminate" | "done".
+    pub status_category: String,
+    pub issue_type: String,
+    pub points: Option<f64>,
+}
+
+/// Ids of the story-point fields. The name depends on the project type —
+/// "Story Points" on company-managed boards, "Story point estimate" on
+/// team-managed ones — and a tenant often has both.
+async fn story_point_fields(settings: &AppSettings, client: &reqwest::Client) -> Vec<String> {
+    #[derive(Deserialize)]
+    struct Field {
+        id: String,
+        #[serde(default)]
+        name: String,
+    }
+    let Ok(resp) = client
+        .get(format!("{}/rest/api/3/field", settings.jira_base_url))
+        .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+        .send()
+        .await
+    else {
+        return vec![];
+    };
+    let fields: Vec<Field> = resp.json().await.unwrap_or_default();
+    fields
+        .into_iter()
+        .filter(|field| {
+            let name = field.name.trim().to_lowercase();
+            name == "story points" || name == "story point estimate"
         })
-        .filter_map(|entry| entry.created.clone())
-        .next_back()
+        .map(|field| field.id)
+        .collect()
+}
+
+/// A JQL search returning raw issues, for field sets the typed search does not cover.
+async fn search_raw(
+    jql: &str,
+    fields: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<Vec<serde_json::Value>, ApiError> {
+    let body = serde_json::json!({ "jql": jql, "fields": fields, "maxResults": 100 });
+    let send = |path: &str| {
+        client
+            .post(format!("{}{path}", settings.jira_base_url))
+            .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+            .json(&body)
+            .send()
+    };
+    let mut resp = send("/rest/api/3/search/jql")
+        .await
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+    if matches!(resp.status().as_u16(), 404 | 405 | 410) {
+        resp = send("/rest/api/3/search")
+            .await
+            .map_err(|e| ApiError::Other(e.to_string()))?;
+    }
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(ApiError::from_status(status.as_u16(), format!("Jira search failed ({status})")));
+    }
+    let payload: serde_json::Value = resp.json().await.map_err(|e| ApiError::Other(e.to_string()))?;
+    Ok(payload["issues"].as_array().cloned().unwrap_or_default())
+}
+
+fn pointed_issue(raw: &serde_json::Value, point_fields: &[String]) -> Option<PointedIssue> {
+    let fields = &raw["fields"];
+    let text = |value: &serde_json::Value| value.as_str().unwrap_or("").to_string();
+    Some(PointedIssue {
+        key: raw["key"].as_str()?.to_string(),
+        summary: text(&fields["summary"]),
+        status: text(&fields["status"]["name"]),
+        status_category: text(&fields["status"]["statusCategory"]["key"]),
+        issue_type: text(&fields["issuetype"]["name"]),
+        points: point_fields
+            .iter()
+            .find_map(|id| fields[id.as_str()].as_f64())
+            .filter(|points| *points > 0.0),
+    })
+}
+
+fn pointed_field_list(point_fields: &[String]) -> Vec<String> {
+    let mut fields: Vec<String> = ["summary", "status", "issuetype"].iter().map(|f| f.to_string()).collect();
+    fields.extend(point_fields.iter().cloned());
+    fields
+}
+
+/// The viewer's stories in the open sprints, with their estimates.
+pub async fn fetch_sprint_issues(
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<Vec<PointedIssue>, ApiError> {
+    let point_fields = story_point_fields(settings, client).await;
+    let issues = search_raw(
+        "assignee = currentUser() AND sprint in openSprints() ORDER BY updated DESC",
+        &pointed_field_list(&point_fields),
+        settings,
+        client,
+    )
+    .await?;
+    Ok(issues.iter().filter_map(|raw| pointed_issue(raw, &point_fields)).collect())
+}
+
+/// Estimates for arbitrary keys (from Toggl history). A key Jira does not know
+/// fails the whole `issueKey in (…)` query, so a failing chunk is retried one
+/// key at a time — this runs once a week, with the history relearn.
+pub async fn fetch_points_for(
+    keys: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Vec<PointedIssue> {
+    let point_fields = story_point_fields(settings, client).await;
+    if point_fields.is_empty() {
+        return vec![];
+    }
+    let fields = pointed_field_list(&point_fields);
+    let query = |keys: &[String]| {
+        format!(
+            "issueKey in ({})",
+            keys.iter().map(|k| format!("\"{k}\"")).collect::<Vec<_>>().join(", ")
+        )
+    };
+
+    let mut found = Vec::new();
+    for chunk in keys.chunks(40) {
+        match search_raw(&query(chunk), &fields, settings, client).await {
+            Ok(issues) => found.extend(issues.iter().filter_map(|raw| pointed_issue(raw, &point_fields))),
+            Err(_) => {
+                for key in chunk {
+                    if let Ok(issues) = search_raw(&query(std::slice::from_ref(key)), &fields, settings, client).await {
+                        found.extend(issues.iter().filter_map(|raw| pointed_issue(raw, &point_fields)));
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Summaries for keys found in local activity (branches, commits) that are not
+/// among the active stories. Keys Jira does not know are simply left out —
+/// that is what filters "FEAT-2" out of a branch called `feat-2-cleanup`.
+pub async fn fetch_issue_summaries(
+    keys: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Vec<JiraIssueSummary> {
+    if keys.is_empty() {
+        return vec![];
+    }
+    let cache = Mutex::new(HashMap::new());
+    let mut found: Vec<JiraIssueSummary> = fetch_jira_issues(keys, settings, &cache, client)
+        .await
+        .into_values()
+        .flatten()
+        .collect();
+    found.sort_by(|a, b| a.key.cmp(&b.key));
+    found
 }
 
 /// Runs a JQL search for the active-work queries, falling back to the legacy
@@ -1258,6 +1588,11 @@ async fn search_issues(
     Ok(parsed.issues.iter().map(map_issue).collect())
 }
 
+/// Without a sprint to scope by, a status alone is not evidence of current work:
+/// stories forgotten in "In Progress" or "Merge Request" by QA or a PM sit there
+/// for months. Only stories touched within this many days count.
+const UNSCOPED_RECENT: &str = "updated >= -14d";
+
 /// Issues assigned to the viewer in one specific status, restricted to the open
 /// sprint when the tenant has sprints.
 ///
@@ -1276,7 +1611,7 @@ async fn search_my_issues_in_status(
     match search_issues(&scoped, settings, client).await {
         Ok(issues) => Ok((issues, true)),
         Err(error) if error.is_auth() => Err(error),
-        Err(_) => search_issues(&format!("{base} ORDER BY updated DESC"), settings, client)
+        Err(_) => search_issues(&format!("{base} AND {UNSCOPED_RECENT} ORDER BY updated DESC"), settings, client)
             .await
             .map(|issues| (issues, false)),
     }
@@ -1302,14 +1637,27 @@ pub async fn fetch_my_active_issues(
     let (merge_request, merge_scoped) = merge_request?;
     let sprint_scoped = in_progress_scoped && merge_scoped;
 
-    // Nothing in the open sprint at all usually means the board doesn't use
-    // sprints the way the filter assumes — fall back to every active story and
-    // let the panel say so, rather than showing an empty planner.
+    // No active story in the open sprint has two very different meanings. If
+    // the viewer has stories in the sprint (all Developed, Verified…), nothing
+    // is active right now and that is the answer: falling back to every story
+    // ever assigned would resurrect months-old ones left in "In Progress" or
+    // "Merge Request". Only when the sprint holds nothing of theirs — the board
+    // doesn't use sprints the way the filter assumes — fall back, and let the
+    // panel say so rather than show an empty planner.
+    let empty_sprint = sprint_scoped && in_progress.is_empty() && merge_request.is_empty();
+    let uses_sprints = empty_sprint
+        && search_issues(
+            "assignee = currentUser() AND sprint in openSprints() ORDER BY updated DESC",
+            settings,
+            client,
+        )
+        .await
+        .is_ok_and(|issues| !issues.is_empty());
     let (in_progress, merge_request, sprint_scoped) =
-        if sprint_scoped && in_progress.is_empty() && merge_request.is_empty() {
+        if empty_sprint && !uses_sprints {
             let base = |status: &str| {
                 format!(
-                    "assignee = currentUser() AND status = \"{}\" ORDER BY updated DESC",
+                    "assignee = currentUser() AND status = \"{}\" AND {UNSCOPED_RECENT} ORDER BY updated DESC",
                     status.replace('"', "\\\"")
                 )
             };

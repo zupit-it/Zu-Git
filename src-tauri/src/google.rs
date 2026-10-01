@@ -53,6 +53,9 @@ pub struct CalendarEvent {
     pub transparent: bool,
     /// "default" | "outOfOffice" | "focusTime" | …
     pub event_type: String,
+    /// Id of the series this occurrence belongs to — the stable identity of a
+    /// recurring meeting, whatever its title says this week.
+    pub recurring_event_id: Option<String>,
 }
 
 // ── PKCE helpers ─────────────────────────────────────────────────────────────
@@ -291,9 +294,12 @@ pub async fn fetch_primary_calendar(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RawEventList {
     #[serde(default)]
     items: Vec<RawEvent>,
+    #[serde(default)]
+    next_page_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,6 +321,8 @@ struct RawEvent {
     event_type: Option<String>,
     #[serde(default)]
     attendees: Vec<RawAttendee>,
+    #[serde(default)]
+    recurring_event_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -349,60 +357,93 @@ pub async fn fetch_events(
     time_max: &str,
     client: &reqwest::Client,
 ) -> Result<Vec<CalendarEvent>, String> {
-    let encoded_id = url::form_urlencoded::byte_serialize(calendar_id.as_bytes()).collect::<String>();
-    let response = client
-        .get(format!("{CALENDAR_API}/calendars/{encoded_id}/events"))
-        .query(&[
-            ("timeMin", time_min),
-            ("timeMax", time_max),
-            ("singleEvents", "true"),
-            ("orderBy", "startTime"),
-            ("maxResults", "50"),
-        ])
-        .bearer_auth(access_token)
-        .send()
-        .await
-        .map_err(|e| format!("Google Calendar unreachable: {e}"))?;
+    fetch_events_paged(access_token, calendar_id, time_min, time_max, 1, client).await
+}
 
-    let status = response.status();
-    if !status.is_success() {
-        let detail = response.text().await.unwrap_or_default();
-        return Err(format!(
-            "Google Calendar rejected the request ({status}): {}",
-            detail.chars().take(200).collect::<String>()
-        ));
+/// Same as [`fetch_events`], following `nextPageToken` for up to `max_pages`
+/// pages of 250 — enough for the months of history the mapping is learned from.
+pub async fn fetch_events_paged(
+    access_token: &str,
+    calendar_id: &str,
+    time_min: &str,
+    time_max: &str,
+    max_pages: usize,
+    client: &reqwest::Client,
+) -> Result<Vec<CalendarEvent>, String> {
+    let encoded_id = url::form_urlencoded::byte_serialize(calendar_id.as_bytes()).collect::<String>();
+    let mut events = Vec::new();
+    let mut page_token: Option<String> = None;
+
+    for _ in 0..max_pages.max(1) {
+        let mut query = vec![
+            ("timeMin", time_min.to_string()),
+            ("timeMax", time_max.to_string()),
+            ("singleEvents", "true".to_string()),
+            ("orderBy", "startTime".to_string()),
+            ("maxResults", "250".to_string()),
+        ];
+        if let Some(token) = &page_token {
+            query.push(("pageToken", token.clone()));
+        }
+
+        let response = client
+            .get(format!("{CALENDAR_API}/calendars/{encoded_id}/events"))
+            .query(&query)
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|e| format!("Google Calendar unreachable: {e}"))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let detail = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "Google Calendar rejected the request ({status}): {}",
+                detail.chars().take(200).collect::<String>()
+            ));
+        }
+
+        let list: RawEventList = response
+            .json()
+            .await
+            .map_err(|e| format!("Could not parse the calendar events: {e}"))?;
+
+        events.extend(list.items.into_iter().filter_map(map_event));
+        page_token = list.next_page_token;
+        if page_token.is_none() {
+            break;
+        }
     }
 
-    let list: RawEventList = response
-        .json()
-        .await
-        .map_err(|e| format!("Could not parse the calendar events: {e}"))?;
+    Ok(events)
+}
 
-    Ok(list
-        .items
-        .into_iter()
-        .filter(|event| event.status.as_deref() != Some("cancelled"))
-        .filter(|event| event.event_type.as_deref() != Some("workingLocation"))
-        // All-day entries carry `date` instead of `dateTime`: they describe the
-        // shape of the day, not a slot of work inside it.
-        .filter(|event| event.start.as_ref().and_then(|s| s.date.as_ref()).is_none())
-        .filter_map(|event| {
-            let start = event.start.as_ref()?.date_time.clone()?;
-            let end = event.end.as_ref()?.date_time.clone()?;
-            let declined = event.attendees.iter().any(|attendee| {
-                attendee.is_self && attendee.response_status.as_deref() == Some("declined")
-            });
-            Some(CalendarEvent {
-                id: event.id.unwrap_or_default(),
-                summary: event.summary.unwrap_or_else(|| "(senza titolo)".to_string()),
-                start,
-                end,
-                declined,
-                transparent: event.transparency.as_deref() == Some("transparent"),
-                event_type: event.event_type.unwrap_or_else(|| "default".to_string()),
-            })
-        })
-        .collect())
+fn map_event(event: RawEvent) -> Option<CalendarEvent> {
+    if event.status.as_deref() == Some("cancelled")
+        || event.event_type.as_deref() == Some("workingLocation")
+    {
+        return None;
+    }
+    // All-day entries carry `date` instead of `dateTime`: they describe the
+    // shape of the day, not a slot of work inside it.
+    if event.start.as_ref()?.date.is_some() {
+        return None;
+    }
+    let start = event.start.as_ref()?.date_time.clone()?;
+    let end = event.end.as_ref()?.date_time.clone()?;
+    let declined = event.attendees.iter().any(|attendee| {
+        attendee.is_self && attendee.response_status.as_deref() == Some("declined")
+    });
+    Some(CalendarEvent {
+        id: event.id.unwrap_or_default(),
+        summary: event.summary.unwrap_or_else(|| "(senza titolo)".to_string()),
+        start,
+        end,
+        declined,
+        transparent: event.transparency.as_deref() == Some("transparent"),
+        event_type: event.event_type.unwrap_or_else(|| "default".to_string()),
+        recurring_event_id: event.recurring_event_id,
+    })
 }
 
 #[cfg(test)]

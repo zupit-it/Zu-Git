@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CHANGELOG = join(__dirname, "../CHANGELOG.md");
+const RAW_BASE = "https://raw.githubusercontent.com/zupit-it/Zu-Git";
 
 const [, , command, version] = process.argv;
 
@@ -47,7 +48,13 @@ if (command === "bump") {
     console.error(`No entry found for version ${version} in CHANGELOG.md`);
     process.exit(1);
   }
-  process.stdout.write(match[1].trim());
+  // Images are written repo-relative in CHANGELOG.md so they render on GitHub;
+  // the release body (GitHub release page, update modal) needs absolute URLs,
+  // pinned to the release tag so they never change under an old release.
+  const notes = match[1]
+    .trim()
+    .replace(/\]\((?:\.\/)?(public\/[^)\s]+)\)/g, `](${RAW_BASE}/v${version}/$1)`);
+  process.stdout.write(notes);
 
 } else {
   console.error(`Unknown command: ${command}`);

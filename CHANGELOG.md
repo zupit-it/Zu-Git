@@ -12,6 +12,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.12.0] - 2026-08-13
 
 ### Added
+- **Toggl: evidence of what you actually worked on** — besides the stories in progress or in merge
+  request, the planner now counts the stories you moved yourself during the day (into any status,
+  *Developed* included), your commits on every branch of the repositories you work in (unpushed ones
+  too) and your Claude Code / Codex sessions, whose git branch names the story. Jira moves made in
+  the same minute share their weight. Local sources can be switched off in **Settings → Toggl →
+  Activity**; only official projects count, experimental branches are ignored.
+- **Toggl: proportional split** — free time is shared by evidence instead of cutting every gap in
+  half: contiguous blocks of at least an hour, each with its reason (*Visto lavorare*, *Stima da
+  Jira*, *Riempimento*) and the other plausible stories as one-click swaps.
+
+  ![Toggl planner with evidence](public/assets/changelog/toggl-evidence.png)
+
+- **Toggl: gap filling** (optional, **Settings → Toggl → Gap filling**) — time no evidence explains
+  goes to the open sprint's stories in proportion to what their estimate still leaves unbooked:
+  story points × your pace (median minutes per point, learned from your Toggl history) minus what is
+  already booked. Stories without points count as one and never drop to zero.
+- **Toggl: calendar memory** — what you book for a meeting is remembered per recurring series and per
+  title, and past meetings are matched with the entries that overlapped them, so a recurring meeting
+  comes pre-filled even when it was booked under a different name.
+- **MCP connector** — `zugit --mcp` serves the Model Context Protocol, so Claude Code, Claude Desktop
+  or Codex can read a Toggl day (`toggl_get_day`), read booked entries (`toggl_get_entries`) and
+  propose a plan (`toggl_propose_day`, prompt `fill_toggl_day`). Credentials stay in the keychain.
+  Proposals are never written to Toggl: the planner opens on them (or swaps them in when already
+  open) and the user confirms; unconfirmed ones for other days are listed, and dropped after a week.
+  Setup commands in **Settings → Assistenti AI**.
+
+  ![AI proposal in the Toggl planner](public/assets/changelog/toggl-ai-proposal.png)
 - **Release notes: manual include / exclude** — every story in the release diff now carries a control
   in its last column showing whether it will end up in the notes. Clicking it offers **Include
   anyway** / **Exclude anyway** / **Auto (default)**, so a Missing story that shipped anyway can be
@@ -23,6 +50,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   *Principale* field — resolved by name at runtime, falling back to the built-in `parent` field —
   with stories without an epic grouped last. Grouping defaults to Epic when the release carries epic
   data. Each row also shows its epic next to the branch.
+
+### Fixed
+- **Toggl: old stories in the plan** — with nothing active in the open sprint, the planner fell back to
+  every story ever assigned in *In Progress* / *Merge Request*, resurrecting months-old ones. It now
+  falls back only when the sprint holds nothing of yours at all, and then only to stories updated in
+  the last 14 days.
+- **Toggl: recurring meetings forgotten** — the weekly relearn dropped meetings booked once, and
+  meetings were matched on the description you typed rather than on the event, so next week's
+  occurrence came up without a project. Accented titles never matched at all.
 ---
 
 ## [0.11.2] - 2026-08-12

@@ -2,6 +2,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { escHtml, errorMessage } from "./utils";
 import { setStatus } from "./render";
+import { parseChangelog, type ChangelogItem } from "./changelog-parse";
 
 const STORAGE_KEY = "zugit-changelog-seen";
 
@@ -19,6 +20,16 @@ interface VersionBlock {
 const VERSIONS: VersionBlock[] = [
   {
     entries: [
+      {
+        title: "Toggl — the plan follows what you actually did",
+        body: "The planner no longer guesses from Jira statuses alone. It also counts the stories <strong>you moved</strong> during the day — straight to <em>Developed</em> included — your <strong>commits</strong> on every branch, and your <strong>Claude Code and Codex sessions</strong>, whose branch names (<code>PENT-5755/…</code>, <code>ZUME-114/…</code>) say which story you were on. The day is then split <strong>in proportion</strong>, in blocks of at least an hour, instead of cutting every gap in half — and each row says why it is there (<em>Visto lavorare: 2 commits · → Merge Request</em>), with the other plausible stories one click away. Only the open sprint counts: a story forgotten in <em>In Progress</em> months ago no longer sneaks into your week. Meetings now remember how you booked them — per recurring series and per title, matched against your history by time — so next Wednesday's call comes pre-filled. Optional in <strong>Settings → Toggl</strong>: <strong>Gap filling</strong> shares the time nothing explains between the sprint's stories by what their estimate still leaves unbooked, at your own pace (minutes per story point, learned from your history).",
+        imgs: ["/assets/changelog/toggl-evidence.png"],
+      },
+      {
+        title: "Ask Claude or Codex to fill your day",
+        body: "ZuGit is now an <strong>MCP connector</strong>: register it once from <strong>Settings → Assistenti AI</strong> (the commands for Claude Code, Codex and Claude Desktop are ready to copy) and ask your assistant <em>\"compila il mio Toggl di oggi\"</em>. It reads the same day ZuGit sees — meetings, stories, commits, sessions, free time — adds what it knows from your conversation, and hands back a plan. Nothing reaches Toggl: the plan opens straight away in the planner, with a note on how the day was split and a reason on every row, and you confirm it — or go back to ZuGit's own plan with one click. <strong>Your tokens never leave the keychain</strong> and never appear in the conversation.",
+        imgs: ["/assets/changelog/toggl-ai-proposal.png"],
+      },
       {
         title: "Release notes — you decide what goes in, grouped by epic",
         body: "Every row of the release diff now says whether it will end up in the notes — <strong>In notes</strong> or <strong>Skipped</strong> — and one click on it offers <strong>Include anyway</strong> / <strong>Exclude anyway</strong> / <strong>Auto (default)</strong>. A story sitting in <em>Missing</em> that shipped anyway can finally be announced, and a <em>Done</em> one can be kept quiet, without editing Jira first. Everything left on <em>Auto</em> keeps following the usual rule — only Done goes in — and your decisions are saved per release, surviving a refresh, a version switch and a restart. The notes panel also gained an <strong>Epic</strong> grouping: <em>POWER</em> and <em>BUG</em> still lead, and under each one the stories are split into per-epic sections read from Jira's <strong>Principale</strong> field, with anything without an epic last.",
@@ -182,79 +193,6 @@ export async function showChangelog() {
 // Fed by the body published with the release, not by CHANGELOG.md: what goes in
 // the What's new modal above is curated by hand, on purpose.
 
-interface ChangelogItem {
-  title: string;
-  body: string;
-  category: string;
-}
-
-interface Release {
-  /** "0.9.7", or "Unreleased". */
-  version: string;
-  date: string;
-  items: ChangelogItem[];
-}
-
-const RELEASE_HEADING = /^##\s+\[([^\]]+)\]\s*(?:-\s*(.+))?$/;
-const CATEGORY_HEADING = /^###\s+(.+)$/;
-const BULLET = /^[-*]\s+(.*)$/;
-
-export function parseChangelog(markdown: string): Release[] {
-  const releases: Release[] = [];
-  let release: Release | null = null;
-  let category = "";
-  let item: ChangelogItem | null = null;
-
-  const flush = () => {
-    if (release && item && (item.title || item.body)) release.items.push(item);
-    item = null;
-  };
-
-  for (const raw of markdown.split(/\r?\n/)) {
-    const line = raw.trimEnd();
-
-    const heading = RELEASE_HEADING.exec(line);
-    if (heading) {
-      flush();
-      release = { version: heading[1], date: (heading[2] ?? "").trim(), items: [] };
-      releases.push(release);
-      category = "";
-      continue;
-    }
-    if (!release) continue;
-
-    const categoryLine = CATEGORY_HEADING.exec(line);
-    if (categoryLine) {
-      flush();
-      category = categoryLine[1].trim();
-      continue;
-    }
-
-    const bullet = BULLET.exec(line);
-    if (bullet) {
-      flush();
-      const text = bullet[1].trim();
-      // "**Title** — body" is the shape used throughout the changelog; anything
-      // else becomes a body-only item so nothing is lost.
-      const titled = /^\*\*(.+?)\*\*\s*[—–-]?\s*(.*)$/.exec(text);
-      item = titled
-        ? { title: titled[1].trim(), body: titled[2].trim(), category }
-        : { title: "", body: text, category };
-      continue;
-    }
-
-    // Continuation of the current bullet: the changelog wraps long entries.
-    if (item && line.trim()) {
-      item.body = `${item.body} ${line.trim()}`.trim();
-      continue;
-    }
-    if (!line.trim()) flush();
-  }
-  flush();
-
-  return releases.filter((entry) => entry.items.length > 0);
-}
-
 /** Inline markdown → HTML, for the small subset the changelog actually uses. */
 export function renderInline(markdown: string): string {
   return escHtml(markdown)
@@ -285,6 +223,13 @@ function renderItems(items: ChangelogItem[]): string {
               <div class="cl-entry-desc">${renderInline(item.body)}</div>
             </div>
           </div>
+          ${
+            item.imgs.length
+              ? `<div class="cl-entry-imgs">${item.imgs
+                  .map((src) => `<img class="cl-entry-img" src="${escHtml(src)}" alt="" onerror="this.hidden=true" loading="lazy" />`)
+                  .join("")}</div>`
+              : ""
+          }
         </div>`;
     })
     .join("");

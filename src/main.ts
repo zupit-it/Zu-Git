@@ -18,7 +18,7 @@ import {
   setStaleAuthorType, setStaleGroupByAuthor, setStaleOnlyMine,
 } from "./stale-branches";
 import {
-  openTogglPanel, startTogglReminder, testTogglConnection,
+  initMcpSetup, openTogglPanel, startTogglReminder, testTogglConnection,
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
 import { escHtml, avatarColor, loginInitials, errorMessage } from "./utils";
@@ -104,6 +104,7 @@ window.addEventListener("DOMContentLoaded", () => {
       const button = event.currentTarget;
       if (button instanceof HTMLButtonElement) void testTogglConnection(button);
     });
+  void initMcpSetup();
 
   // ── Search ──────────────────────────────────────────────────────────────────
   document

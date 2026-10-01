@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { escHtml, errorMessage } from "./utils";
 import { state } from "./state";
-import { notifyTogglReminder, refreshGoogleStatus, setStatus } from "./render";
-import type { Assignment, Candidate, PlannerEvent } from "./toggl-plan";
+import { notifyTogglProposal, notifyTogglReminder, refreshGoogleStatus, setStatus } from "./render";
+import type { Assignment, FillStory, PlannerActivity, PlannerEvent } from "./toggl-plan";
 import {
-  assignSlots, busyIntervals, calendarBlocks, candidatesFor, ceilTo, clockLabel, dateAt,
+  busyIntervals, calendarBlocks, candidatesFor, ceilTo, clockLabel, dateAt, eventKeys,
   floorTo, freeGaps, midnightOf, minutesFromMidnight, normalizeDescription,
-  overlappingIds, parseClock, shouldRemind, splitRange, toIsoWithOffset,
+  overlappingIds, parseClock, planStories, shouldRemind, toIsoWithOffset,
 } from "./toggl-plan";
 
 // ── Backend types ─────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ interface ActiveIssue {
   issueType: string;
   url: string;
   statusChangedAt?: string | null;
-  stage: "in-progress" | "merge-request" | "other";
+  stage: "in-progress" | "merge-request" | "touched" | "sprint" | "other";
 }
 
 interface ProjectHint {
@@ -76,6 +76,8 @@ interface LearnedRules {
   byKey: Record<string, ProjectHint>;
   byPrefix: Record<string, ProjectHint>;
   recurring: RecurringHint[];
+  /** Calendar event → booking, keyed by `eventKeys` (series id, then title). */
+  byEvent: Record<string, ProjectHint>;
   entriesScanned: number;
   learnedAt: string;
 }
@@ -87,7 +89,34 @@ interface TogglDayContext {
   issues: ActiveIssue[];
   rules: LearnedRules;
   events: PlannerEvent[];
+  /** Evidence of what was worked on: Jira moves, commits, AI sessions. */
+  activity: PlannerActivity[];
+  /** Gap-filling weights per sprint story, when the option is on. */
+  fill: FillStory[];
   warnings: string[];
+}
+
+/** A day plan handed over by an AI assistant through `zugit --mcp`. */
+interface TogglProposal {
+  date: string;
+  createdAt: string;
+  source: string;
+  note?: string | null;
+  entries: {
+    start: string;
+    end: string;
+    description: string;
+    issueKey?: string | null;
+    projectId?: number | null;
+    tags: string[];
+    billable?: boolean | null;
+    reason?: string | null;
+  }[];
+}
+
+interface CalendarRef {
+  recurringEventId: string | null;
+  title: string;
 }
 
 interface CreatedEntry {
@@ -111,8 +140,16 @@ interface PlanRow {
   billable: boolean;
   /** Where the row came from — a Jira story, the calendar, or the user. */
   source: "story" | "calendar" | "manual";
-  /** Keys plausible for this slot — populated only when the pick was a toss-up. */
-  candidateKeys: string[];
+  /** Other stories that could own this slot, offered as one-click swaps. */
+  alternatives: string[];
+  /** What backs the pick: activity seen around this time, the Jira status
+   *  alone, or an AI assistant's proposal. */
+  basis: "activity" | "status" | "fill" | "ai" | null;
+  /** Short evidence shown under the row ("2 commits · Claude Code"). */
+  reason: string;
+  /** The calendar event a row came from — its booking is remembered for the
+   *  next occurrence. */
+  calendarRef?: CalendarRef;
   /** Set once the user (or a submit) has settled the row. */
   submitted: "pending" | "ok" | "error";
   error?: string;
@@ -144,6 +181,15 @@ interface PanelState {
   dateOpen: boolean;
   /** Whole-request failure, distinct from the per-row errors. */
   apiError: string | null;
+  /** The AI proposal the rows were built from, when there is one. */
+  proposal: TogglProposal | null;
+  /** A proposal for this day arrived while rows were being edited — loading it
+   *  is the user's call, so the edits are not thrown away. */
+  proposalWaiting: boolean;
+  /** Unconfirmed AI proposals for other recent days, oldest first. */
+  otherProposals: string[];
+  /** The user changed the plan since it was loaded. */
+  edited: boolean;
   notice: { text: string; tone: "info" | "danger" | "success" } | null;
 }
 
@@ -273,27 +319,8 @@ function makeRow(
   key: string | null,
   summary: string,
   rules: LearnedRules,
-  candidateKeys: string[] = [],
+  extra: Partial<Pick<PlanRow, "alternatives" | "basis" | "reason">> = {},
 ): PlanRow {
-  // A toss-up is left blank on purpose: pre-filling one of the candidates would
-  // let a straight-through confirm book a story the user never chose, and the
-  // empty description is what keeps the submit button disabled until they do.
-  if (candidateKeys.length > 1) {
-    return {
-      id,
-      startMin: from,
-      endMin: to,
-      issueKey: null,
-      description: "",
-      projectId: null,
-      tags: [],
-      billable: false,
-      source: "story",
-      candidateKeys,
-      submitted: "pending",
-    };
-  }
-
   const hint = hintFor(rules, key);
   // Past wording for this exact story wins — that is what "reproduce my past
   // choices" means in practice.
@@ -309,55 +336,107 @@ function makeRow(
     tags: hint?.tags.slice(0, 1) ?? [],
     billable: hint?.billable ?? false,
     source: "story",
-    candidateKeys,
+    alternatives: extra.alternatives ?? [],
+    basis: extra.basis ?? null,
+    reason: extra.reason ?? "",
     submitted: "pending",
   };
 }
 
-/** Calendar events become rows of their own, pre-filled from the recurring rule
- *  that matches their title — the retro on the calendar lands on the project and
- *  tags you always give it. */
+/**
+ * How a calendar event was booked before, most reliable source first: what the
+ * user picked for this very series or title in the planner (or what history
+ * matched to it by time), then a recurring entry with the same name, then the
+ * story whose Jira key appears in the title.
+ */
+function eventHint(rules: LearnedRules, event: PlannerEvent): ProjectHint | null {
+  for (const key of eventKeys(event)) {
+    const hint = rules.byEvent?.[key];
+    if (hint) return hint;
+  }
+  const normalized = normalizeDescription(event.summary);
+  const recurring = rules.recurring.find((candidate) => candidate.normalized === normalized);
+  if (recurring) return recurring.hint;
+  const jiraKey = event.summary.match(/\b[A-Z][A-Z0-9]+-\d+\b/)?.[0] ?? null;
+  return hintFor(rules, jiraKey);
+}
+
+/** Calendar events become rows of their own, pre-filled from how the same
+ *  meeting was booked before — the retro lands on the project, tags and
+ *  wording you always give it. */
 function buildCalendarRows(
   blocks: { event: PlannerEvent; from: number; to: number }[],
   rules: LearnedRules,
 ): PlanRow[] {
   return blocks.map((block, index) => {
-    const normalized = normalizeDescription(block.event.summary);
-    const rule = rules.recurring.find((candidate) => candidate.normalized === normalized);
+    const hint = eventHint(rules, block.event);
     return {
       id: `cal-${index}-${block.from}`,
       startMin: block.from,
       endMin: block.to,
       issueKey: null,
-      description: block.event.summary,
-      projectId: rule?.hint.projectId ?? null,
-      tags: rule?.hint.tags.slice(0, 1) ?? [],
-      billable: rule?.hint.billable ?? false,
+      description: hint?.description?.trim() || block.event.summary,
+      projectId: hint?.projectId ?? null,
+      tags: hint?.tags.slice(0, 1) ?? [],
+      billable: hint?.billable ?? false,
       source: "calendar",
-      candidateKeys: [],
+      alternatives: [],
+      basis: null,
+      reason: "",
+      calendarRef: { recurringEventId: block.event.recurringEventId ?? null, title: block.event.summary },
       submitted: "pending",
     };
   });
 }
 
-function buildRows(
-  assignments: Assignment[],
-  rules: LearnedRules,
-  candidates: Candidate[],
+function buildRows(assignments: Assignment[], rules: LearnedRules): PlanRow[] {
+  return assignments.map((assignment, index) =>
+    makeRow(
+      `row-${index}-${assignment.from}`,
+      assignment.from,
+      assignment.to,
+      assignment.chosen?.key ?? null,
+      assignment.chosen?.summary ?? "",
+      rules,
+      { alternatives: assignment.alternatives, basis: assignment.basis, reason: assignment.reason },
+    ),
+  );
+}
+
+/** Rows from an AI proposal. Project, tags and billable fall back to the learned
+ *  rules when the assistant left them out — which is what it is told to do. */
+function buildProposalRows(
+  proposal: TogglProposal,
+  context: TogglDayContext,
+  blocks: { event: PlannerEvent; from: number; to: number }[],
 ): PlanRow[] {
-  return assignments
-    .map((assignment, index) =>
-      makeRow(
-        `row-${index}-${assignment.from}`,
-        assignment.from,
-        assignment.to,
-        assignment.chosen?.key ?? null,
-        assignment.chosen?.summary ?? "",
-        rules,
-        assignment.candidateKeys.length > 1 ? assignment.candidateKeys : [],
-      ),
-    )
-    .filter((row) => row.endMin > row.startMin || candidates.length > 0);
+  return proposal.entries.map((entry, index) => {
+    const from = parseClock(entry.start);
+    let to = entry.end.trim() === "24:00" ? 1440 : parseClock(entry.end);
+    if (to <= from) to += 1440;
+    const key = entry.issueKey?.trim() || null;
+    // A proposed row on a meeting's exact slot is that meeting: remember it so.
+    const block = blocks.find((candidate) => candidate.from === from && candidate.to === to);
+    const hint = key ? hintFor(context.rules, key) : block ? eventHint(context.rules, block.event) : null;
+    return {
+      id: `ai-${index}-${from}`,
+      startMin: from,
+      endMin: to,
+      issueKey: key,
+      description: entry.description,
+      projectId: entry.projectId ?? hint?.projectId ?? null,
+      tags: entry.tags?.length ? entry.tags.slice(0, 1) : (hint?.tags.slice(0, 1) ?? []),
+      billable: entry.billable ?? hint?.billable ?? false,
+      source: block ? "calendar" : key ? "story" : "manual",
+      alternatives: [],
+      basis: "ai",
+      reason: entry.reason?.trim() ?? "",
+      calendarRef: block
+        ? { recurringEventId: block.event.recurringEventId ?? null, title: block.event.summary }
+        : undefined,
+      submitted: "pending",
+    };
+  });
 }
 
 /** Entries already on Toggl that overlap the working range. */
@@ -423,6 +502,7 @@ const I = {
 const REMINDER_KEY = "zugit-toggl-reminder";
 
 let reminderTimer: number | null = null;
+let proposalTimer: number | null = null;
 
 /**
  * Once the working range is over, nudge the user and open the planner for a
@@ -431,7 +511,57 @@ let reminderTimer: number | null = null;
 export function startTogglReminder() {
   if (reminderTimer !== null) window.clearInterval(reminderTimer);
   reminderTimer = window.setInterval(() => void maybeRemind(), 60_000);
+  // A local file read: cheap enough to poll often, so a plan asked of the
+  // assistant shows up within seconds rather than a minute.
+  if (proposalTimer !== null) window.clearInterval(proposalTimer);
+  proposalTimer = window.setInterval(() => void checkProposals(), 15_000);
   void maybeRemind();
+  void checkProposals();
+}
+
+/** Proposals already announced, by date → creation time. Persisted so a restart
+ *  does not announce the same plan twice. */
+const PROPOSALS_SEEN_KEY = "zugit-toggl-proposals-seen";
+
+function seenProposals(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(PROPOSALS_SEEN_KEY) ?? "{}") as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Notices a plan an AI assistant handed over through `zugit --mcp`, and brings
+ * it in front of the user: they just asked for it, the next step is theirs.
+ */
+async function checkProposals() {
+  if (!state.togglReady) return;
+  let pending: { date: string; createdAt: string }[];
+  try {
+    pending = await invoke<{ date: string; createdAt: string }[]>("toggl_list_proposals");
+  } catch {
+    return;
+  }
+  const seen = seenProposals();
+  const fresh = pending.filter((proposal) => seen[proposal.date] !== proposal.createdAt);
+  if (fresh.length === 0) return;
+
+  for (const proposal of fresh) seen[proposal.date] = proposal.createdAt;
+  try {
+    localStorage.setItem(PROPOSALS_SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    // Only costs a repeated announcement.
+  }
+
+  const latest = fresh[fresh.length - 1];
+  if (state.notificationsEnabled) void notifyTogglProposal(dayLabel(latest.date));
+  if (openPanel) {
+    // The planner is open — likely on the day the user just asked about.
+    for (const proposal of fresh) onProposalArrived?.(proposal.date);
+    return;
+  }
+  await openTogglPanel(latest.date);
 }
 
 async function maybeRemind() {
@@ -455,15 +585,17 @@ async function maybeRemind() {
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
 let openPanel: HTMLElement | null = null;
+/** Set by the open panel: offers a proposal that arrives for its day. */
+let onProposalArrived: ((date: string) => void) | null = null;
 
-export async function openTogglPanel() {
+export async function openTogglPanel(date?: string) {
   if (openPanel) {
     openPanel.remove();
     openPanel = null;
   }
 
   const st: PanelState = {
-    date: todayIso(),
+    date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayIso(),
     context: null,
     range: { from: parseClock(state.togglDayStart), to: parseClock(state.togglDayEnd) },
     rows: [],
@@ -475,6 +607,10 @@ export async function openTogglPanel() {
     dateOpen: false,
     apiError: null,
     notice: null,
+    proposal: null,
+    proposalWaiting: false,
+    otherProposals: [],
+    edited: false,
   };
 
   const overlay = document.createElement("div");
@@ -486,9 +622,28 @@ export async function openTogglPanel() {
 
   const shell = () => overlay.querySelector<HTMLElement>("[data-tg-shell]");
 
+  // An AI plan always comes first: one that arrives for the day on screen
+  // replaces the automatic plan at once — unless the user has been editing,
+  // then it waits behind a banner. One for another day is pointed at.
+  onProposalArrived = (date) => {
+    if (st.loading) return;
+    if (date !== st.date) {
+      if (!st.otherProposals.includes(date)) st.otherProposals = [...st.otherProposals, date].sort();
+      render();
+      return;
+    }
+    if (st.edited) {
+      st.proposalWaiting = true;
+      render();
+      return;
+    }
+    void load();
+  };
+
   function close() {
     overlay.remove();
     openPanel = null;
+    onProposalArrived = null;
     document.removeEventListener("keydown", onKey);
   }
 
@@ -508,8 +663,11 @@ export async function openTogglPanel() {
     if (target) target.innerHTML = renderShell(st);
   }
 
-  async function load(forceRelearn = false) {
+  /** `automatic`: ignore a waiting AI proposal and plan from the evidence. */
+  async function load(forceRelearn = false, automatic = false) {
     st.loading = true;
+    st.proposalWaiting = false;
+    st.edited = false;
     st.apiError = null;
     st.notice = null;
     render();
@@ -522,14 +680,20 @@ export async function openTogglPanel() {
     endMin = ceilTo(endMin, slot);
 
     try {
-      const context = await invoke<TogglDayContext>("toggl_prepare_day", {
-        // Half a day of margin on both sides: the Toggl query filters on the
-        // entry start, so a meeting that began before the range would otherwise
-        // be invisible and its slot would look free.
-        rangeStart: toIsoWithOffset(dateAt(st.date, startMin - FETCH_MARGIN_MIN)),
-        rangeEnd: toIsoWithOffset(dateAt(st.date, endMin + FETCH_MARGIN_MIN)),
-        forceRelearn,
-      });
+      const [context, proposal] = await Promise.all([
+        invoke<TogglDayContext>("toggl_prepare_day", {
+          date: st.date,
+          // Half a day of margin on both sides: the Toggl query filters on the
+          // entry start, so a meeting that began before the range would otherwise
+          // be invisible and its slot would look free.
+          rangeStart: toIsoWithOffset(dateAt(st.date, startMin - FETCH_MARGIN_MIN)),
+          rangeEnd: toIsoWithOffset(dateAt(st.date, endMin + FETCH_MARGIN_MIN)),
+          forceRelearn,
+        }),
+        automatic
+          ? Promise.resolve(null)
+          : invoke<TogglProposal | null>("toggl_get_proposal", { date: st.date }).catch(() => null),
+      ]);
       st.context = context;
       const range = { from: startMin, to: endMin };
       st.range = range;
@@ -544,11 +708,25 @@ export async function openTogglPanel() {
       const claimed = [...busy, ...blocks.map((block) => ({ from: block.from, to: block.to }))]
         .sort((a, b) => a.from - b.from);
       const gaps = freeGaps(range, claimed, slot);
-      const candidates = candidatesFor(context.issues, range, st.date, slot);
-      const storyRows = candidates.length
-        ? buildRows(assignSlots(gaps, candidates), context.rules, candidates)
-        : [];
-      st.rows = [...calendarRows, ...storyRows].sort((a, b) => a.startMin - b.startMin);
+      st.proposal = proposal;
+      st.otherProposals = await invoke<{ date: string }[]>("toggl_list_proposals")
+        .then((pending) => pending.map((item) => item.date).filter((date) => date !== st.date))
+        .catch(() => []);
+      if (proposal) {
+        const proposed = buildProposalRows(proposal, context, blocks);
+        // Meetings the assistant left out still belong to the day.
+        const meetings = calendarRows.filter(
+          (row) => !proposed.some((other) => other.startMin < row.endMin && row.startMin < other.endMin),
+        );
+        st.rows = [...meetings, ...proposed].sort((a, b) => a.startMin - b.startMin);
+      } else {
+        const candidates = candidatesFor(context.issues, range, st.date, slot);
+        const storyRows = buildRows(
+          planStories(gaps, candidates, context.activity ?? [], st.date, slot, context.fill ?? []),
+          context.rules,
+        );
+        st.rows = [...calendarRows, ...storyRows].sort((a, b) => a.startMin - b.startMin);
+      }
 
       if (context.warnings.length > 0) {
         st.notice = { text: context.warnings.join(" · "), tone: "info" };
@@ -603,6 +781,25 @@ export async function openTogglPanel() {
       void load(target.closest("[data-tg-relearn]") !== null);
       return;
     }
+    if (target.closest("[data-tg-proposal-load]")) {
+      void load();
+      return;
+    }
+    const otherDay = target.closest<HTMLElement>("[data-tg-proposal-open]");
+    if (otherDay) {
+      st.date = otherDay.dataset.tgProposalOpen ?? st.date;
+      void load();
+      return;
+    }
+    if (target.closest("[data-tg-proposal-discard]")) {
+      void discardProposal();
+      return;
+    }
+    const swapBtn = target.closest<HTMLElement>("[data-tg-swap]");
+    if (swapBtn) {
+      swapStory(swapBtn.dataset.tgSwap ?? "", swapBtn.dataset.tgSwapKey ?? "");
+      return;
+    }
     if (target.closest("[data-tg-dismiss-error]")) {
       st.apiError = null;
       render();
@@ -611,6 +808,7 @@ export async function openTogglPanel() {
 
     const removeBtn = target.closest<HTMLElement>("[data-tg-remove]");
     if (removeBtn) {
+      st.edited = true;
       st.rows = st.rows.filter((row) => row.id !== removeBtn.dataset.tgRemove);
       render();
       return;
@@ -627,14 +825,10 @@ export async function openTogglPanel() {
     if (billableBtn) {
       const row = st.rows.find((candidate) => candidate.id === billableBtn.dataset.tgBillable);
       if (row) {
+        st.edited = true;
         row.billable = !row.billable;
         render();
       }
-      return;
-    }
-    const splitBtn = target.closest<HTMLElement>("[data-tg-split]");
-    if (splitBtn) {
-      splitRow(splitBtn.dataset.tgSplit ?? "");
       return;
     }
     const storyBtn = target.closest<HTMLElement>("[data-tg-story-add]");
@@ -678,6 +872,7 @@ export async function openTogglPanel() {
     const rowId = target.closest<HTMLElement>("[data-tg-row]")?.dataset.tgRow;
     const row = st.rows.find((candidate) => candidate.id === rowId);
     if (!row) return;
+    st.edited = true;
 
     if (target instanceof HTMLSelectElement && target.dataset.tgField === "issue") {
       const context = st.context;
@@ -691,7 +886,7 @@ export async function openTogglPanel() {
         row.tags = hint?.tags.slice(0, 1) ?? row.tags;
         row.billable = hint?.billable ?? row.billable;
       }
-      row.candidateKeys = [];
+      row.alternatives = [];
       render();
       return;
     }
@@ -726,6 +921,7 @@ export async function openTogglPanel() {
     const rowId = target.closest<HTMLElement>("[data-tg-row]")?.dataset.tgRow;
     const row = st.rows.find((candidate) => candidate.id === rowId);
     if (!row || !(target instanceof HTMLInputElement)) return;
+    st.edited = true;
 
     // No re-render here: it would pull the caret out of the field being typed in.
     if (target.dataset.tgField === "description") {
@@ -745,6 +941,7 @@ export async function openTogglPanel() {
   }
 
   function addRow() {
+    st.edited = true;
     const startMin = nextSlotStart();
     const id = `row-manual-${Date.now()}`;
     st.rows.push({
@@ -757,7 +954,9 @@ export async function openTogglPanel() {
       tags: [],
       billable: false,
       source: "manual",
-      candidateKeys: [],
+      alternatives: [],
+      basis: null,
+      reason: "",
       submitted: "pending",
     });
     // A blank row is useless collapsed — open it straight away.
@@ -767,6 +966,7 @@ export async function openTogglPanel() {
 
   /** Adds a row already pointing at one of the active stories. */
   function addStoryRow(key: string) {
+    st.edited = true;
     const context = st.context;
     const issue = context?.issues.find((candidate) => candidate.key === key);
     if (!context || !issue) return;
@@ -784,28 +984,42 @@ export async function openTogglPanel() {
     render();
   }
 
-  /** Shares an ambiguous slot equally between the stories that could own it,
-   *  instead of forcing a single pick. */
-  function splitRow(rowId: string) {
+  /** Hands a row over to another plausible story, keeping its time slot. */
+  function swapStory(rowId: string, key: string) {
+    st.edited = true;
     const context = st.context;
     const index = st.rows.findIndex((row) => row.id === rowId);
     const row = st.rows[index];
-    if (!context || !row || row.candidateKeys.length < 2) return;
+    const issue = context?.issues.find((candidate) => candidate.key === key);
+    if (!context || !row || !issue) return;
 
-    const pieces = splitRange(row.startMin, row.endMin, row.candidateKeys.length, state.togglSlotMinutes);
-    const replacement = pieces.map((piece, i) => {
-      const key = row.candidateKeys[i] ?? row.candidateKeys[row.candidateKeys.length - 1];
-      const issue = context.issues.find((candidate) => candidate.key === key);
-      return makeRow(`${row.id}-split-${i}`, piece.from, piece.to, key, issue?.summary ?? "", context.rules);
+    const previous = row.issueKey;
+    const swapped = makeRow(row.id, row.startMin, row.endMin, issue.key, issue.summary, context.rules, {
+      alternatives: [previous, ...row.alternatives].filter(
+        (candidate): candidate is string => Boolean(candidate) && candidate !== issue.key,
+      ),
+      // The user's pick, not an estimate any more.
+      basis: null,
+      reason: `Scelta tua (era ${previous ?? "vuota"})`,
     });
-
-    st.rows.splice(index, 1, ...replacement);
+    st.rows.splice(index, 1, swapped);
     render();
+  }
+
+  /** Drops the AI proposal and plans the day from the evidence instead. */
+  async function discardProposal() {
+    try {
+      await invoke("toggl_discard_proposal", { date: st.date });
+    } catch {
+      // The plan below still replaces it on screen.
+    }
+    await load(false, true);
   }
 
   /** Recurring meetings (retro, estimation…) replay the project and tags the user
    *  gave them in the past. */
   function applyRecurring(normalized: string) {
+    st.edited = true;
     const rule = st.context?.rules.recurring.find((entry) => entry.normalized === normalized);
     if (!rule) return;
     const startMin = nextSlotStart();
@@ -820,7 +1034,9 @@ export async function openTogglPanel() {
       tags: rule.hint.tags.slice(0, 1),
       billable: rule.hint.billable,
       source: "manual",
-      candidateKeys: [],
+      alternatives: [],
+      basis: null,
+      reason: "",
       submitted: "pending",
     });
     st.expanded.add(id);
@@ -846,6 +1062,7 @@ export async function openTogglPanel() {
           tags: row.tags,
           billable: row.billable,
           clientRef: row.id,
+          calendarEvent: row.calendarRef ?? null,
         })),
       });
 
@@ -860,6 +1077,8 @@ export async function openTogglPanel() {
       const created = results.length - failed.length;
       if (failed.length === 0) {
         setStatus(`Toggl: ${created} time entries created.`, "neutral");
+        // The plan it described is booked now — it must not come back.
+        if (st.proposal) await invoke("toggl_discard_proposal", { date: st.date }).catch(() => {});
         // Re-read the day so the new entries come back as locked rows — that is
         // the confirmation they really landed.
         st.submitting = false;
@@ -911,6 +1130,8 @@ function renderShell(st: PanelState): string {
   return `
     ${renderHeader(st)}
     ${renderApiError(st)}
+    ${renderProposal(st)}
+    ${renderOtherProposals(st)}
     ${renderNotice(st)}
     ${st.loading || complete || noStory ? "" : renderStoryChips(st)}
     <div class="tg-body">
@@ -983,6 +1204,46 @@ function renderApiError(st: PanelState): string {
     </div>`;
 }
 
+/** Unconfirmed AI plans for other days — easy to forget once the day is over. */
+function renderOtherProposals(st: PanelState): string {
+  if (st.otherProposals.length === 0) return "";
+  const links = st.otherProposals
+    .map(
+      (date) =>
+        `<button class="tg-banner-action tg-banner-action--neutral" data-tg-proposal-open="${escHtml(date)}" type="button">${escHtml(dayLabel(date))}</button>`,
+    )
+    .join("");
+  return `
+    <div class="tg-banner tg-banner--ai">
+      ${I.warn}
+      <span class="tg-banner-text">Proposta AI non ancora confermata per:</span>
+      ${links}
+    </div>`;
+}
+
+function renderProposal(st: PanelState): string {
+  const proposal = st.proposal;
+  if (st.proposalWaiting) {
+    return `
+    <div class="tg-banner tg-banner--ai">
+      ${I.check}
+      <span class="tg-banner-text">Il tuo assistente AI ha preparato una proposta per questo giorno. Caricandola perdi le modifiche fatte qui.</span>
+      <button class="tg-banner-action tg-banner-action--neutral" data-tg-proposal-load type="button">Mostra la proposta</button>
+    </div>`;
+  }
+  if (!proposal) return "";
+  const when = new Date(proposal.createdAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  return `
+    <div class="tg-banner tg-banner--ai">
+      ${I.check}
+      <span class="tg-banner-text">
+        Piano proposto da ${escHtml(proposal.source)} alle ${escHtml(when)} — controlla e conferma.
+        ${proposal.note ? `<span class="tg-banner-note">${escHtml(proposal.note)}</span>` : ""}
+      </span>
+      <button class="tg-banner-action tg-banner-action--neutral" data-tg-proposal-discard type="button">Usa il piano automatico</button>
+    </div>`;
+}
+
 function renderNotice(st: PanelState): string {
   if (!st.notice) return "";
   const icon = st.notice.tone === "success" ? I.check : I.warn;
@@ -1018,7 +1279,6 @@ function renderStoryChips(st: PanelState): string {
 function renderLegend(st: PanelState): string {
   const seen = new Set<string>();
   const tasks = st.rows.filter((row) => {
-    if (row.candidateKeys.length > 1) return false;
     const key = taskKey(row);
     if (seen.has(key)) return false;
     seen.add(key);
@@ -1104,13 +1364,12 @@ function renderRail(st: PanelState): string {
     </div>`;
 }
 
-type RowStatus = "ok" | "ambiguous" | "clash" | "submitted" | "error";
+type RowStatus = "ok" | "clash" | "submitted" | "error";
 
 function rowStatus(row: PlanRow, clashing: boolean): RowStatus {
   if (row.submitted === "ok") return "submitted";
   if (row.submitted === "error") return "error";
   if (clashing) return "clash";
-  if (row.candidateKeys.length > 1) return "ambiguous";
   return "ok";
 }
 
@@ -1149,7 +1408,7 @@ function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
   if (!context) return "";
 
   const status = rowStatus(row, clashing);
-  const needsAttention = status === "ambiguous" || status === "clash" || status === "error";
+  const needsAttention = status === "clash" || status === "error";
   const expanded = st.expanded.has(row.id) || needsAttention;
   const submitted = status === "submitted";
   const color = colorFor(buildTaskColors(st.rows), row);
@@ -1222,18 +1481,7 @@ function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
         }
       </div>
 
-      ${
-        status === "ambiguous"
-          ? `<div class="tg-band tg-band--warn">
-               ${I.warn}
-               <span class="tg-band-text">Which story was this from?</span>
-               ${renderIssueSelect(row, context)}
-               <button class="tg-band-btn" data-tg-split="${row.id}" type="button">
-                 ${I.split} Split between ${row.candidateKeys.length}
-               </button>
-             </div>`
-          : ""
-      }
+      ${submitted ? "" : renderEvidence(row)}
       ${
         status === "clash"
           ? `<div class="tg-band tg-band--fail">${I.warn}
@@ -1305,17 +1553,36 @@ function renderBillable(row: PlanRow): string {
     </button>`;
 }
 
-function renderIssueSelect(row: PlanRow, context: TogglDayContext): string {
-  const options = row.candidateKeys
-    .map((key) => context.issues.find((issue) => issue.key === key))
-    .filter((issue): issue is ActiveIssue => Boolean(issue))
-    .map((issue) => `<option value="${escHtml(issue.key)}">${escHtml(issue.key)} · ${escHtml(issue.status)}</option>`)
+/**
+ * Why a row is there, and what else it could be. Rows backed by activity say
+ * what was seen; rows resting on a Jira status alone say so plainly and offer
+ * the other plausible stories as one-click swaps.
+ */
+function renderEvidence(row: PlanRow): string {
+  const swaps = row.alternatives
+    .map(
+      (key) =>
+        `<button class="tg-swap" data-tg-swap="${escHtml(row.id)}" data-tg-swap-key="${escHtml(key)}" type="button">${escHtml(key)}</button>`,
+    )
     .join("");
+  if (!row.reason && !swaps) return "";
+
+  const label =
+    row.basis === "activity"
+      ? "Visto lavorare:"
+      : row.basis === "ai"
+        ? "Proposta AI:"
+        : row.basis === "fill"
+          ? "Riempimento:"
+          : row.basis === "status"
+            ? "Stima da Jira, nessuna attività vista:"
+            : "";
   return `
-    <select class="tg-band-select" data-tg-field="issue">
-      <option value="">Choose story…</option>
-      ${options}
-    </select>`;
+    <div class="tg-why tg-why--${row.basis ?? "none"}">
+      ${label ? `<span class="tg-why-label">${label}</span>` : ""}
+      ${row.reason ? `<span class="tg-why-text">${escHtml(row.reason)}</span>` : ""}
+      ${swaps ? `<span class="tg-why-swaps"><span class="tg-why-or">oppure</span>${swaps}</span>` : ""}
+    </div>`;
 }
 
 // ── Footer ────────────────────────────────────────────────────────────────────
@@ -1461,4 +1728,44 @@ export async function testTogglConnection(button: HTMLButtonElement) {
   } finally {
     button.disabled = false;
   }
+}
+
+// ── MCP setup ─────────────────────────────────────────────────────────────────
+
+/** The commands that register `zugit --mcp` with each assistant, built from the
+ *  path of the running executable. */
+function mcpCommands(executable: string): Record<string, string> {
+  const shellQuoted = `"${executable.replace(/(["\\$`])/g, "\\$1")}"`;
+  return {
+    claude: `claude mcp add --scope user zugit -- ${shellQuoted} --mcp`,
+    // A TOML literal string: Windows backslashes stay as they are.
+    codex: `# ~/.codex/config.toml\n[mcp_servers.zugit]\ncommand = '${executable}'\nargs = ["--mcp"]`,
+    desktop: JSON.stringify({ mcpServers: { zugit: { command: executable, args: ["--mcp"] } } }, null, 2),
+  };
+}
+
+export async function initMcpSetup() {
+  let commands: Record<string, string>;
+  try {
+    const info = await invoke<{ executable: string }>("mcp_setup_info");
+    commands = mcpCommands(info.executable);
+  } catch {
+    return;
+  }
+  document.querySelectorAll<HTMLElement>("[data-mcp-command]").forEach((element) => {
+    element.textContent = commands[element.dataset.mcpCommand ?? ""] ?? "";
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-mcp-copy]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const text = commands[button.dataset.mcpCopy ?? ""];
+      if (!text) return;
+      void navigator.clipboard.writeText(text).then(
+        () => {
+          button.textContent = "Copiato";
+          window.setTimeout(() => (button.textContent = "Copia"), 1500);
+        },
+        () => setStatus("Copia non riuscita: seleziona il testo a mano.", "danger"),
+      );
+    });
+  });
 }

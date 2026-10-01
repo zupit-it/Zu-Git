@@ -1,12 +1,15 @@
+mod activity;
 mod commands;
 mod dashboard;
 mod github;
 mod google;
 mod jira;
+mod mcp;
 mod models;
 mod secret_store;
 mod storage;
 mod toggl;
+mod toggl_day;
 
 use std::collections::HashMap;
 use parking_lot::Mutex;
@@ -26,6 +29,12 @@ pub struct AppState {
     pub toggl_account: Mutex<Option<(String, toggl::TogglAccount)>>,
     /// Google access token with its expiry — refreshed from the stored refresh token.
     pub google_access: Mutex<Option<(String, std::time::Instant)>>,
+}
+
+/// `zugit --mcp`: serve the Model Context Protocol on stdio instead of opening
+/// the window. Same binary, so the keychain sees the same app reading its tokens.
+pub fn run_mcp() {
+    mcp::run();
 }
 
 pub fn run() {
@@ -109,6 +118,10 @@ pub fn run() {
             commands::toggl_check_connection,
             commands::toggl_prepare_day,
             commands::toggl_submit_entries,
+            commands::toggl_get_proposal,
+            commands::toggl_discard_proposal,
+            commands::toggl_list_proposals,
+            commands::mcp_setup_info,
             commands::google_connect,
             commands::google_disconnect,
             commands::google_status,

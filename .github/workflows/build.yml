@@ -164,6 +164,12 @@ jobs:
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
+          # tauri-action writes `notes` in latest.json from this input, never from
+          # the release it uploads to — without it the in-app update modal shows
+          # "This release ships without notes" even though the release body is fine.
+          # With releaseId set the input is used for latest.json only, so the
+          # release body written by create-release is left untouched.
+          releaseBody: ${{ needs.release-notes.outputs.body }}
           args: ${{ matrix.args }}
 
   publish-release:

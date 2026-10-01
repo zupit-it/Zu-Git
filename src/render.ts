@@ -1130,6 +1130,18 @@ export async function notifyTogglReminder() {
   }
 }
 
+export async function notifyTogglProposal(dayLabel: string) {
+  try {
+    await invoke("show_native_notification", {
+      title: "ZuGit – Toggl",
+      body: `Il tuo assistente AI ha preparato Toggl per ${dayLabel}: controlla e conferma.`,
+      silent: false,
+    });
+  } catch (error) {
+    setStatus(errorMessage(error, "Unable to show the native notification."), "danger");
+  }
+}
+
 export async function notifyPendingReviewReminder(pendingReviewCount: number) {
   if (pendingReviewCount <= 0) return;
   try {

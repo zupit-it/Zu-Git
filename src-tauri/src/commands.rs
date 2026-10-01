@@ -652,25 +652,6 @@ pub async fn fetch_release_diff(
 
 // ── Toggl ─────────────────────────────────────────────────────────────────────
 
-/// Everything the day planner needs, in one round trip: the Toggl account, the
-/// entries already booked inside the working range, the stories the viewer is
-/// working on, and the learned project/tag mapping.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TogglDayContext {
-    pub account: crate::toggl::TogglAccount,
-    pub workspace_id: i64,
-    pub existing: Vec<crate::toggl::TogglTimeEntry>,
-    pub issues: Vec<crate::jira::ActiveIssue>,
-    pub rules: crate::toggl::LearnedRules,
-    /// Google Calendar events overlapping the range, when the calendar is connected.
-    pub events: Vec<crate::google::CalendarEvent>,
-    pub warnings: Vec<String>,
-}
-
-/// Rules older than this are refreshed from Toggl history on the next open.
-const TOGGL_RULES_MAX_AGE_DAYS: i64 = 7;
-
 fn toggl_settings(settings: &AppSettings) -> Result<(), String> {
     if !settings.toggl_enabled {
         return Err("Toggl integration is disabled in Settings.".into());
@@ -702,7 +683,7 @@ async fn toggl_account(
     Ok(account)
 }
 
-fn toggl_workspace_id(
+pub fn toggl_workspace_id(
     settings: &AppSettings,
     account: &crate::toggl::TogglAccount,
 ) -> Result<i64, String> {
@@ -810,135 +791,45 @@ pub async fn toggl_check_connection(
     toggl_account(&settings, &state, true).await
 }
 
+/// Everything the day planner needs, in one round trip — see [`crate::toggl_day`].
 #[tauri::command]
 pub async fn toggl_prepare_day(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
+    date: String,
     range_start: String,
     range_end: String,
     force_relearn: bool,
-) -> Result<TogglDayContext, String> {
+) -> Result<crate::toggl_day::TogglDayContext, String> {
     let settings = storage::load_settings(&app).await?;
     toggl_settings(&settings)?;
 
     let account = toggl_account(&settings, &state, false).await?;
     let workspace_id = toggl_workspace_id(&settings, &account)?;
-    let mut warnings: Vec<String> = vec![];
-
-    let entries_fut = crate::toggl::fetch_time_entries(
-        &settings.toggl_token,
-        &range_start,
-        &range_end,
-        &state.http_client,
-    );
-    let issues_fut = async {
-        if crate::models::settings_ready_for_jira(&settings) {
-            crate::jira::fetch_my_active_issues(&settings, &state.http_client).await
-        } else {
-            Ok(crate::jira::ActiveIssues {
-                issues: vec![],
-                sprint_scoped: true,
-            })
-        }
-    };
-    let (entries, issues) = futures::future::join(entries_fut, issues_fut).await;
-
-    let existing = entries.map_err(String::from)?;
-    let issues = match issues {
-        Ok(active) => {
-            if !active.sprint_scoped && !active.issues.is_empty() {
-                warnings.push(
-                    "Nessuna story nello sprint attivo: mostro tutte le story assegnate a te."
-                        .to_string(),
-                );
-            }
-            active.issues
-        }
-        Err(error) => {
-            warnings.push(format!("Jira stories unavailable: {error}"));
-            vec![]
-        }
-    };
-    if !crate::models::settings_ready_for_jira(&settings) {
-        warnings.push("Jira is not configured — no stories to propose.".to_string());
-    }
-
+    let day = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+        .map_err(|_| format!("Invalid date '{date}'."))?;
     // Calendar events are proposals, not blockers: a failure here degrades to a
     // warning instead of sinking the whole day plan.
-    let mut events = vec![];
-    if settings.google_calendar_enabled {
-        match google_access_token(&settings, &state).await {
-            Ok(token) => {
-                let calendar_id = if settings.google_calendar_id.trim().is_empty() {
-                    "primary"
-                } else {
-                    settings.google_calendar_id.trim()
-                };
-                match crate::google::fetch_events(
-                    &token,
-                    calendar_id,
-                    &range_start,
-                    &range_end,
-                    &state.http_client,
-                )
-                .await
-                {
-                    Ok(fetched) => events = fetched,
-                    Err(error) => warnings.push(format!("Google Calendar: {error}")),
-                }
-            }
-            Err(error) => warnings.push(format!("Google Calendar: {error}")),
-        }
-    }
+    let google_token = if settings.google_calendar_enabled {
+        Some(google_access_token(&settings, &state).await)
+    } else {
+        None
+    };
+    let data_dir = storage::data_dir(&app)?;
 
-    let mut rules = storage::load_toggl_rules(&app);
-    let stale = force_relearn
-        || rules.entries_scanned == 0
-        // Cached under an older shape: re-learn rather than answer with defaults
-        // for fields that did not exist when the file was written.
-        || rules.version < crate::toggl::RULES_VERSION
-        || chrono::DateTime::parse_from_rfc3339(&rules.learned_at)
-            .map(|learned| {
-                (chrono::Utc::now() - learned.with_timezone(&chrono::Utc)).num_days()
-                    >= TOGGL_RULES_MAX_AGE_DAYS
-            })
-            .unwrap_or(true);
-
-    if stale {
-        let today = chrono::Local::now();
-        let from = (today - chrono::Duration::days(settings.toggl_history_days as i64))
-            .format("%Y-%m-%d")
-            .to_string();
-        let to = today.format("%Y-%m-%d").to_string();
-        match crate::toggl::fetch_time_entries(
-            &settings.toggl_token,
-            &from,
-            &to,
-            &state.http_client,
-        )
-        .await
-        {
-            Ok(history) => {
-                rules = crate::toggl::learn_from_entries(&history, chrono::Utc::now().to_rfc3339());
-                if let Err(error) = storage::save_toggl_rules(&app, &rules) {
-                    warnings.push(format!("Could not cache the learned mapping: {error}"));
-                }
-            }
-            Err(error) => warnings.push(format!(
-                "Could not read Toggl history — project mapping may be incomplete: {error}"
-            )),
-        }
-    }
-
-    Ok(TogglDayContext {
+    crate::toggl_day::build_context(crate::toggl_day::DayRequest {
+        settings: &settings,
+        data_dir: &data_dir,
+        client: &state.http_client,
         account,
         workspace_id,
-        existing,
-        issues,
-        rules,
-        events,
-        warnings,
+        google_token,
+        range_start,
+        range_end,
+        day,
+        force_relearn,
     })
+    .await
 }
 
 #[tauri::command]
@@ -957,6 +848,7 @@ pub async fn toggl_submit_entries(
     // eagerly, and a day is only ever a handful of entries.
     let mut results = Vec::with_capacity(entries.len());
     let mut created_entries = Vec::new();
+    let mut created_events = Vec::new();
     for entry in &entries {
         match crate::toggl::create_time_entry(
             &settings.toggl_token,
@@ -967,7 +859,7 @@ pub async fn toggl_submit_entries(
         .await
         {
             Ok(id) => {
-                created_entries.push(crate::toggl::TogglTimeEntry {
+                let created = crate::toggl::TogglTimeEntry {
                     id,
                     workspace_id,
                     project_id: entry.project_id,
@@ -977,7 +869,11 @@ pub async fn toggl_submit_entries(
                     duration: entry.duration_seconds,
                     tags: entry.tags.clone(),
                     billable: entry.billable,
-                });
+                };
+                if let Some(calendar) = &entry.calendar_event {
+                    created_events.push((calendar.clone(), created.clone()));
+                }
+                created_entries.push(created);
                 results.push(crate::toggl::CreatedEntry {
                     client_ref: entry.client_ref.clone(),
                     id: Some(id),
@@ -996,13 +892,72 @@ pub async fn toggl_submit_entries(
         }
     }
 
+    let data_dir = storage::data_dir(&app)?;
     if !created_entries.is_empty() {
-        let mut rules = storage::load_toggl_rules(&app);
+        let mut rules = storage::load_toggl_rules(&data_dir);
         crate::toggl::reinforce_rules(&mut rules, &created_entries, chrono::Utc::now().to_rfc3339());
-        let _ = storage::save_toggl_rules(&app, &rules);
+        let _ = storage::save_toggl_rules(&data_dir, &rules);
+    }
+    if !created_events.is_empty() {
+        let mut memory = storage::load_event_memory(&data_dir);
+        for (calendar, created) in &created_events {
+            memory.remember(calendar, created);
+        }
+        let _ = storage::save_event_memory(&data_dir, &memory);
     }
 
     Ok(results)
+}
+
+/// The plan an MCP client proposed for `date`, if one is waiting.
+#[tauri::command]
+pub async fn toggl_get_proposal(
+    app: tauri::AppHandle,
+    date: String,
+) -> Result<Option<crate::toggl_day::TogglProposal>, String> {
+    Ok(storage::load_toggl_proposal(&storage::data_dir(&app)?, &date))
+}
+
+/// Drops the proposal for `date` — after it was submitted, or when the user
+/// prefers the automatic plan.
+#[tauri::command]
+pub async fn toggl_discard_proposal(app: tauri::AppHandle, date: String) -> Result<(), String> {
+    storage::delete_toggl_proposal(&storage::data_dir(&app)?, &date)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingProposal {
+    pub date: String,
+    pub created_at: String,
+}
+
+/// Proposals waiting for review — polled so ZuGit can react when an AI
+/// assistant hands one over.
+#[tauri::command]
+pub async fn toggl_list_proposals(app: tauri::AppHandle) -> Result<Vec<PendingProposal>, String> {
+    let dir = storage::data_dir(&app)?;
+    // Same reach as the planner's date picker.
+    storage::prune_toggl_proposals(&dir, chrono::Local::now().date_naive(), 7);
+    Ok(storage::list_toggl_proposals(&dir)
+        .into_iter()
+        .map(|(date, created_at)| PendingProposal { date, created_at })
+        .collect())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSetupInfo {
+    /// Absolute path of the running ZuGit executable — the MCP server command.
+    pub executable: String,
+}
+
+#[tauri::command]
+pub async fn mcp_setup_info() -> Result<McpSetupInfo, String> {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(McpSetupInfo {
+        executable: executable.to_string_lossy().to_string(),
+    })
 }
 
 // ── Release notes overrides ───────────────────────────────────────────────────
