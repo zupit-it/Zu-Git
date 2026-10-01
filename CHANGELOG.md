@@ -18,6 +18,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   billable from your history. Project and tag open a searchable picker, most used first.
 
   ![Editing the Toggl planner](public/assets/changelog/toggl-editing.png)
+- **MCP connector: see whether it is set up** — Settings → Connettore MCP now shows, next to each
+  command, whether Claude Code, Codex and Claude Desktop run this ZuGit: connected, not connected, or
+  pointing at a ZuGit that is gone (app moved or reinstalled) or at another copy (a dev build), with
+  what to change. ZuGit only reads their config files; registering stays copy and paste.
 
 ### Changed
 - **Settings: compact, collapsible sections** — the settings page is grouped into Connections,

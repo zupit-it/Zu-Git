@@ -5,6 +5,7 @@ mod github;
 mod google;
 mod jira;
 mod mcp;
+mod mcp_setup;
 mod models;
 mod secret_store;
 mod storage;
@@ -122,6 +123,7 @@ pub fn run() {
             commands::toggl_discard_proposal,
             commands::toggl_list_proposals,
             commands::mcp_setup_info,
+            commands::mcp_setup_status,
             commands::google_connect,
             commands::google_disconnect,
             commands::google_status,

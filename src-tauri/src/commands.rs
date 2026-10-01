@@ -960,6 +960,16 @@ pub async fn mcp_setup_info() -> Result<McpSetupInfo, String> {
     })
 }
 
+/// Whether Claude Code, Codex and Claude Desktop are set up to run this
+/// executable as their ZuGit MCP server. Reads their configs, never writes them.
+#[tauri::command]
+pub async fn mcp_setup_status() -> Result<Vec<crate::mcp_setup::McpClientStatus>, String> {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || crate::mcp_setup::statuses(&executable))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ── Release notes overrides ───────────────────────────────────────────────────
 
 /// Manual include/exclude decisions for one release's notes, keyed by Jira key.

@@ -2301,6 +2301,63 @@ function mcpCommands(executable: string): Record<string, string> {
   };
 }
 
+/** See `mcp_setup.rs`. */
+interface McpClientStatus {
+  client: string;
+  state: "connected" | "missing" | "stale" | "elsewhere" | "unreadable";
+  configured?: string | null;
+  error?: string | null;
+}
+
+const MCP_BADGES: Record<McpClientStatus["state"], { label: string; tone: string }> = {
+  connected: { label: "Collegato", tone: "ok" },
+  missing: { label: "Non collegato", tone: "neutral" },
+  stale: { label: "Percorso non valido", tone: "missing" },
+  elsewhere: { label: "Altra copia di ZuGit", tone: "warn" },
+  unreadable: { label: "Config illeggibile", tone: "warn" },
+};
+
+/** How to point an existing entry at this executable, per assistant. */
+const MCP_FIX: Record<string, string> = {
+  claude: "Esegui claude mcp remove --scope user zugit, poi incolla di nuovo il comando.",
+  codex: "Sostituisci il blocco [mcp_servers.zugit] in config.toml con quello qui sopra.",
+  desktop: "Sostituisci la voce zugit in claude_desktop_config.json e riavvia Claude Desktop.",
+};
+
+function mcpNote(status: McpClientStatus): string {
+  const fix = MCP_FIX[status.client] ?? "";
+  if (status.state === "stale") return `Punta a ${status.configured}, che non esiste più. ${fix}`;
+  if (status.state === "elsewhere") return `Punta a un'altra copia di ZuGit: ${status.configured}. ${fix}`;
+  if (status.state === "unreadable") return `Il file di configurazione non si legge: ${status.error ?? "formato non valido"}.`;
+  return "";
+}
+
+/** Reads the assistants' configs (never writes them) and shows whether each one
+ *  runs this ZuGit. */
+async function refreshMcpStatus() {
+  let statuses: McpClientStatus[];
+  try {
+    statuses = await invoke<McpClientStatus[]>("mcp_setup_status");
+  } catch {
+    return;
+  }
+  for (const status of statuses) {
+    const badge = document.querySelector<HTMLElement>(`[data-mcp-status="${status.client}"]`);
+    const note = document.querySelector<HTMLElement>(`[data-mcp-note="${status.client}"]`);
+    const look = MCP_BADGES[status.state];
+    if (badge && look) {
+      badge.textContent = look.label;
+      badge.className = `token-store-badge mcp-status token-store-badge-${look.tone}`;
+      badge.title = status.configured ?? "";
+      badge.hidden = false;
+    }
+    if (note) {
+      note.textContent = mcpNote(status);
+      note.hidden = !note.textContent;
+    }
+  }
+}
+
 export async function initMcpSetup() {
   let commands: Record<string, string>;
   try {
@@ -2309,6 +2366,16 @@ export async function initMcpSetup() {
   } catch {
     return;
   }
+  // When the card opens, and again when the user comes back from the terminal
+  // where they pasted the command.
+  const card = document.querySelector("[data-mcp-command]")?.closest("details");
+  void refreshMcpStatus();
+  card?.addEventListener("toggle", () => {
+    if (card.open) void refreshMcpStatus();
+  });
+  window.addEventListener("focus", () => {
+    if (card?.open) void refreshMcpStatus();
+  });
   document.querySelectorAll<HTMLElement>("[data-mcp-command]").forEach((element) => {
     element.textContent = commands[element.dataset.mcpCommand ?? ""] ?? "";
   });

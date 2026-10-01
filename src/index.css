@@ -5747,3 +5747,6 @@ img.avatar { object-fit: cover; }
   word-break: break-all;
   user-select: all;
 }
+
+.mcp-status { margin-left: 6px; vertical-align: 1px; }
+.mcp-status-note { overflow-wrap: anywhere; }
