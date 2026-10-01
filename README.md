@@ -39,8 +39,8 @@ On each refresh, ZuGit sends a single GraphQL query per repository to the GitHub
 Each query returns all open PRs with reviews, CI status, additions/deletions, and assignees in one round trip.
 Stale entries (closed or merged PRs) are evicted automatically.
 
-Jira tickets are fetched in bulk once per refresh and cached in memory for the same session.
-The cache is cleared entirely only when settings are saved.
+Jira tickets are fetched fresh, in bulk, on every refresh, so a story moved to another fix version
+is regrouped right away. The in-memory copy is only a fallback for tickets Jira could not return.
 
 ## Token security
 
@@ -113,7 +113,7 @@ ZuGit integrates with Jira in two ways: **read-only enrichment** (ticket data sh
 
 ### Ticket enrichment
 
-On each refresh ZuGit issues a single bulk JQL query (`POST /rest/api/3/search/jql`) for all Jira keys found in the current PR list, then caches the results in memory for the session. Fields fetched: `summary`, `priority`, `status`, `fixVersions`, `assignee`.
+On each refresh ZuGit issues a single bulk JQL query (`POST /rest/api/3/search/jql`) for all Jira keys found in the current PR list. Results are kept in memory only as a fallback: a ticket the next refresh cannot load keeps its last known data instead of losing its release and priority. Fields fetched: `summary`, `priority`, `status`, `fixVersions`, `assignee`.
 
 If the tenant does not support the `/jql` endpoint (older Jira Server versions), ZuGit falls back to individual `GET /rest/api/3/issue/{key}` calls automatically.
 
