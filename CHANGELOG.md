@@ -7,6 +7,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Toggl planner: edit in place, like a calendar** — the timeline is now draggable: move a block,
+  resize it from its top or bottom edge, drag the seam between two touching blocks to move the
+  boundary (the next row follows, so the day keeps no hole and no overlap; hold Alt to move one edge
+  alone), click free time to add a row covering exactly that gap. The same seam sits between
+  touching cards. No more pencil: times and length are always editable — ↑ ↓ for ±15 minutes
+  (Shift: ±1 hour), or type `930`, `9:30`, `+45m`, `1h30`. The description suggests today's stories
+  and what you booked before, and picking one — or just typing a Jira key — fills project, tag and
+  billable from your history. Project and tag open a searchable picker, most used first.
+
+  ![Editing the Toggl planner](public/assets/changelog/toggl-editing.png)
+
+### Fixed
+- **PR list: stories stuck in their old release** — Jira data was cached for the whole session and
+  only re-read for keys never seen before, so a story moved to another fix version on Jira kept being
+  grouped under the old one until the cache happened to be cleared (settings saved, release diff
+  opened, or the 12-hour maintenance). Every refresh now re-reads all linked tickets; the cache is
+  only a fallback for tickets Jira could not return that time.
+
 ---
 
 ## [1.0.0] - 2026-10-01

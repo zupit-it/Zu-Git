@@ -2,11 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { escHtml, errorMessage } from "./utils";
 import { state } from "./state";
 import { notifyTogglProposal, notifyTogglReminder, refreshGoogleStatus, setStatus } from "./render";
-import type { Assignment, FillStory, PlannerActivity, PlannerEvent } from "./toggl-plan";
+import type { Assignment, Edge, FillStory, PlannerActivity, PlannerEvent, Span } from "./toggl-plan";
 import {
   busyIntervals, calendarBlocks, candidatesFor, ceilTo, clockLabel, dateAt, eventKeys,
-  floorTo, freeGaps, midnightOf, minutesFromMidnight, normalizeDescription,
-  overlappingIds, parseClock, planStories, shouldRemind, toIsoWithOffset,
+  floorTo, freeGaps, gapAt, midnightOf, minutesFromMidnight, moveEdge, moveRow, normalizeDescription,
+  overlappingIds, parseClock, parseDurationInput, parseTimeInput, planStories, shouldRemind, toIsoWithOffset,
 } from "./toggl-plan";
 
 // ── Backend types ─────────────────────────────────────────────────────────────
@@ -175,8 +175,12 @@ interface PanelState {
   locked: LockedRow[];
   loading: boolean;
   submitting: boolean;
-  /** Rows the user opened for editing. Attention rows are always open. */
-  expanded: Set<string>;
+  /** The open picker — project, tag, or description suggestions — if any. */
+  picker: Picker | null;
+  /** Field to focus after the next render (`rowId:field`), e.g. a new row's description. */
+  focus: string | null;
+  /** The rail gesture in progress, shown as a time label next to the block. */
+  drag: { rowId: string; label: string } | null;
   hoverId: string | null;
   dateOpen: boolean;
   /** Whole-request failure, distinct from the per-row errors. */
@@ -192,6 +196,17 @@ interface PanelState {
   edited: boolean;
   notice: { text: string; tone: "info" | "danger" | "success" } | null;
 }
+
+interface Picker {
+  rowId: string;
+  kind: "project" | "tag" | "description";
+  query: string;
+  /** Highlighted option, for the keyboard. */
+  index: number;
+}
+
+/** Rows may be dragged anywhere in the two days around the planned one. */
+const DAY_BOUNDS = { from: 0, to: 2880 };
 
 /** Entries are fetched with half a day of margin around the working range, then
  *  clipped: the Toggl query filters on the entry start, so a meeting that began
@@ -602,7 +617,9 @@ export async function openTogglPanel(date?: string) {
     locked: [],
     loading: true,
     submitting: false,
-    expanded: new Set(),
+    picker: null,
+    focus: null,
+    drag: null,
     hoverId: null,
     dateOpen: false,
     apiError: null,
@@ -649,18 +666,77 @@ export async function openTogglPanel(date?: string) {
 
   function onKey(event: KeyboardEvent) {
     if (event.key !== "Escape" || st.submitting) return;
+    if (st.picker?.kind === "description") {
+      st.picker = null;
+      refreshSuggestions();
+      return;
+    }
+    if (st.picker) {
+      closePicker();
+      return;
+    }
     if (st.dateOpen) {
       st.dateOpen = false;
       render();
+      return;
+    }
+    // Escape in a field leaves the field; only a second one closes the panel.
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && overlay.contains(active)) {
+      active.blur();
       return;
     }
     close();
   }
   document.addEventListener("keydown", onKey);
 
+  /** True while the panel is being swapped out — see the `change` handler. */
+  let rendering = false;
+
+  /**
+   * Re-renders the panel, keeping what a full innerHTML swap would lose: the
+   * scroll position, and the field being typed in (with its caret). Every
+   * focusable control carries a stable `data-tg-focus` key for this.
+   */
   function render() {
     const target = shell();
-    if (target) target.innerHTML = renderShell(st);
+    if (!target) return;
+    const active = document.activeElement;
+    const focusKey =
+      st.focus ?? (active instanceof HTMLElement && target.contains(active) ? active.dataset.tgFocus ?? null : null);
+    const caret =
+      !st.focus && active instanceof HTMLInputElement ? [active.selectionStart, active.selectionEnd] : null;
+    const scroll = target.querySelector(".tg-body")?.scrollTop ?? 0;
+
+    rendering = true;
+    try {
+      target.innerHTML = renderShell(st);
+    } finally {
+      rendering = false;
+    }
+
+    const body = target.querySelector(".tg-body");
+    if (body) body.scrollTop = scroll;
+    const wantsSelectAll = st.focus !== null;
+    st.focus = null;
+    if (!focusKey) return;
+    const element = target.querySelector<HTMLElement>(`[data-tg-focus="${CSS.escape(focusKey)}"]`);
+    if (!element) return;
+    element.focus({ preventScroll: true });
+    if (element instanceof HTMLInputElement) {
+      try {
+        if (caret && caret[0] !== null && caret[1] !== null) element.setSelectionRange(caret[0], caret[1]);
+        else if (wantsSelectAll) element.select();
+      } catch {
+        // Some input types refuse a selection — focus alone is fine.
+      }
+    }
+  }
+
+  /** Renders after the current event: a `change` fired by leaving a field must
+   *  not pull the focus back to it from wherever the user went. */
+  function renderSoon() {
+    window.setTimeout(render, 0);
   }
 
   /** `automatic`: ignore a waiting AI proposal and plan from the evidence. */
@@ -698,7 +774,7 @@ export async function openTogglPanel(date?: string) {
       const range = { from: startMin, to: endMin };
       st.range = range;
       st.locked = buildLockedRows(context, st.date, range);
-      st.expanded = new Set();
+      st.picker = null;
 
       const busy = busyIntervals(context.existing, st.date, slot, Date.now());
       // Calendar events claim their slots first; the stories then fill what is
@@ -813,12 +889,31 @@ export async function openTogglPanel(date?: string) {
       render();
       return;
     }
-    const editBtn = target.closest<HTMLElement>("[data-tg-edit]");
-    if (editBtn) {
-      const id = editBtn.dataset.tgEdit ?? "";
-      if (st.expanded.has(id)) st.expanded.delete(id);
-      else st.expanded.add(id);
-      render();
+    const pickOption = target.closest<HTMLElement>("[data-tg-pick-option]");
+    if (pickOption) {
+      choose(Number.parseInt(pickOption.dataset.tgPickOption ?? "-1", 10));
+      return;
+    }
+    const pickTrigger = target.closest<HTMLElement>("[data-tg-pick]");
+    if (pickTrigger) {
+      const rowId = pickTrigger.closest<HTMLElement>("[data-tg-row]")?.dataset.tgRow ?? "";
+      const kind = pickTrigger.dataset.tgPick as Picker["kind"];
+      if (st.picker?.rowId === rowId && st.picker.kind === kind) closePicker();
+      else openPicker(rowId, kind, `${rowId}:pick`);
+      return;
+    }
+    // A click anywhere else closes an open project / tag picker.
+    if (st.picker && st.picker.kind !== "description" && !target.closest("[data-tg-pop]")) {
+      closePicker();
+    }
+    const track = target.closest<HTMLElement>("[data-tg-track]");
+    if (
+      track &&
+      performance.now() > ignoreClicksUntil &&
+      !target.closest("[data-tg-rail-row]") &&
+      !target.closest("[data-tg-boundary]")
+    ) {
+      addRowAt(track, (event as MouseEvent).clientY);
       return;
     }
     const billableBtn = target.closest<HTMLElement>("[data-tg-billable]");
@@ -867,72 +962,348 @@ export async function openTogglPanel(date?: string) {
     });
   }
 
-  overlay.addEventListener("change", (event) => {
-    const target = event.target as HTMLElement;
-    const rowId = target.closest<HTMLElement>("[data-tg-row]")?.dataset.tgRow;
-    const row = st.rows.find((candidate) => candidate.id === rowId);
-    if (!row) return;
+  // ── Editing helpers ─────────────────────────────────────────────────────────
+
+  const rowById = (id: string | undefined) => st.rows.find((row) => row.id === id);
+  const rowOf = (element: Element) => rowById(element.closest<HTMLElement>("[data-tg-row]")?.dataset.tgRow);
+
+  /** Rows that can still change, as spans; and what they must not run into. */
+  function editableSpans(): Span[] {
+    return st.rows.filter((row) => row.submitted !== "ok");
+  }
+  function walls(): Span[] {
+    return [...st.locked, ...st.rows.filter((row) => row.submitted === "ok")];
+  }
+
+  function applyChanges(changes: Map<string, { from: number; to: number }>) {
+    for (const [id, span] of changes) {
+      const row = rowById(id);
+      if (!row) continue;
+      row.startMin = span.from;
+      row.endMin = span.to;
+    }
+    if (changes.size > 0) st.edited = true;
+  }
+
+  function setEdge(row: PlanRow, edge: Edge, minute: number, detach = false) {
+    applyChanges(
+      moveEdge(editableSpans(), walls(), row.id, edge, minute, state.togglSlotMinutes, DAY_BOUNDS, detach),
+    );
+  }
+
+  /** Fills project, tags and billable from what history says about `key`. */
+  function applyHint(row: PlanRow, hint: ProjectHint | null) {
+    if (!hint) return;
+    row.projectId = hint.projectId ?? row.projectId;
+    row.tags = hint.tags.slice(0, 1);
+    row.billable = hint.billable;
+  }
+
+  /** Typing a Jira key in a description links the row to that story — and
+   *  brings along the project and tags it was booked with before. */
+  function linkKeyFromDescription(row: PlanRow) {
+    const key = row.description.match(/\b[A-Za-z][A-Za-z0-9]+-\d+\b/)?.[0]?.toUpperCase() ?? null;
+    if (!key || key === row.issueKey || !st.context) return;
+    row.issueKey = key;
+    applyHint(row, hintFor(st.context.rules, key));
+  }
+
+  function openPicker(rowId: string, kind: Picker["kind"], focus: string | null) {
+    const row = rowById(rowId);
+    st.picker = { rowId, kind, query: kind === "description" ? (row?.description ?? "") : "", index: 0 };
+    st.focus = focus;
+    render();
+  }
+
+  function closePicker() {
+    if (!st.picker) return;
+    const { rowId, kind } = st.picker;
+    st.picker = null;
+    st.focus = kind === "description" ? null : `${rowId}:${kind}`;
+    render();
+  }
+
+  /** Applies option `index` of the open picker. */
+  function choose(index: number) {
+    const picker = st.picker;
+    const context = st.context;
+    const row = rowById(picker?.rowId);
+    if (!picker || !context || !row) return;
     st.edited = true;
 
-    if (target instanceof HTMLSelectElement && target.dataset.tgField === "issue") {
-      const context = st.context;
-      const issue = context?.issues.find((candidate) => candidate.key === target.value);
-      row.issueKey = issue?.key ?? null;
-      if (issue && context) {
-        const hint = hintFor(context.rules, issue.key);
-        row.description =
-          context.rules.byKey[issue.key]?.description ?? `${issue.key} ${issue.summary}`.trim();
-        row.projectId = hint?.projectId ?? row.projectId;
-        row.tags = hint?.tags.slice(0, 1) ?? row.tags;
-        row.billable = hint?.billable ?? row.billable;
+    if (picker.kind === "project") {
+      const option = projectOptions(context, picker.query)[index];
+      if (!option) return;
+      row.projectId = option.id;
+    } else if (picker.kind === "tag") {
+      const option = tagOptions(context, picker.query)[index];
+      if (option === undefined) return;
+      row.tags = option ? [option] : [];
+    } else {
+      const option = descriptionSuggestions(context, picker.query)[index];
+      if (!option) return;
+      row.description = option.description;
+      if (option.issueKey) row.issueKey = option.issueKey;
+      applyHint(row, option.hint);
+    }
+    st.picker = null;
+    st.focus = `${row.id}:${picker.kind}`;
+    render();
+  }
+
+  function optionCount(picker: Picker): number {
+    const context = st.context;
+    if (!context) return 0;
+    if (picker.kind === "project") return projectOptions(context, picker.query).length;
+    if (picker.kind === "tag") return tagOptions(context, picker.query).length;
+    return descriptionSuggestions(context, picker.query).length;
+  }
+
+  /** A click on free time on the rail: a row covering the whole gap, with the
+   *  story suggestions already open. */
+  function addRowAt(track: HTMLElement, clientY: number) {
+    const range = railRange(st);
+    const minute = range.from + (clientY - track.getBoundingClientRect().top) / PX_PER_MIN;
+    const gap = gapAt([...st.rows, ...st.locked], minute, st.range, state.togglSlotMinutes);
+    if (!gap) return;
+    const id = `row-gap-${Date.now()}`;
+    st.rows.push(blankRow(id, gap.from, gap.to));
+    st.rows.sort((a, b) => a.startMin - b.startMin);
+    st.edited = true;
+    openPicker(id, "description", `${id}:description`);
+  }
+
+  // ── Fields ──────────────────────────────────────────────────────────────────
+
+  overlay.addEventListener("change", (event) => {
+    const target = event.target as HTMLElement;
+    // A field replaced by a re-render (a suggestion just picked, an arrow key)
+    // reports its stale value while it is being removed — ignore it.
+    if (rendering || !target.isConnected) return;
+    const row = rowOf(target);
+    if (!row || !(target instanceof HTMLInputElement)) return;
+    const field = target.dataset.tgField;
+
+    if (field === "start" || field === "end") {
+      const current = field === "start" ? row.startMin : row.endMin;
+      let minute = parseTimeInput(target.value, current);
+      // An absolute end before the start is the next day's (overnight work).
+      if (minute !== null && field === "end" && minute <= row.startMin && !/^[+-]/.test(target.value.trim())) {
+        minute += 1440;
       }
-      row.alternatives = [];
-      render();
+      if (minute !== null) setEdge(row, field, minute);
+      renderSoon();
       return;
     }
-
-    if (target instanceof HTMLSelectElement && target.dataset.tgField === "project") {
-      row.projectId = target.value ? Number.parseInt(target.value, 10) : null;
-      render();
+    if (field === "duration") {
+      const minutes = parseDurationInput(target.value);
+      if (minutes !== null && minutes > 0) setEdge(row, "end", row.startMin + minutes);
+      renderSoon();
       return;
     }
-
-    if (target instanceof HTMLSelectElement && target.dataset.tgField === "tag") {
-      row.tags = target.value ? [target.value] : [];
-      render();
-      return;
-    }
-
-    if (target instanceof HTMLInputElement && target.dataset.tgField === "start") {
-      row.startMin = clampToDay(parseClock(target.value), row.endMin - state.togglSlotMinutes);
-      render();
-      return;
-    }
-
-    if (target instanceof HTMLInputElement && target.dataset.tgField === "end") {
-      const parsed = parseClock(target.value);
-      row.endMin = parsed <= row.startMin ? parsed + 1440 : parsed;
-      render();
+    if (field === "description") {
+      row.description = target.value;
+      linkKeyFromDescription(row);
+      st.edited = true;
+      renderSoon();
     }
   });
 
   overlay.addEventListener("input", (event) => {
     const target = event.target as HTMLElement;
-    const rowId = target.closest<HTMLElement>("[data-tg-row]")?.dataset.tgRow;
-    const row = st.rows.find((candidate) => candidate.id === rowId);
-    if (!row || !(target instanceof HTMLInputElement)) return;
-    st.edited = true;
+    if (!(target instanceof HTMLInputElement)) return;
 
-    // No re-render here: it would pull the caret out of the field being typed in.
-    if (target.dataset.tgField === "description") {
+    if (target.dataset.tgPickQuery !== undefined && st.picker) {
+      st.picker.query = target.value;
+      st.picker.index = 0;
+      render();
+      return;
+    }
+    const row = rowOf(target);
+    if (row && target.dataset.tgField === "description") {
       row.description = target.value;
+      st.edited = true;
+      st.picker = { rowId: row.id, kind: "description", query: target.value, index: 0 };
+      refreshSuggestions();
       const submitBtn = overlay.querySelector<HTMLButtonElement>("[data-tg-submit]");
       if (submitBtn) submitBtn.disabled = !canSubmit(st);
     }
   });
 
-  function clampToDay(value: number, max: number) {
-    return Math.max(0, Math.min(value, max));
+  /**
+   * Redraws only the description suggestions. Re-rendering the whole panel on
+   * focus or on every keystroke would swap the elements under the pointer —
+   * a click pressed on one copy and released on the next is lost — and make
+   * the caret jump.
+   */
+  function refreshSuggestions() {
+    overlay.querySelectorAll(".tg-pop--suggest").forEach((element) => element.remove());
+    overlay.querySelectorAll(".tg-card.has-suggestions").forEach((card) => card.classList.remove("has-suggestions"));
+    const picker = st.picker;
+    if (!picker || picker.kind !== "description" || !st.context) return;
+    const card = overlay.querySelector<HTMLElement>(`.tg-card[data-tg-row="${CSS.escape(picker.rowId)}"]`);
+    card?.classList.add("has-suggestions");
+    card?.querySelector(".tg-desc-wrap")?.insertAdjacentHTML("beforeend", renderDescriptionPop(picker, st.context));
+  }
+
+  // Focusing a description opens its suggestions; focusing anything else
+  // closes suggestions left open on another row.
+  overlay.addEventListener("focusin", (event) => {
+    const target = event.target as HTMLElement;
+    const row = rowOf(target);
+    const isDescription = target.dataset.tgField === "description";
+    if (isDescription && row && (st.picker?.rowId !== row.id || st.picker.kind !== "description")) {
+      if (st.picker && st.picker.kind !== "description") {
+        // A project / tag picker is a full re-render away; close it first.
+        st.picker = { rowId: row.id, kind: "description", query: row.description, index: 0 };
+        render();
+        return;
+      }
+      st.picker = { rowId: row.id, kind: "description", query: row.description, index: 0 };
+      refreshSuggestions();
+      return;
+    }
+    if (!isDescription && st.picker?.kind === "description" && !target.closest("[data-tg-pop]")) {
+      st.picker = null;
+      refreshSuggestions();
+    }
+  });
+
+  // Suggestions are clicked, not focused: keep the caret in the field.
+  overlay.addEventListener("mousedown", (event) => {
+    if ((event.target as Element).closest("[data-tg-pick-option]")) event.preventDefault();
+  });
+
+  overlay.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement;
+    const picker = st.picker;
+    const inPicker =
+      picker &&
+      (target.dataset.tgPickQuery !== undefined ||
+        (picker.kind === "description" && target.dataset.tgField === "description"));
+
+    if (inPicker && picker) {
+      const count = optionCount(picker);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (count > 0) {
+          picker.index = (picker.index + (event.key === "ArrowDown" ? 1 : count - 1)) % count;
+          if (picker.kind === "description") refreshSuggestions();
+          else render();
+        }
+        return;
+      }
+      if (event.key === "Enter" && count > 0) {
+        event.preventDefault();
+        choose(picker.index);
+        return;
+      }
+    }
+
+    const step = state.togglSlotMinutes * (event.shiftKey ? 4 : 1);
+    const delta = event.key === "ArrowUp" ? step : event.key === "ArrowDown" ? -step : 0;
+
+    // Arrows on a seam move the boundary between two blocks.
+    const seam = target.closest<HTMLElement>("[data-tg-boundary]");
+    if (seam && delta) {
+      event.preventDefault();
+      const upper = rowById(seam.dataset.tgBoundary?.split("|")[0]);
+      if (upper) setEdge(upper, "end", upper.endMin + delta);
+      render();
+      return;
+    }
+
+    const row = rowOf(target);
+    const field = target.dataset.tgField;
+    if (!row || !field) return;
+    if (delta && (field === "start" || field === "end" || field === "duration")) {
+      event.preventDefault();
+      if (field === "start") setEdge(row, "start", row.startMin + delta);
+      else setEdge(row, "end", row.endMin + delta);
+      render();
+      return;
+    }
+    if (event.key === "Enter" && target instanceof HTMLInputElement) {
+      event.preventDefault();
+      target.blur();
+    }
+  });
+
+  // ── Rail gestures ───────────────────────────────────────────────────────────
+
+  interface Drag {
+    mode: "move" | Edge | "boundary";
+    rowId: string;
+    originY: number;
+    startMin: number;
+    endMin: number;
+    moved: boolean;
+  }
+  let drag: Drag | null = null;
+  /** The click that ends a rail gesture must not also add a row. */
+  let ignoreClicksUntil = 0;
+
+  overlay.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || st.submitting) return;
+    const target = event.target as Element;
+    const seam = target.closest<HTMLElement>("[data-tg-boundary]");
+    const block = target.closest<HTMLElement>("[data-tg-rail-row]");
+    const row = rowById(seam ? seam.dataset.tgBoundary?.split("|")[0] : block?.dataset.tgRailRow);
+    if (!row || row.submitted === "ok") return;
+    const grip = target.closest<HTMLElement>("[data-tg-grip]")?.dataset.tgGrip as Edge | undefined;
+    drag = {
+      mode: seam ? "boundary" : (grip ?? "move"),
+      rowId: row.id,
+      originY: event.clientY,
+      startMin: row.startMin,
+      endMin: row.endMin,
+      moved: false,
+    };
+    event.preventDefault();
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", onDragEnd, { once: true });
+  });
+
+  function onDragMove(event: PointerEvent) {
+    const current = drag;
+    const row = rowById(current?.rowId);
+    if (!current || !row) return;
+    if (!current.moved && Math.abs(event.clientY - current.originY) < 4) return;
+    current.moved = true;
+    const delta = (event.clientY - current.originY) / PX_PER_MIN;
+    const slot = state.togglSlotMinutes;
+
+    if (current.mode === "move") {
+      const span = moveRow(editableSpans(), walls(), row.id, current.startMin + delta, slot, DAY_BOUNDS);
+      if (span) applyChanges(new Map([[row.id, span]]));
+    } else if (current.mode === "start") {
+      setEdge(row, "start", current.startMin + delta, event.altKey);
+    } else {
+      // The bottom edge and a seam both move the end — a seam is simply the end
+      // of the upper block, with the lower one following.
+      setEdge(row, "end", current.endMin + delta, current.mode === "end" && event.altKey);
+    }
+    st.drag = { rowId: row.id, label: `${clockLabel(row.startMin)}–${clockLabel(row.endMin)}` };
+    render();
+  }
+
+  function onDragEnd() {
+    window.removeEventListener("pointermove", onDragMove);
+    ignoreClicksUntil = performance.now() + 120;
+    const finished = drag;
+    drag = null;
+    st.drag = null;
+    if (finished && !finished.moved && finished.mode !== "boundary") {
+      // A plain click on a block: jump to its row and start typing there.
+      st.focus = `${finished.rowId}:description`;
+      setHover(finished.rowId);
+    }
+    render();
+    if (finished && !finished.moved) {
+      overlay
+        .querySelector(`.tg-card[data-tg-row="${CSS.escape(finished.rowId)}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    }
   }
 
   function nextSlotStart(): number {
@@ -940,14 +1311,11 @@ export async function openTogglPanel(date?: string) {
     return last ? last.endMin : st.range.from;
   }
 
-  function addRow() {
-    st.edited = true;
-    const startMin = nextSlotStart();
-    const id = `row-manual-${Date.now()}`;
-    st.rows.push({
+  function blankRow(id: string, startMin: number, endMin: number): PlanRow {
+    return {
       id,
       startMin,
-      endMin: startMin + state.togglSlotMinutes * 2,
+      endMin,
       issueKey: null,
       description: "",
       projectId: null,
@@ -958,10 +1326,16 @@ export async function openTogglPanel(date?: string) {
       basis: null,
       reason: "",
       submitted: "pending",
-    });
-    // A blank row is useless collapsed — open it straight away.
-    st.expanded.add(id);
-    render();
+    };
+  }
+
+  function addRow() {
+    st.edited = true;
+    const startMin = nextSlotStart();
+    const id = `row-manual-${Date.now()}`;
+    st.rows.push(blankRow(id, startMin, startMin + state.togglSlotMinutes * 2));
+    // A blank row wants a description first: type it, or pick a suggestion.
+    openPicker(id, "description", `${id}:description`);
   }
 
   /** Adds a row already pointing at one of the active stories. */
@@ -980,7 +1354,7 @@ export async function openTogglPanel(date?: string) {
       context.rules,
     );
     st.rows.push(row);
-    st.expanded.add(row.id);
+    st.focus = `${row.id}:description`;
     render();
   }
 
@@ -1039,7 +1413,7 @@ export async function openTogglPanel(date?: string) {
       reason: "",
       submitted: "pending",
     });
-    st.expanded.add(id);
+    st.focus = `${id}:description`;
     render();
   }
 
@@ -1302,65 +1676,86 @@ function renderLegend(st: PanelState): string {
 
 // ── Timeline rail ─────────────────────────────────────────────────────────────
 
+/** The rail's time span: the working range, widened to every row on it. */
+function railRange(st: PanelState): Interval {
+  return effectiveRange([...st.rows, ...st.locked], st.range);
+}
+
+/** Pairs of editable rows that touch — their boundary can be dragged. */
+function seamsOf(rows: PlanRow[]): [PlanRow, PlanRow][] {
+  const editable = rows.filter((row) => row.submitted !== "ok").sort((a, b) => a.startMin - b.startMin);
+  const seams: [PlanRow, PlanRow][] = [];
+  for (let i = 0; i < editable.length - 1; i += 1) {
+    if (editable[i].endMin === editable[i + 1].startMin) seams.push([editable[i], editable[i + 1]]);
+  }
+  return seams;
+}
+
+/**
+ * The day as a calendar column. Blocks can be dragged to move them, by their
+ * top or bottom edge to resize them, and by the seam between two touching
+ * blocks to move the boundary; a click on free time adds a row covering it.
+ */
 function renderRail(st: PanelState): string {
-  const range = effectiveRange([...st.rows, ...st.locked], st.range);
+  const range = railRange(st);
   const total = Math.max(range.to - range.from, 60);
   const height = total * PX_PER_MIN;
+  const y = (minute: number) => (minute - range.from) * PX_PER_MIN;
 
   const hours: string[] = [];
   for (let minute = ceilTo(range.from, 60); minute <= range.to; minute += 60) {
-    hours.push(
-      `<div class="tg-rail-hour" style="top:${(minute - range.from) * PX_PER_MIN - 5}px">${clockLabel(minute)}</div>`,
-    );
+    hours.push(`<div class="tg-rail-hour" style="top:${y(minute) - 5}px">${clockLabel(minute)}</div>`);
   }
 
-  const block = (
-    id: string,
-    startMin: number,
-    endMin: number,
-    className: string,
-    style: string,
-    title: string,
-  ) => `
-    <div class="tg-rail-block ${className}" data-tg-hover="${id}"
-         style="top:${(startMin - range.from) * PX_PER_MIN}px;height:${Math.max((endMin - startMin) * PX_PER_MIN, 3)}px;${style}"
-         title="${escHtml(title)}"></div>`;
-
   const lockedBlocks = st.locked
-    .map((row) =>
-      block(row.id, row.startMin, row.endMin, "tg-rail-block--locked", "", `${clockLabel(row.startMin)}–${clockLabel(row.endMin)} · ${row.description}`),
+    .map(
+      (row) => `
+        <div class="tg-rail-block tg-rail-block--locked" data-tg-hover="${row.id}"
+             style="top:${y(row.startMin)}px;height:${Math.max((row.endMin - row.startMin) * PX_PER_MIN, 3)}px"
+             title="${escHtml(`${clockLabel(row.startMin)}–${clockLabel(row.endMin)} · ${row.description}`)}"></div>`,
     )
     .join("");
 
-  const clashing = overlappingIds([
-    ...st.rows,
-    ...st.locked.map((l) => ({ id: l.id, startMin: l.startMin, endMin: l.endMin })),
-  ]);
-
+  const clashing = overlappingIds([...st.rows, ...st.locked]);
   const colors = buildTaskColors(st.rows);
   const rowBlocks = st.rows
     .map((row) => {
       const status = rowStatus(row, clashing.has(row.id));
       const color = colorFor(colors, row);
-      const style =
-        status === "ok"
-          ? `background:${color.bg};border-color:${color.bd}`
-          : "";
-      return block(
-        row.id,
-        row.startMin,
-        row.endMin,
-        `tg-rail-block--${status}`,
-        style,
-        `${clockLabel(row.startMin)}–${clockLabel(row.endMin)} · ${row.description || "Untitled"}`,
-      );
+      const editable = status !== "submitted";
+      const blockHeight = Math.max((row.endMin - row.startMin) * PX_PER_MIN, 3);
+      const style = status === "ok" ? `background:${color.bg};border-color:${color.bd};color:${color.fg}` : "";
+      const dragging = st.drag?.rowId === row.id;
+      return `
+        <div class="tg-rail-block tg-rail-block--${status} ${editable ? "is-editable" : ""} ${dragging ? "is-dragging" : ""}"
+             data-tg-hover="${row.id}" ${editable ? `data-tg-rail-row="${row.id}"` : ""}
+             style="top:${y(row.startMin)}px;height:${blockHeight}px;${style}"
+             title="${escHtml(`${clockLabel(row.startMin)}–${clockLabel(row.endMin)} · ${row.description || "Untitled"}`)}">
+          ${blockHeight >= 18 ? `<span class="tg-rail-time">${clockLabel(row.startMin)}</span>` : ""}
+          ${
+            editable
+              ? `<span class="tg-grip tg-grip--start" data-tg-grip="start"></span>
+                 <span class="tg-grip tg-grip--end" data-tg-grip="end"></span>`
+              : ""
+          }
+          ${dragging && st.drag ? `<span class="tg-rail-drag">${escHtml(st.drag.label)}</span>` : ""}
+        </div>`;
     })
+    .join("");
+
+  const seams = seamsOf(st.rows)
+    .map(
+      ([upper, lower]) =>
+        `<div class="tg-rail-seam" data-tg-boundary="${upper.id}|${lower.id}" style="top:${y(upper.endMin) - 4}px"
+              title="Trascina per spostare il confine (${clockLabel(upper.endMin)})"></div>`,
+    )
     .join("");
 
   return `
     <div class="tg-rail" style="height:${height}px">
       ${hours.join("")}
-      <div class="tg-rail-track" style="height:${height}px">${lockedBlocks}${rowBlocks}</div>
+      <div class="tg-rail-track" data-tg-track style="height:${height}px"
+           title="Clic su uno spazio libero per aggiungere una riga">${lockedBlocks}${rowBlocks}${seams}</div>
     </div>`;
 }
 
@@ -1376,13 +1771,22 @@ function rowStatus(row: PlanRow, clashing: boolean): RowStatus {
 // ── Plan ──────────────────────────────────────────────────────────────────────
 
 function renderPlan(st: PanelState): string {
-  const clashing = overlappingIds([
-    ...st.rows,
-    ...st.locked.map((l) => ({ id: l.id, startMin: l.startMin, endMin: l.endMin })),
-  ]);
+  const clashing = overlappingIds([...st.rows, ...st.locked]);
+  const seams = new Map(seamsOf(st.rows).map(([upper, lower]) => [upper.id, lower]));
   const items: { startMin: number; html: string }[] = [
     ...st.locked.map((row) => ({ startMin: row.startMin, html: renderLockedCard(row) })),
-    ...st.rows.map((row) => ({ startMin: row.startMin, html: renderCard(row, st, clashing.has(row.id)) })),
+    ...st.rows.map((row) => {
+      const lower = seams.get(row.id);
+      // Between two touching rows, a seam: drag it, or focus it and use the
+      // arrows, to move the boundary between them.
+      const seam = lower
+        ? `<div class="tg-seam" data-tg-boundary="${row.id}|${lower.id}" data-tg-focus="seam:${row.id}" tabindex="0"
+                title="Trascina, o usa ↑ ↓, per spostare il confine">
+             <span class="tg-seam-time">${clockLabel(row.endMin)}</span>
+           </div>`
+        : "";
+      return { startMin: row.startMin, html: renderCard(row, st, clashing.has(row.id)) + seam };
+    }),
   ].sort((a, b) => a.startMin - b.startMin);
 
   return `
@@ -1403,85 +1807,81 @@ function renderLockedCard(row: LockedRow): string {
     </div>`;
 }
 
+/** Every field is edited in place: times and length with the keyboard
+ *  (↑ ↓ = ±15 min, Shift = ±1 h, or typed "930", "+45m"), the description
+ *  with suggestions, project and tag through a searchable picker. */
 function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
   const context = st.context;
   if (!context) return "";
 
   const status = rowStatus(row, clashing);
-  const needsAttention = status === "clash" || status === "error";
-  const expanded = st.expanded.has(row.id) || needsAttention;
   const submitted = status === "submitted";
   const color = colorFor(buildTaskColors(st.rows), row);
   const outside = row.startMin < st.range.from || row.endMin > st.range.to;
-  const duration = shortDuration(row.endMin - row.startMin);
-
-  const tone =
-    status === "ok"
-      ? `style="background:${color.bg};border-color:${color.bd}"`
-      : "";
-
+  const tone = status === "ok" ? `style="background:${color.bg};border-color:${color.bd}"` : "";
   const project = context.account.projects.find((p) => p.id === row.projectId);
+  const picker = st.picker?.rowId === row.id ? st.picker : null;
+  const focusKey = (field: string) => `data-tg-focus="${escHtml(row.id)}:${field}"`;
+
+  if (submitted) {
+    return `
+      <div class="tg-card tg-card--submitted" data-tg-row="${row.id}" data-tg-hover="${row.id}">
+        <div class="tg-card-main">
+          <span class="tg-card-icon">${row.source === "calendar" ? I.cal : I.clock}</span>
+          <span class="tg-card-time">${clockLabel(row.startMin)}–${clockLabel(row.endMin)}</span>
+          <span class="tg-card-dur">${shortDuration(row.endMin - row.startMin)}</span>
+          <span class="tg-card-desc">${escHtml(row.description)}</span>
+          <span class="tg-card-created">${I.check} Created</span>
+        </div>
+      </div>`;
+  }
+
+  const timeInput = (field: "start" | "end", minute: number, label: string) =>
+    `<input class="tg-time" type="text" inputmode="numeric" spellcheck="false" autocomplete="off"
+            data-tg-field="${field}" ${focusKey(field)} value="${clockLabel(minute)}" aria-label="${label}"
+            title="${label}: ↑ ↓ ±15 min (Shift ±1 h), oppure scrivi 930, 9:30, +45m" />`;
 
   return `
-    <div class="tg-card tg-card--${status}" data-tg-row="${row.id}" data-tg-hover="${row.id}" ${tone}>
+    <div class="tg-card tg-card--${status} ${picker && picker.kind !== "description" ? "has-picker" : ""} ${picker?.kind === "description" ? "has-suggestions" : ""}" data-tg-row="${row.id}" data-tg-hover="${row.id}" ${tone}>
       <div class="tg-card-main">
         <span class="tg-card-icon" ${status === "ok" ? `style="color:${color.fg}"` : ""}>
           ${row.source === "calendar" ? I.cal : I.clock}
         </span>
+        ${timeInput("start", row.startMin, "Inizio")}
+        <span class="tg-dash">–</span>
+        ${timeInput("end", row.endMin, "Fine")}
+        <input class="tg-dur" type="text" spellcheck="false" autocomplete="off" data-tg-field="duration" ${focusKey("duration")}
+               value="${shortDuration(row.endMin - row.startMin)}" aria-label="Durata"
+               title="Durata: ↑ ↓ ±15 min, oppure scrivi 45, 1h30, 1:15" />
+        ${outside ? `<span class="tg-outside" title="Falls outside the usual working window">${I.moon}</span>` : ""}
 
-        ${
-          expanded && !submitted
-            ? `<input class="tg-time" type="text" inputmode="numeric" maxlength="5" data-tg-field="start"
-                      value="${clockLabel(row.startMin)}" aria-label="Start" />
-               <span class="tg-dash">–</span>
-               <input class="tg-time" type="text" inputmode="numeric" maxlength="5" data-tg-field="end"
-                      value="${clockLabel(row.endMin)}" aria-label="End" />`
-            : `<span class="tg-card-time">${clockLabel(row.startMin)}–${clockLabel(row.endMin)}</span>`
-        }
-        <span class="tg-card-dur">${duration}</span>
-        ${
-          outside
-            ? `<span class="tg-outside" title="Falls outside the usual working window">${I.moon} Outside hours</span>`
-            : ""
-        }
+        <div class="tg-desc-wrap">
+          <input class="tg-desc-input ${row.description ? "" : "is-empty"}" type="text" spellcheck="false" autocomplete="off"
+                 data-tg-field="description" ${focusKey("description")}
+                 value="${escHtml(row.description)}" placeholder="Cosa stavi facendo? Scrivi o scegli una story…" />
+          ${picker?.kind === "description" ? renderDescriptionPop(picker, context) : ""}
+        </div>
 
-        ${
-          expanded && !submitted
-            ? `<input class="tg-desc-input" type="text" data-tg-field="description"
-                      value="${escHtml(row.description)}" placeholder="What were you working on?" />`
-            : `<span class="tg-card-desc ${row.description ? "" : "is-empty"}">${
-                escHtml(row.description) || "No description"
-              }</span>`
-        }
-
-        ${
-          submitted
-            ? `<span class="tg-card-created">${I.check} Created</span>`
-            : expanded
-              ? `${renderProjectSelect(row, context)}${renderTagSelect(row, context)}${renderBillable(row)}`
-              : `<span class="tg-pill ${project ? "" : "tg-pill--empty"}">${
-                  project ? escHtml(project.name) : "No project"
-                }</span>
-                 ${row.tags[0] ? `<span class="tg-pill-tag">#${escHtml(row.tags[0])}</span>` : ""}
-                 <span class="tg-bill-mark ${row.billable ? "is-on" : ""}" title="${
-                   row.billable ? "Billable" : "Non-billable"
-                 }">${I.dollar}</span>`
-        }
-
-        ${
-          !needsAttention && !submitted
-            ? `<button class="tg-card-btn ${expanded ? "is-done" : ""}" data-tg-edit="${row.id}" type="button"
-                       title="${expanded ? "Done editing" : "Edit"}">${expanded ? I.check : I.pencil}</button>`
-            : ""
-        }
-        ${
-          submitted
-            ? ""
-            : `<button class="tg-card-btn tg-card-btn--danger" data-tg-remove="${row.id}" type="button" title="Delete">${I.trash}</button>`
-        }
+        <div class="tg-pick-wrap">
+          <button class="tg-pill tg-pill--button ${project ? "" : "tg-pill--empty"}" data-tg-pick="project" ${focusKey("project")}
+                  type="button" title="${project ? escHtml(project.name) : "Scegli il progetto"}">
+            ${project ? escHtml(project.name) : "No project"}
+          </button>
+          ${picker?.kind === "project" ? renderProjectPop(picker, context, row) : ""}
+        </div>
+        <div class="tg-pick-wrap">
+          <button class="tg-pill-tag tg-pill-tag--button" data-tg-pick="tag" ${focusKey("tag")} type="button"
+                  title="${row.tags[0] ? escHtml(row.tags[0]) : "Aggiungi un tag"}">
+            ${row.tags[0] ? `#${escHtml(row.tags[0])}` : "+ tag"}
+          </button>
+          ${picker?.kind === "tag" ? renderTagPop(picker, context, row) : ""}
+        </div>
+        <button class="tg-bill-mark tg-bill-mark--button ${row.billable ? "is-on" : ""}" data-tg-billable="${row.id}"
+                ${focusKey("billable")} type="button" title="${row.billable ? "Billable" : "Non-billable"}">${I.dollar}</button>
+        <button class="tg-card-btn tg-card-btn--danger" data-tg-remove="${row.id}" type="button" title="Delete">${I.trash}</button>
       </div>
 
-      ${submitted ? "" : renderEvidence(row)}
+      ${renderEvidence(row)}
       ${
         status === "clash"
           ? `<div class="tg-band tg-band--fail">${I.warn}
@@ -1499,21 +1899,78 @@ function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
     </div>`;
 }
 
-function renderProjectSelect(row: PlanRow, context: TogglDayContext): string {
-  const projects = context.account.projects.filter((p) => p.workspaceId === context.workspaceId);
-  const options = projects
-    .map(
-      (project) =>
-        `<option value="${project.id}" ${row.projectId === project.id ? "selected" : ""}>${escHtml(
-          project.name,
-        )}${project.clientName ? ` · ${escHtml(project.clientName)}` : ""}</option>`,
-    )
-    .join("");
-  return `
-    <select class="tg-mini-select ${row.projectId === null ? "tg-mini-select--empty" : ""}" data-tg-field="project">
-      <option value="">Select project</option>
-      ${options}
-    </select>`;
+// ── Pickers ───────────────────────────────────────────────────────────────────
+
+/** Lower-case, accents stripped — "Attività" is found by typing "attivita". */
+function fold(text: string): string {
+  return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+function matchesQuery(text: string, query: string): boolean {
+  const haystack = fold(text);
+  return fold(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((word) => haystack.includes(word));
+}
+
+/** How often each project shows up in what history learned. */
+function projectUsage(rules: LearnedRules): Map<number, number> {
+  const usage = new Map<number, number>();
+  const hints = [
+    ...Object.values(rules.byKey),
+    ...Object.values(rules.byPrefix),
+    ...Object.values(rules.byEvent ?? {}),
+    ...rules.recurring.map((rule) => rule.hint),
+  ];
+  for (const hint of hints) {
+    if (hint.projectId !== null && hint.projectId !== undefined) {
+      usage.set(hint.projectId, (usage.get(hint.projectId) ?? 0) + (hint.uses || 1));
+    }
+  }
+  return usage;
+}
+
+interface ProjectOption {
+  id: number;
+  name: string;
+  client: string;
+  /** Section header shown above this option, if it starts one. */
+  section?: string;
+}
+
+/** Projects for the picker: the ones used most first, then the rest A–Z; while
+ *  typing, only the matches, best first. */
+function projectOptions(context: TogglDayContext, query: string): ProjectOption[] {
+  const usage = projectUsage(context.rules);
+  const projects = context.account.projects
+    .filter((project) => project.workspaceId === context.workspaceId)
+    .map((project) => ({ id: project.id, name: project.name, client: project.clientName ?? "", active: project.active }));
+
+  if (query.trim()) {
+    const q = fold(query.trim());
+    return projects
+      .filter((project) => matchesQuery(`${project.name} ${project.client}`, query))
+      .sort(
+        (a, b) =>
+          Number(fold(b.name).startsWith(q)) - Number(fold(a.name).startsWith(q)) ||
+          (usage.get(b.id) ?? 0) - (usage.get(a.id) ?? 0) ||
+          a.name.localeCompare(b.name),
+      )
+      .slice(0, 30);
+  }
+
+  const frequent = projects
+    .filter((project) => (usage.get(project.id) ?? 0) > 0)
+    .sort((a, b) => (usage.get(b.id) ?? 0) - (usage.get(a.id) ?? 0))
+    .slice(0, 5);
+  const rest = projects
+    .filter((project) => !frequent.includes(project) && project.active)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return [
+    ...frequent.map((project, i) => ({ ...project, section: i === 0 ? "Usati spesso" : undefined })),
+    ...rest.map((project, i) => ({ ...project, section: i === 0 && frequent.length ? "Tutti" : undefined })),
+  ];
 }
 
 /** Every tag the account knows about: the workspace ones plus anything seen in
@@ -1531,26 +1988,126 @@ function knownTags(context: TogglDayContext): string[] {
   return [...names].sort((a, b) => a.localeCompare(b));
 }
 
-function renderTagSelect(row: PlanRow, context: TogglDayContext): string {
-  const current = row.tags[0] ?? "";
-  const known = knownTags(context);
-  // A tag that no longer exists in the workspace is still shown while selected,
-  // so editing another field cannot silently drop it.
-  const options = (known.includes(current) || !current ? known : [current, ...known])
-    .map((tag) => `<option value="${escHtml(tag)}" ${tag === current ? "selected" : ""}>${escHtml(tag)}</option>`)
-    .join("");
-  return `
-    <select class="tg-mini-select" data-tg-field="tag">
-      <option value="">+ Tag</option>
-      ${options}
-    </select>`;
+/** "" stands for "no tag". */
+function tagOptions(context: TogglDayContext, query: string): string[] {
+  const tags = knownTags(context).filter((tag) => matchesQuery(tag, query));
+  return query.trim() ? tags : ["", ...tags];
 }
 
-function renderBillable(row: PlanRow): string {
+interface Suggestion {
+  description: string;
+  issueKey: string | null;
+  hint: ProjectHint | null;
+  /** Where it comes from: the story's status, "ricorrente", "calendario"… */
+  meta: string;
+}
+
+/**
+ * Descriptions to pick from: today's stories first, then what was booked
+ * before — stories, recurring activities, meetings. Picking one also fills
+ * project, tag and billable the way they were booked last time.
+ */
+function descriptionSuggestions(context: TogglDayContext, query: string): Suggestion[] {
+  const rules = context.rules;
+  const seen = new Set<string>();
+  const all: Suggestion[] = [];
+  const add = (suggestion: Suggestion) => {
+    const key = fold(suggestion.description.trim());
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    all.push(suggestion);
+  };
+
+  for (const issue of context.issues) {
+    add({
+      description: rules.byKey[issue.key]?.description ?? `${issue.key} ${issue.summary}`.trim(),
+      issueKey: issue.key,
+      hint: hintFor(rules, issue.key),
+      meta: issue.status,
+    });
+  }
+  for (const rule of rules.recurring) {
+    add({ description: rule.label, issueKey: null, hint: rule.hint, meta: "ricorrente" });
+  }
+  for (const hint of Object.values(rules.byEvent ?? {})) {
+    if (hint.description) add({ description: hint.description, issueKey: null, hint, meta: "calendario" });
+  }
+  const pastStories = Object.entries(rules.byKey).sort(([, a], [, b]) => (b.uses ?? 0) - (a.uses ?? 0));
+  for (const [key, hint] of pastStories) {
+    if (hint.description) add({ description: hint.description, issueKey: key, hint, meta: "storico" });
+  }
+
+  return all.filter((suggestion) => matchesQuery(suggestion.description, query)).slice(0, 8);
+}
+
+function projectName(context: TogglDayContext, id: number | null | undefined): string {
+  return context.account.projects.find((project) => project.id === id)?.name ?? "";
+}
+
+function renderOptions<T>(
+  picker: Picker,
+  options: T[],
+  label: (option: T) => string,
+  extra: (option: T) => { meta?: string; section?: string; current?: boolean },
+): string {
+  if (options.length === 0) return `<div class="tg-pop-empty">Nessun risultato</div>`;
+  return options
+    .map((option, index) => {
+      const { meta, section, current } = extra(option);
+      return `
+        ${section ? `<div class="tg-pop-section">${escHtml(section)}</div>` : ""}
+        <button class="tg-pop-option ${index === picker.index ? "is-active" : ""} ${current ? "is-current" : ""}"
+                data-tg-pick-option="${index}" type="button" tabindex="-1">
+          <span class="tg-pop-label">${escHtml(label(option))}</span>
+          ${meta ? `<span class="tg-pop-meta">${escHtml(meta)}</span>` : ""}
+        </button>`;
+    })
+    .join("");
+}
+
+function renderPop(picker: Picker, placeholder: string, list: string): string {
   return `
-    <button class="tg-bill ${row.billable ? "is-on" : ""}" data-tg-billable="${row.id}" type="button" title="Billable">
-      ${I.dollar}${row.billable ? "Billable" : "Non-bill."}
-    </button>`;
+    <div class="tg-pop" data-tg-pop>
+      <input class="tg-pop-query" type="text" spellcheck="false" autocomplete="off" data-tg-pick-query
+             data-tg-focus="${escHtml(picker.rowId)}:pick" value="${escHtml(picker.query)}" placeholder="${placeholder}" />
+      <div class="tg-pop-list">${list}</div>
+    </div>`;
+}
+
+function renderProjectPop(picker: Picker, context: TogglDayContext, row: PlanRow): string {
+  const options = projectOptions(context, picker.query);
+  return renderPop(
+    picker,
+    "Cerca progetto o cliente…",
+    renderOptions(picker, options, (option) => option.name, (option) => ({
+      meta: option.client,
+      section: option.section,
+      current: option.id === row.projectId,
+    })),
+  );
+}
+
+function renderTagPop(picker: Picker, context: TogglDayContext, row: PlanRow): string {
+  const options = tagOptions(context, picker.query);
+  return renderPop(
+    picker,
+    "Cerca tag…",
+    renderOptions(picker, options, (tag) => (tag ? `#${tag}` : "Nessun tag"), (tag) => ({
+      current: (row.tags[0] ?? "") === tag,
+    })),
+  );
+}
+
+/** Suggestions hang under the description field itself — no search box. */
+function renderDescriptionPop(picker: Picker, context: TogglDayContext): string {
+  const options = descriptionSuggestions(context, picker.query);
+  if (options.length === 0) return "";
+  return `
+    <div class="tg-pop tg-pop--suggest" data-tg-pop>
+      <div class="tg-pop-list">${renderOptions(picker, options, (option) => option.description, (option) => ({
+        meta: [projectName(context, option.hint?.projectId), option.meta].filter(Boolean).join(" · "),
+      }))}</div>
+    </div>`;
 }
 
 /**

@@ -21,6 +21,11 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Toggl — edit the plan like a calendar",
+        body: "The timeline on the left is now yours to drag: <strong>move</strong> a block, <strong>resize</strong> it from its top or bottom edge, or drag the <strong>seam between two blocks</strong> to say \"this story ended at 11, not 10:30\" — the next one follows, so the day never gets a hole or an overlap. A <strong>click on free time</strong> adds a row covering exactly that gap. The pencil is gone: times and length are always editable, with <strong>↑ ↓</strong> for ±15 minutes or typed the quick way (<code>930</code>, <code>+45m</code>, <code>1h30</code>). The description <strong>suggests</strong> today's stories and what you booked before — pick one, or just type a Jira key, and project, tag and billable come from your history. Project and tag open a <strong>searchable picker</strong>, most used first.",
+        imgs: ["/assets/changelog/toggl-editing.png"],
+      },
+      {
         title: "Toggl — the plan follows what you actually did",
         body: "The planner no longer guesses from Jira statuses alone. It also counts the stories <strong>you moved</strong> during the day — straight to <em>Developed</em> included — your <strong>commits</strong> on every branch, and your <strong>Claude Code and Codex sessions</strong>, whose branch names (<code>PENT-5755/…</code>, <code>ZUME-114/…</code>) say which story you were on. The day is then split <strong>in proportion</strong>, in blocks of at least an hour, instead of cutting every gap in half — and each row says why it is there (<em>Visto lavorare: 2 commits · → Merge Request</em>), with the other plausible stories one click away. Only the open sprint counts: a story forgotten in <em>In Progress</em> months ago no longer sneaks into your week. Meetings now remember how you booked them — per recurring series and per title, matched against your history by time — so next Wednesday's call comes pre-filled. Optional in <strong>Settings → Toggl</strong>: <strong>Gap filling</strong> shares the time nothing explains between the sprint's stories by what their estimate still leaves unbooked, at your own pace (minutes per story point, learned from your history).",
         imgs: ["/assets/changelog/toggl-evidence.png"],
@@ -34,6 +39,10 @@ const VERSIONS: VersionBlock[] = [
         title: "Release notes — you decide what goes in, grouped by epic",
         body: "Every row of the release diff now says whether it will end up in the notes — <strong>In notes</strong> or <strong>Skipped</strong> — and one click on it offers <strong>Include anyway</strong> / <strong>Exclude anyway</strong> / <strong>Auto (default)</strong>. A story sitting in <em>Missing</em> that shipped anyway can finally be announced, and a <em>Done</em> one can be kept quiet, without editing Jira first. Everything left on <em>Auto</em> keeps following the usual rule — only Done goes in — and your decisions are saved per release, surviving a refresh, a version switch and a restart. The notes panel also gained an <strong>Epic</strong> grouping: <em>POWER</em> and <em>BUG</em> still lead, and under each one the stories are split into per-epic sections read from Jira's <strong>Principale</strong> field, with anything without an epic last.",
         imgs: ["/assets/changelog/override-release-notes-logic.png"],
+      },
+      {
+        title: "Refresh picks up release changes from Jira",
+        body: "Moved a story to another fix version on Jira? The next <strong>refresh</strong> now groups its PR under the <strong>new release</strong>. Before, ZuGit could keep showing it under the old one, because tickets it had already seen were served from memory instead of being read again. Every refresh now re-reads all linked tickets; if Jira does not answer, the last known data is kept.",
       },
     ],
   },

@@ -322,22 +322,25 @@ pub async fn fetch_jira_issues(
     };
 
     let mut result: HashMap<String, Option<JiraIssueSummary>> = HashMap::new();
-    let mut missing: Vec<String> = Vec::new();
 
-    for key in &unique_keys {
-        let ck = cache_key(&settings.jira_base_url, key);
-        if let Some(cached) = cache.lock().get(&ck).cloned() {
-            result.insert(key.clone(), cached);
-        } else {
-            missing.push(key.clone());
-        }
-    }
-
-    // Process in chunks of 50.
-    for chunk in missing.chunks(50) {
+    // Always fetch fresh: issue fields (fixVersions above all) change on the Jira
+    // side, and serving them from the cache would keep a story grouped under its
+    // old release until the cache happens to be cleared. The cache is only a
+    // fallback for keys Jira could not answer for this time.
+    for chunk in unique_keys.chunks(50) {
         if let Err(e) = fetch_chunk(chunk, settings, cache, client, &mut result).await {
             // Log but don't fail the whole dashboard.
             eprintln!("[zugit][jira] chunk fetch error: {}", e);
+        }
+    }
+
+    for key in &unique_keys {
+        if result.contains_key(key) {
+            continue;
+        }
+        let ck = cache_key(&settings.jira_base_url, key);
+        if let Some(cached) = cache.lock().get(&ck).cloned() {
+            result.insert(key.clone(), cached);
         }
     }
 
@@ -376,8 +379,9 @@ async fn fetch_chunk(
     // Fall back to individual fetches for tenants that don't support JQL search.
     if status == 404 || status == 405 || status == 410 {
         for key in keys {
-            let individual = fetch_single_issue(key, settings, cache, client).await;
-            result.insert(key.clone(), individual);
+            if let Some(individual) = fetch_single_issue(key, settings, cache, client).await {
+                result.insert(key.clone(), individual);
+            }
         }
         return Ok(());
     }
@@ -413,12 +417,14 @@ async fn fetch_chunk(
     Ok(())
 }
 
+/// Outer `None` means Jira could not answer (network/HTTP error), so the caller
+/// may fall back to the cache; `Some(None)` means the issue does not exist.
 async fn fetch_single_issue(
     key: &str,
     settings: &AppSettings,
     cache: &Mutex<HashMap<String, Option<JiraIssueSummary>>>,
     client: &reqwest::Client,
-) -> Option<JiraIssueSummary> {
+) -> Option<Option<JiraIssueSummary>> {
     let url = format!(
         "{}/rest/api/3/issue/{}?fields=summary,priority,status,fixVersions,assignee",
         settings.jira_base_url, key
@@ -434,7 +440,7 @@ async fn fetch_single_issue(
     if response.status() == 404 {
         let ck = cache_key(&settings.jira_base_url, key);
         cache.lock().insert(ck, None);
-        return None;
+        return Some(None);
     }
 
     if !response.status().is_success() {
@@ -445,7 +451,7 @@ async fn fetch_single_issue(
     let summary = map_issue(&issue);
     let ck = cache_key(&settings.jira_base_url, key);
     cache.lock().insert(ck, Some(summary.clone()));
-    Some(summary)
+    Some(Some(summary))
 }
 
 // ── Checklist field discovery ─────────────────────────────────────────────────

@@ -628,6 +628,140 @@ export function eventKeys(event: { recurringEventId?: string | null; summary: st
   return keys;
 }
 
+// ── Editing ───────────────────────────────────────────────────────────────────
+
+/** A row or booked entry on the day's timeline. */
+export interface Span {
+  id: string;
+  startMin: number;
+  endMin: number;
+}
+
+export type Edge = "start" | "end";
+
+/** "+45m", "+1h", "+1h30", "-15", "+90" → signed minutes; null for anything else. */
+function parseRelative(text: string): number | null {
+  const match = /^([+-])\s*(?:(\d+)\s*h\s*)?(?:(\d+)\s*m?)?$/i.exec(text.trim());
+  if (!match || (!match[2] && !match[3])) return null;
+  const minutes = Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0);
+  return match[1] === "-" ? -minutes : minutes;
+}
+
+/**
+ * A time typed into a field: absolute the way people type it ("9", "930",
+ * "09:30") or relative to `current` ("+45m", "+1h30", "-15"). Null when it
+ * cannot be read — the field then snaps back to its value.
+ */
+export function parseTimeInput(text: string, current: number): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const relative = parseRelative(trimmed);
+  if (relative !== null) return current + relative;
+  if (!/^\d{1,2}(:?\d{2})?$/.test(trimmed)) return null;
+  return parseClock(trimmed);
+}
+
+/** A length typed into a field: "45", "45m", "1h", "1h30", "1:30", "1.5h". */
+export function parseDurationInput(text: string): number | null {
+  const value = text.trim().toLowerCase().replace(",", ".");
+  let match = /^(\d+):(\d{1,2})$/.exec(value);
+  if (match) return Number(match[1]) * 60 + Number(match[2]);
+  match = /^(\d+(?:\.\d+)?)\s*h(?:\s*(\d+)\s*m?)?$/.exec(value);
+  if (match) return Math.round(Number.parseFloat(match[1]) * 60) + Number(match[2] ?? 0);
+  match = /^(\d+)\s*m?$/.exec(value);
+  if (match) return Number(match[1]);
+  return null;
+}
+
+const clampTo = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
+
+/** The free stretch around `span`: from the latest end before it to the
+ *  earliest start after it among `others`, within `bounds`. */
+export function roomAround(span: Span, others: Span[], bounds: Interval): Interval {
+  let from = bounds.from;
+  let to = bounds.to;
+  for (const other of others) {
+    if (other.id === span.id) continue;
+    if (other.endMin <= span.startMin) from = Math.max(from, other.endMin);
+    else if (other.startMin >= span.endMin) to = Math.min(to, other.startMin);
+  }
+  return { from, to };
+}
+
+/**
+ * Moves one edge of a row to `minute`, snapped to the slot grid.
+ *
+ * A row touching that edge follows it — the boundary between two blocks moves
+ * and the plan keeps no hole and no overlap: "this story ended at 11, not at
+ * 10:30" is one gesture. With `detach`, or when nothing touches, the edge moves
+ * alone and stops at whatever is next (another row, an entry already on
+ * Toggl). Every row keeps at least one slot. Returns the rows that changed.
+ */
+export function moveEdge(
+  rows: Span[],
+  walls: Span[],
+  id: string,
+  edge: Edge,
+  minute: number,
+  slot: number,
+  bounds: Interval,
+  detach = false,
+): Map<string, Interval> {
+  const changes = new Map<string, Interval>();
+  const row = rows.find((candidate) => candidate.id === id);
+  if (!row) return changes;
+  const target = roundTo(minute, slot);
+
+  if (edge === "end") {
+    const next = detach ? undefined : rows.find((other) => other.id !== id && other.startMin === row.endMin);
+    if (next) {
+      const at = clampTo(target, row.startMin + slot, next.endMin - slot);
+      changes.set(row.id, { from: row.startMin, to: at });
+      changes.set(next.id, { from: at, to: next.endMin });
+    } else {
+      const room = roomAround(row, [...rows, ...walls], bounds);
+      changes.set(row.id, { from: row.startMin, to: clampTo(target, row.startMin + slot, room.to) });
+    }
+  } else {
+    const previous = detach ? undefined : rows.find((other) => other.id !== id && other.endMin === row.startMin);
+    if (previous) {
+      const at = clampTo(target, previous.startMin + slot, row.endMin - slot);
+      changes.set(previous.id, { from: previous.startMin, to: at });
+      changes.set(row.id, { from: at, to: row.endMin });
+    } else {
+      const room = roomAround(row, [...rows, ...walls], bounds);
+      changes.set(row.id, { from: clampTo(target, room.from, row.endMin - slot), to: row.endMin });
+    }
+  }
+  return changes;
+}
+
+/** Moves a whole row to start at `minute`, keeping its length, inside the free
+ *  stretch it sits in — it never slides over a neighbour. */
+export function moveRow(rows: Span[], walls: Span[], id: string, minute: number, slot: number, bounds: Interval): Interval | null {
+  const row = rows.find((candidate) => candidate.id === id);
+  if (!row) return null;
+  const length = row.endMin - row.startMin;
+  const room = roomAround(row, [...rows, ...walls], bounds);
+  if (room.to - room.from < length) return { from: row.startMin, to: row.endMin };
+  const from = clampTo(roundTo(minute, slot), room.from, room.to - length);
+  return { from, to: from + length };
+}
+
+/** The free stretch of `range` around `minute`, or null when the minute falls
+ *  on a row, an entry, or outside the range. */
+export function gapAt(spans: Span[], minute: number, range: Interval, slot: number): Interval | null {
+  if (minute < range.from || minute >= range.to) return null;
+  if (spans.some((span) => span.startMin <= minute && minute < span.endMin)) return null;
+  let from = range.from;
+  let to = range.to;
+  for (const span of spans) {
+    if (span.endMin <= minute) from = Math.max(from, span.endMin);
+    if (span.startMin > minute) to = Math.min(to, span.startMin);
+  }
+  return to - from >= slot ? { from, to } : null;
+}
+
 // ── End-of-day reminder ───────────────────────────────────────────────────────
 
 export interface ReminderCheck {

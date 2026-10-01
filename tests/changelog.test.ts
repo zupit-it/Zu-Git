@@ -24,7 +24,7 @@ test("images from anywhere else are ignored", () => {
 });
 
 test("release notes extracted for a version point images at that tag", () => {
-  const notes = execFileSync("node", ["scripts/changelog.js", "extract", "Unreleased"], { encoding: "utf8" });
-  assert.match(notes, /!\[[^\]]*\]\(https:\/\/raw\.githubusercontent\.com\/zupit-it\/Zu-Git\/vUnreleased\/public\/assets\/changelog\/toggl-evidence\.png\)/);
+  const notes = execFileSync("node", ["scripts/changelog.js", "extract", "0.12.0"], { encoding: "utf8" });
+  assert.match(notes, /!\[[^\]]*\]\(https:\/\/raw\.githubusercontent\.com\/zupit-it\/Zu-Git\/v0\.12\.0\/public\/assets\/changelog\/toggl-evidence\.png\)/);
   assert.doesNotMatch(notes, /\]\(public\//);
 });
