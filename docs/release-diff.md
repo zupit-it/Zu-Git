@@ -40,10 +40,15 @@ Jira's *Principale* field — ZuGit resolves it by name through `/rest/api/3/fie
 the built-in `parent` field, which is what Italian Jira sites label "Principale". Stories with no
 epic are grouped last.
 
-## Minor Releases
+## Minor Releases And Release Branches
 
-Minor releases are intentionally not fully modeled yet.
+Minor releases often have their own release branch and require cherry-picks, so main's merged PR range can be misleading. The header of the diff has a branch picker next to the version: it lists `main` plus every branch whose name starts with the **Release branch prefix** setting (Settings → Jira, default `release`, case-insensitive), most recently updated first.
 
-They often have their own release branch and require cherry-picks, so using main's merged PR range can be misleading. The expected future behavior is likely to rely primarily on Jira's fixVersion list, then track cherry-pick state separately.
+When a release branch is picked:
 
-Until that workflow is designed, release diff behavior should be treated as reliable for beta and major releases only.
+- the lower bound is the latest Git tag reachable from that branch (last 100 commits), not from main
+- merged PRs count only when their base is that branch
+- the commits after the tag are scanned too, so a cherry-pick pushed without a PR still marks its story as merged; the row links to the original PR when the message carries `(#123)` or `Merge pull request #123`, otherwise to the commit
+- a story with a terminal Jira status (Verified, Done…) is **not** assumed to be on the branch: without a matching PR or commit it stays *Missing*, flagged "Jira ahead of git" — that is the cherry-pick still to do
+
+The branch picked is remembered per release name on this machine, so reopening the diff of a minor release lands on its branch again.

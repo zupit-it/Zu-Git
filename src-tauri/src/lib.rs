@@ -105,6 +105,7 @@ pub fn run() {
             commands::fetch_branch_stats,
             commands::fetch_stale_branches,
             commands::fetch_release_diff,
+            commands::fetch_release_branches,
             commands::move_jira_fix_versions,
             commands::drop_jira_fix_versions,
             commands::move_to_developed,

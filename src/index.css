@@ -3429,6 +3429,27 @@ img.avatar { object-fit: cover; }
   appearance: auto;
 }
 
+.rd-branch-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #4A4C55;
+}
+
+.rd-branch-select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #4A4C55;
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  padding: 0;
+  max-width: 220px;
+  appearance: auto;
+}
+
 .rd-repo {
   font-family: var(--font-mono);
   font-size: 11.5px;

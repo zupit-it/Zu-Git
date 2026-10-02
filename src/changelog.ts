@@ -41,6 +41,10 @@ const VERSIONS: VersionBlock[] = [
         imgs: ["/assets/changelog/override-release-notes-logic.png"],
       },
       {
+        title: "Release status — check a release on its own branch",
+        body: "Next to the version in the release diff you can now pick the <strong>branch</strong> it is checked against: <strong>main</strong>, as before, or any branch starting with <code>release</code> — the prefix is yours to change in <strong>Settings → Jira</strong>. On a release branch the diff starts from <strong>that branch's latest tag</strong>, counts only the PRs merged into it, and reads the commits too, so a <strong>cherry-pick</strong> pushed without a PR still marks its story as there. A story that is <em>Verified</em> on Jira but never reached the branch stays in <strong>Missing</strong>, flagged <em>Jira ahead of git</em>: that is your cherry-pick still to do. ZuGit remembers the branch you picked for each release.",
+      },
+      {
         title: "Refresh picks up release changes from Jira",
         body: "Moved a story to another fix version on Jira? The next <strong>refresh</strong> now groups its PR under the <strong>new release</strong>. Before, ZuGit could keep showing it under the old one, because tickets it had already seen were served from memory instead of being read again. Every refresh now re-reads all linked tickets; if Jira does not answer, the last known data is kept.",
       },

@@ -355,6 +355,14 @@
                       <label class="field-label" for="jiraMergeTransition">Transition name on PR open</label>
                       <input id="jiraMergeTransition" name="jiraMergeTransition" type="text" placeholder="MERGE REQUEST" />
                     </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="releaseBranchPrefix">Release branch prefix</label>
+                      <input id="releaseBranchPrefix" name="releaseBranchPrefix" type="text" placeholder="release" />
+                      <p class="field-hint">
+                        Branch proposti come destinazione nel Release status, al posto di main:
+                        <code>release</code> mostra <code>release/2026.06</code>, <code>release-hotfix</code>…
+                      </p>
+                    </div>
 
                   </div>
                 </details>

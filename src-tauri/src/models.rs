@@ -53,6 +53,8 @@ pub struct AppSettings {
     pub stale_branch_days: u32,
     /// Branch name prefixes never reported as stale (release trains, long-lived lines…).
     pub stale_branch_ignored_prefixes: Vec<String>,
+    /// Branches offered as comparison target in the release diff start with this.
+    pub release_branch_prefix: String,
 }
 
 impl Default for AppSettings {
@@ -93,6 +95,7 @@ impl Default for AppSettings {
             stale_branches_enabled: false,
             stale_branch_days: 15,
             stale_branch_ignored_prefixes: vec!["release".to_string()],
+            release_branch_prefix: "release".to_string(),
         }
     }
 }
@@ -145,6 +148,8 @@ pub struct SettingsFormValues {
     pub stale_branches_enabled: String,                  // "on" | ""
     pub stale_branch_days: String,
     pub stale_branch_ignored_prefixes: String,
+    #[serde(default)]
+    pub release_branch_prefix: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -531,6 +536,10 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         stale_branch_ignored_prefixes: split_multiline_list(
             &values.stale_branch_ignored_prefixes,
         ),
+        release_branch_prefix: match values.release_branch_prefix.trim() {
+            "" => "release".to_string(),
+            prefix => prefix.to_string(),
+        },
     }
 }
 
@@ -597,6 +606,7 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         stale_branches_enabled: if settings.stale_branches_enabled { "on".to_string() } else { String::new() },
         stale_branch_days: settings.stale_branch_days.to_string(),
         stale_branch_ignored_prefixes: settings.stale_branch_ignored_prefixes.join("\n"),
+        release_branch_prefix: settings.release_branch_prefix.clone(),
     }
 }
 

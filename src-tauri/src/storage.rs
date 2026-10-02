@@ -110,6 +110,8 @@ struct PersistedSettings {
         alias = "orphanIgnoredBranchPrefixes"
     )]
     stale_branch_ignored_prefixes: Vec<String>,
+    #[serde(default = "default_release_branch_prefix")]
+    release_branch_prefix: String,
     // Legacy/fallback field. New fallback writes are only produced when they can
     // be protected by the platform (currently DPAPI on Windows).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,6 +164,10 @@ fn default_stale_branch_days() -> u32 {
 /// are the one prefix worth excluding out of the box.
 fn default_stale_ignored_prefixes() -> Vec<String> {
     vec!["release".to_string()]
+}
+
+fn default_release_branch_prefix() -> String {
+    "release".to_string()
 }
 
 fn token_fallback_value(token: &str) -> Option<String> {
@@ -339,6 +345,7 @@ pub fn load_settings_from(dir: &Path) -> AppSettings {
         stale_branches_enabled: if persisted.stale_branches_enabled { "on".to_string() } else { String::new() },
         stale_branch_days: persisted.stale_branch_days.to_string(),
         stale_branch_ignored_prefixes: persisted.stale_branch_ignored_prefixes.join("\n"),
+        release_branch_prefix: persisted.release_branch_prefix,
     };
 
     normalize_settings(&form)
@@ -404,6 +411,7 @@ pub async fn save_settings(
         stale_branches_enabled: normalized.stale_branches_enabled,
         stale_branch_days: normalized.stale_branch_days,
         stale_branch_ignored_prefixes: normalized.stale_branch_ignored_prefixes.clone(),
+        release_branch_prefix: normalized.release_branch_prefix.clone(),
         github_token: github_token_fallback,
         jira_token: jira_token_fallback,
         toggl_token: toggl_token_fallback,

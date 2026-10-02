@@ -405,6 +405,30 @@ fn author_initials(login: &str) -> String {
 
 // ── Release diff ──────────────────────────────────────────────────────────────
 
+/// Branches the release diff can be compared against, filtered by the
+/// `release_branch_prefix` setting.
+#[tauri::command]
+pub async fn fetch_release_branches(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repos: Option<Vec<String>>,
+) -> Result<Vec<String>, String> {
+    let settings = storage::load_settings(&app).await?;
+    if !crate::models::settings_ready_for_github(&settings) {
+        return Err("GitHub not configured".into());
+    }
+    let repos = repos
+        .filter(|repos| !repos.is_empty())
+        .unwrap_or_else(|| settings.github_repos.clone());
+    Ok(crate::github::fetch_release_branches(
+        &repos,
+        &settings.release_branch_prefix,
+        &settings,
+        &state.http_client,
+    )
+    .await)
+}
+
 #[tauri::command]
 pub async fn fetch_release_diff(
     app: tauri::AppHandle,
@@ -412,6 +436,7 @@ pub async fn fetch_release_diff(
     release_name: String,
     project_key: Option<String>,
     repos: Option<Vec<String>>,
+    target_branch: Option<String>,
 ) -> Result<ReleaseDiffResult, String> {
     let settings = storage::load_settings(&app).await?;
 
@@ -429,9 +454,15 @@ pub async fn fetch_release_diff(
         .filter(|repos| !repos.is_empty())
         .unwrap_or_else(|| settings.github_repos.clone());
 
+    // Empty = the default branch.
+    let target_branch = target_branch
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty());
+
     // RT1 — one batched GitHub GraphQL query for tag-bounded merged PRs.
     let (merged_prs, since_tag) = crate::github::fetch_merged_prs_since_last_release(
         &release_repos,
+        target_branch.as_deref(),
         &settings,
         &state.http_client,
     )
@@ -551,11 +582,13 @@ pub async fn fetch_release_diff(
     // Planned issues → done or missing.
     // A story is Done if a merged PR was found OR if it already has a terminal
     // status (e.g. Verified) — in that case it's confirmed on main even if the
-    // PR title didn't carry the Jira key.
+    // PR title didn't carry the Jira key. A release branch gets no such benefit
+    // of the doubt: a verified story is exactly what may still need cherry-picking.
+    let trust_terminal_status = target_branch.is_none();
     for key in &planned_keys {
         if let Some(issue) = jira_map.get(key) {
             let merged = merged_map.get(key).copied();
-            if merged.is_some() || is_terminal(&issue.status) {
+            if merged.is_some() || (trust_terminal_status && is_terminal(&issue.status)) {
                 // Flag when we relied on terminal status alone (no PR link found) — Jira ahead of git.
                 let flag = if merged.is_none() {
                     Some("no-pr".to_string())
@@ -564,8 +597,9 @@ pub async fn fetch_release_diff(
                 };
                 done.push(make_item(issue, merged, flag));
             } else {
-                // Flag when Developed — Jira says code is ready but no merged PR found.
-                let flag = if issue.status.to_lowercase() == "developed" {
+                // Flag when Developed (or done, on a release branch) — Jira says
+                // code is ready but no merged PR found.
+                let flag = if issue.status.to_lowercase() == "developed" || is_terminal(&issue.status) {
                     Some("no-pr".to_string())
                 } else {
                     None

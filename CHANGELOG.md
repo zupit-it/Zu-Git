@@ -26,6 +26,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   command, whether Claude Code, Codex and Claude Desktop run this ZuGit: connected, not connected, or
   pointing at a ZuGit that is gone (app moved or reinstalled) or at another copy (a dev build), with
   what to change. ZuGit only reads their config files; registering stays copy and paste.
+- **Release status: compare against a release branch** — next to the version, pick the branch the
+  release is checked against: `main` (the default) or any branch starting with the new **Release
+  branch prefix** setting (Settings → Jira, `release` out of the box). On a release branch the window
+  starts at that branch's latest tag, only PRs based on it count, and the commits since the tag are
+  read too, so a cherry-pick pushed without a PR still marks its story as merged (linked to the
+  original PR, or to the commit). A Verified or Done story is no longer assumed to be there: with no
+  matching PR or commit it stays Missing, flagged "Jira ahead of git" — the cherry-pick still to do.
+  The branch picked is remembered per release.
 
 ### Changed
 - **Settings: compact, collapsible sections** — the settings page is grouped into Connections,
@@ -45,6 +53,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   grouped under the old one until the cache happened to be cleared (settings saved, release diff
   opened, or the 12-hour maintenance). Every refresh now re-reads all linked tickets; the cache is
   only a fallback for tickets Jira could not return that time.
+- **Release status: "Since" tag disappearing** — the tag the diff starts from vanished as soon as
+  the list re-rendered (right after opening, on every tab switch). It now stays next to the tabs.
 
 ---
 

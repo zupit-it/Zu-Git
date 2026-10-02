@@ -44,6 +44,8 @@ export interface AppSettings {
   staleBranchDays: number;
   /** Branch name prefixes never reported as stale (release trains, long-lived lines…). */
   staleBranchIgnoredPrefixes: string[];
+  /** Branches offered as comparison target in the release diff start with this. */
+  releaseBranchPrefix: string;
 }
 
 export interface ListFilterPreferences {
@@ -93,6 +95,7 @@ export interface SettingsFormValues {
   staleBranchesEnabled: string;          // "on" | ""
   staleBranchDays: string;
   staleBranchIgnoredPrefixes: string;
+  releaseBranchPrefix: string;
 }
 
 export const defaultSettings: AppSettings = {
@@ -132,6 +135,7 @@ export const defaultSettings: AppSettings = {
   staleBranchDays: 15,
   // Release branches are long-lived by convention, not by protection rule.
   staleBranchIgnoredPrefixes: ["release"],
+  releaseBranchPrefix: "release",
 };
 
 export const defaultListFilterPreferences: ListFilterPreferences = {
@@ -214,6 +218,7 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
     staleBranchesEnabled: settings.staleBranchesEnabled ? "on" : "",
     staleBranchDays: String(settings.staleBranchDays),
     staleBranchIgnoredPrefixes: settings.staleBranchIgnoredPrefixes.join("\n"),
+    releaseBranchPrefix: settings.releaseBranchPrefix,
   };
 }
 
@@ -280,6 +285,7 @@ export function normalizeSettings(
       values.staleBranchDays, 7, 365, defaultSettings.staleBranchDays,
     ),
     staleBranchIgnoredPrefixes: splitMultilineList(values.staleBranchIgnoredPrefixes),
+    releaseBranchPrefix: values.releaseBranchPrefix?.trim() || defaultSettings.releaseBranchPrefix,
   };
 }
 

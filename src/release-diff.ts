@@ -93,7 +93,7 @@ function cleanTitle(summary: string): string {
 /** Label for stories whose "Principale" (epic) field is empty. */
 const NO_EPIC = "Senza epica";
 
-/** The automatic rule: only what actually landed on main goes in the notes. */
+/** The automatic rule: only what actually landed on the target branch goes in the notes. */
 function autoIncluded(kind: ItemKind): boolean {
   return kind === "done";
 }
@@ -164,6 +164,45 @@ interface ModalState {
   noteMenuKey: string | null;
   /** Resolved on first open: "epic" when the release carries epic data. */
   notesGroupBy: "type" | "epic" | null;
+  /** Branch the diff is computed on; "" = the default branch. */
+  targetBranch: string;
+  /** Branches matching the release prefix, loaded after the modal opens. */
+  branches: string[];
+}
+
+function branchLabel(st: ModalState): string {
+  return st.targetBranch || "main";
+}
+
+// ── Target branch memory ──────────────────────────────────────────────────────
+// The branch picked for a release is remembered per release name, so reopening
+// the diff of a minor release lands straight on its release branch.
+
+const BRANCH_BY_RELEASE_KEY = "zugit.releaseDiff.branchByRelease";
+
+function readSavedBranches(): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(BRANCH_BY_RELEASE_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+function savedBranchFor(releaseName: string): string | undefined {
+  const branch = readSavedBranches()[releaseName];
+  return typeof branch === "string" ? branch : undefined;
+}
+
+function saveBranchFor(releaseName: string, branch: string) {
+  const saved = readSavedBranches();
+  if (branch) saved[releaseName] = branch;
+  else delete saved[releaseName];
+  try {
+    localStorage.setItem(BRANCH_BY_RELEASE_KEY, JSON.stringify(saved));
+  } catch {
+    // Storage unavailable: the diff just starts on main next time.
+  }
 }
 
 /** Whether the story ends up in the notes, override first, rule second. */
@@ -214,10 +253,10 @@ function renderStatusChip(status: string): string {
   return `<span class="rd-status-chip" style="background:${s.bg};color:${s.fg};border:1px solid ${s.bd}">${escHtml(s.label)}</span>`;
 }
 
-function renderFlagChip(flag: string): string {
+function renderFlagChip(flag: string, branch: string): string {
   const cfg: Record<string, { label: string; hint: string }> = {
-    "no-pr":   { label: "Jira ahead of git", hint: "Status is set in Jira but no merged PR was found on main." },
-    "no-jira": { label: "Git ahead of Jira", hint: "Merged on main but Jira status hasn't caught up." },
+    "no-pr":   { label: "Jira ahead of git", hint: `Status is set in Jira but no merged PR or commit was found on ${branch}.` },
+    "no-jira": { label: "Git ahead of Jira", hint: `Merged on ${branch} but Jira status hasn't caught up.` },
   };
   const c = cfg[flag];
   if (!c) return "";
@@ -300,7 +339,7 @@ function renderItem(st: ModalState, item: ReleaseDiffItem, kind: ItemKind): stri
 
   // Divergence column — flag chip and/or jira-version chip and/or preview
   let divergence = "";
-  if (item.flag) divergence += renderFlagChip(item.flag);
+  if (item.flag) divergence += renderFlagChip(item.flag, branchLabel(st));
   const divergent = divergentVersions(item, currentVersion);
   if (divergent.length > 0 && kind === "extra") {
     const label = divergent.join(", ");
@@ -313,9 +352,10 @@ function renderItem(st: ModalState, item: ReleaseDiffItem, kind: ItemKind): stri
 
   const statusCol = `<div class="rd-status-col">${renderStatusChip(item.status)}</div>`;
 
-  const prNum = item.prNumber ? `#${item.prNumber}` : "";
+  // A cherry-pick pushed without a PR of its own links to the commit instead.
+  const prLabel = item.prNumber ? `PR #${item.prNumber}` : item.prUrl?.includes("/commit/") ? "Commit" : "PR";
   const prCol = item.prUrl
-    ? `<div class="rd-pr-col"><a class="rd-pr-link" data-pr-link="${escHtml(item.prUrl)}" href="#" title="${escHtml(item.prUrl)}">PR ${escHtml(prNum)} ${I.ext}</a></div>`
+    ? `<div class="rd-pr-col"><a class="rd-pr-link" data-pr-link="${escHtml(item.prUrl)}" href="#" title="${escHtml(item.prUrl)}">${escHtml(prLabel)} ${I.ext}</a></div>`
     : `<div class="rd-pr-col"></div>`;
 
   return `<div class="rd-item" data-rd-item="${escHtml(item.key)}">
@@ -329,11 +369,11 @@ function renderItem(st: ModalState, item: ReleaseDiffItem, kind: ItemKind): stri
   </div>`;
 }
 
-interface SectionCfg { icon: string; label: string; fg: string; bg: string; bd: string; hint: string; }
+interface SectionCfg { icon: string; label: string; fg: string; bg: string; bd: string; hint: (branch: string) => string; }
 const SECTION_CFG: Record<string, SectionCfg> = {
-  done:    { icon: I.check, label: "Done",    fg: T.ok,   bg: T.okSoft,   bd: T.okBd,   hint: "Merged into main with this release version" },
-  missing: { icon: I.minus, label: "Missing", fg: T.fail, bg: T.failSoft, bd: T.failBd, hint: "Targeted to this release in Jira but not yet merged" },
-  extra:   { icon: I.plus,  label: "Extra",   fg: T.warn, bg: T.warnSoft, bd: T.warnBd, hint: "Merged into main but Jira target version differs" },
+  done:    { icon: I.check, label: "Done",    fg: T.ok,   bg: T.okSoft,   bd: T.okBd,   hint: b => `Merged into ${b} with this release version` },
+  missing: { icon: I.minus, label: "Missing", fg: T.fail, bg: T.failSoft, bd: T.failBd, hint: b => `Targeted to this release in Jira but not yet on ${b}` },
+  extra:   { icon: I.plus,  label: "Extra",   fg: T.warn, bg: T.warnSoft, bd: T.warnBd, hint: b => `Merged into ${b} but Jira target version differs` },
 };
 
 function renderSection(kind: ItemKind, items: ReleaseDiffItem[], st: ModalState): string {
@@ -358,7 +398,7 @@ function renderSection(kind: ItemKind, items: ReleaseDiffItem[], st: ModalState)
   const header = `<div class="rd-section-hd">
     <span class="rd-kind-pill" style="background:${cfg.bg};color:${cfg.fg};border:1px solid ${cfg.bd}">${cfg.icon} ${cfg.label}</span>
     <span class="rd-count-pill">${items.length}</span>
-    <span class="rd-hint">${escHtml(cfg.hint)}</span>
+    <span class="rd-hint">${escHtml(cfg.hint(branchLabel(st)))}</span>
     <div class="rd-spacer"></div>
     ${selectAllBtn}
   </div>`;
@@ -370,7 +410,7 @@ function renderSection(kind: ItemKind, items: ReleaseDiffItem[], st: ModalState)
   return `<div class="rd-section" data-rd-section="${kind}">${header}<div>${rows}</div></div>`;
 }
 
-function renderTabs(tab: string, counts: ReturnType<typeof computeCounts>): string {
+function renderTabs(tab: string, counts: ReturnType<typeof computeCounts>, sinceTag: string): string {
   const tabs: Array<{ id: string; label: string; count: number; warnColor?: boolean }> = [
     { id: "all",     label: "All",     count: counts.all },
     { id: "done",    label: "Done",    count: counts.done },
@@ -384,7 +424,7 @@ function renderTabs(tab: string, counts: ReturnType<typeof computeCounts>): stri
     return `<button class="rd-tab ${active ? "rd-tab--active" : ""}" data-rd-tab="${t.id}">
       ${icon}${escHtml(t.label)}<span class="rd-tab-count">${t.count}</span>
     </button>`;
-  }).join("");
+  }).join("") + (sinceTag ? `<span class="rd-since-tag">Since: <code>${escHtml(sinceTag)}</code></span>` : "");
 }
 
 function renderProgressBar(counts: ReturnType<typeof computeCounts>): string {
@@ -498,9 +538,22 @@ function renderVersionSelect(current: string, available: string[]): string {
   return `<select class="rd-version-select" data-rd-version-select>${options}</select>`;
 }
 
+function renderBranchSelect(st: ModalState): string {
+  const branches = st.targetBranch && !st.branches.includes(st.targetBranch)
+    ? [st.targetBranch, ...st.branches]
+    : st.branches;
+  const options = [
+    `<option value="" ${st.targetBranch ? "" : "selected"}>main</option>`,
+    ...branches.map(b =>
+      `<option value="${escHtml(b)}" ${b === st.targetBranch ? "selected" : ""}>${escHtml(b)}</option>`
+    ),
+  ].join("");
+  return `${I.branch}<select class="rd-branch-select" data-rd-branch-select title="Branch the release is compared against">${options}</select>`;
+}
+
 // ── Modal construction ────────────────────────────────────────────────────────
 
-function buildModal(releaseName: string, result: ReleaseDiffResult, repos: string[] = [], projectKey?: string): HTMLElement {
+function buildModal(releaseName: string, result: ReleaseDiffResult, repos: string[] = [], projectKey?: string, targetBranch = ""): HTMLElement {
   const st: ModalState = {
     releaseName,
     result,
@@ -515,6 +568,8 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     overrides: {},
     noteMenuKey: null,
     notesGroupBy: null,
+    targetBranch,
+    branches: [],
   };
 
   const counts = computeCounts(result, releaseName);
@@ -530,6 +585,8 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
         <div class="rd-header-row1">
           <span class="rd-badge">Release status</span>
           ${renderVersionSelect(st.releaseName, result.availableVersions)}
+          <span class="rd-sep">on</span>
+          <span class="rd-branch-target" data-rd-branch-target>${renderBranchSelect(st)}</span>
           <span class="rd-sep">·</span>
           <span class="rd-repo">${escHtml(result.repo)}</span>
           <span class="rd-sep">·</span>
@@ -544,8 +601,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
 
       <!-- Tabs -->
       <div class="rd-tabs" data-rd-tabs>
-        ${renderTabs(st.tab, counts)}
-        ${result.sinceTag ? `<span class="rd-since-tag">Since: <code>${escHtml(result.sinceTag)}</code></span>` : ""}
+        ${renderTabs(st.tab, counts, result.sinceTag)}
       </div>
 
       <!-- Body -->
@@ -595,7 +651,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     const tabsEl   = overlay.querySelector<HTMLElement>("[data-rd-tabs]");
     const bodyEl   = overlay.querySelector<HTMLElement>("[data-rd-body]");
     const footerEl = overlay.querySelector<HTMLElement>("[data-rd-footer]");
-    if (tabsEl)   tabsEl.innerHTML   = renderTabs(st.tab, freshCounts);
+    if (tabsEl)   tabsEl.innerHTML   = renderTabs(st.tab, freshCounts, st.result.sinceTag);
     if (bodyEl) {
       // Re-rendering the list must not scroll the row the user just acted on away.
       const scroll = bodyEl.scrollTop;
@@ -633,12 +689,31 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
   });
 
   overlay.addEventListener("change", (e) => {
+    const branchSelect = (e.target as Element).closest<HTMLSelectElement>("[data-rd-branch-select]");
+    if (branchSelect) {
+      st.targetBranch = branchSelect.value;
+      saveBranchFor(st.releaseName, st.targetBranch);
+      void refreshDiff();
+      return;
+    }
     const select = (e.target as Element).closest<HTMLSelectElement>("[data-rd-version-select]");
     if (!select) return;
     st.releaseName = select.value;
     st.targetVersion = select.value;
+    st.targetBranch = savedBranchFor(st.releaseName) ?? st.targetBranch;
+    renderBranchTarget();
     void refreshDiff();
   });
+
+  function renderBranchTarget() {
+    const el = overlay.querySelector<HTMLElement>("[data-rd-branch-target]");
+    if (el) el.innerHTML = renderBranchSelect(st);
+  }
+
+  // The branch list costs a GitHub round trip — load it without holding the modal.
+  invoke<string[]>("fetch_release_branches", st.repos.length > 0 ? { repos: st.repos } : {})
+    .then(branches => { st.branches = branches; renderBranchTarget(); })
+    .catch(err => console.error("Release branches error:", err));
 
   // ── Event delegation ──────────────────────────────────────────────────────
 
@@ -980,6 +1055,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
         releaseName: st.releaseName,
         ...(st.projectKey ? { projectKey: st.projectKey } : {}),
         ...(st.repos.length > 0 ? { repos: st.repos } : {}),
+        ...(st.targetBranch ? { targetBranch: st.targetBranch } : {}),
       });
       st.result = fresh;
       st.selected.clear();
@@ -1013,11 +1089,13 @@ export async function openReleaseDiff(
   triggerBtn.classList.add("is-loading");
 
   try {
-    console.info("[zugit][release-diff] opening", { releaseName, projectKey: projectKey ?? null, repos: repos ?? null });
+    const targetBranch = savedBranchFor(releaseName) ?? "";
+    console.info("[zugit][release-diff] opening", { releaseName, projectKey: projectKey ?? null, repos: repos ?? null, targetBranch });
     const params = {
       releaseName,
       ...(projectKey ? { projectKey } : {}),
       ...(repos && repos.length > 0 ? { repos } : {}),
+      ...(targetBranch ? { targetBranch } : {}),
     };
     const result = await invoke<ReleaseDiffResult>("fetch_release_diff", params);
     console.info("[zugit][release-diff] result", {
@@ -1027,7 +1105,7 @@ export async function openReleaseDiff(
       extra: result.extra.length,
     });
     document.querySelector("[data-release-diff-overlay]")?.remove();
-    document.body.appendChild(buildModal(releaseName, result, repos ?? [], projectKey));
+    document.body.appendChild(buildModal(releaseName, result, repos ?? [], projectKey, targetBranch));
   } catch (err) {
     console.error("Release diff error:", err);
   } finally {

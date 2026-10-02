@@ -1403,8 +1403,33 @@ pub struct MergedPrRecord {
     pub jira_keys: Vec<String>,
 }
 
+/// Quotes a value for inlining into a GraphQL query as a string literal.
+fn graphql_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// PR number a commit message points back to: GitHub's squash suffix "(#123)"
+/// or the "Merge pull request #123" headline. A cherry-pick keeps the original
+/// message, so this leads back to the PR the story was first merged with.
+fn pr_number_in_message(message: &str) -> Option<u64> {
+    static PR_REF_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+        regex::Regex::new(r"\(#(\d+)\)|Merge pull request #(\d+)").unwrap()
+    });
+    PR_REF_RE
+        .captures(message)
+        .and_then(|c| c.get(1).or_else(|| c.get(2)))
+        .and_then(|m| m.as_str().parse().ok())
+}
+
+/// Merged work since the latest tag on `target_branch`, or on the default branch
+/// when none is given.
+///
+/// On a release branch stories often land as plain cherry-picks with no PR of
+/// their own, so besides the PRs whose base is that branch the commits since the
+/// tag are scanned too: any Jira key they carry counts as merged.
 pub async fn fetch_merged_prs_since_last_release(
     repos: &[String],
+    target_branch: Option<&str>,
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> (Vec<MergedPrRecord>, String) {
@@ -1413,19 +1438,28 @@ pub async fn fetch_merged_prs_since_last_release(
     }
 
     // Build one batched GraphQL query across all repos. It fetches:
-    // - last 100 commits on the default branch (main) to locate the latest tag on that branch
-    // - all recent tags with resolved commit OIDs (for cross-referencing with main's history)
-    // - merged PRs after that tag
+    // - last 100 commits on the target branch to locate the latest tag on that branch
+    // - all recent tags with resolved commit OIDs (for cross-referencing with the branch history)
+    // - merged PRs after that tag (only those based on the target branch, when one is given)
+    let (branch_ref, history_fields, pr_filter) = match target_branch {
+        Some(branch) => (
+            format!("ref(qualifiedName: {})", graphql_string(&format!("refs/heads/{branch}"))),
+            "oid url messageHeadline message author { user { login avatarUrl } name } committedDate",
+            format!(", baseRefName: {}", graphql_string(branch)),
+        ),
+        None => ("defaultBranchRef".to_string(), "oid", String::new()),
+    };
     let mut q = String::from("{");
     for (i, repo) in repos.iter().enumerate() {
         if let Some((owner, name)) = repo.split_once('/') {
             q.push_str(&format!(
                 r#" r_{i}: repository(owner:"{owner}", name:"{name}") {{
-                  defaultBranchRef {{
+                  url
+                  branchRef: {branch_ref} {{
                     target {{
                       ... on Commit {{
                         history(first: 100) {{
-                          nodes {{ oid }}
+                          nodes {{ {history_fields} }}
                         }}
                       }}
                     }}
@@ -1443,7 +1477,7 @@ pub async fn fetch_merged_prs_since_last_release(
                       }}
                     }}
                   }}
-                  pullRequests(states: [MERGED], first: 100, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
+                  pullRequests(states: [MERGED]{pr_filter}, first: 100, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
                     nodes {{ number title body headRefName mergedAt url author {{ login avatarUrl }} }}
                   }}
                 }}"#
@@ -1460,7 +1494,7 @@ pub async fn fetch_merged_prs_since_last_release(
     let mut result: Vec<MergedPrRecord> = vec![];
     let mut since_tags: Vec<String> = vec![];
 
-    for (i, repo) in repos.iter().enumerate() {
+    for i in 0..repos.len() {
         let repo_node = &data[&format!("r_{i}")];
         if repo_node.is_null() {
             continue;
@@ -1483,22 +1517,21 @@ pub async fn fetch_merged_prs_since_last_release(
             }
         }
 
-        // Walk main's commit history and find the most recent commit that has a tag.
-        // This ensures we only consider tags reachable from the default branch.
-        let main_history = repo_node["defaultBranchRef"]["target"]["history"]["nodes"]
-            .as_array();
-        let latest_tag_ref: Option<&serde_json::Value> =
-            main_history
-                .and_then(|commits| {
-                    commits.iter().find(|c| {
-                        c["oid"]
-                            .as_str()
-                            .map(|oid| oid_to_tag.contains_key(oid))
-                            .unwrap_or(false)
-                    })
-                })
-                .and_then(|c| c["oid"].as_str())
-                .and_then(|oid| oid_to_tag.get(oid).copied());
+        // Walk the branch's commit history and find the most recent commit that has a tag.
+        // This ensures we only consider tags reachable from that branch.
+        let branch_history: &[serde_json::Value] = repo_node["branchRef"]["target"]["history"]["nodes"]
+            .as_array()
+            .map(|a| a.as_slice())
+            .unwrap_or(&[]);
+        let tagged_index = branch_history.iter().position(|c| {
+            c["oid"]
+                .as_str()
+                .map(|oid| oid_to_tag.contains_key(oid))
+                .unwrap_or(false)
+        });
+        let latest_tag_ref: Option<&serde_json::Value> = tagged_index
+            .and_then(|idx| branch_history[idx]["oid"].as_str())
+            .and_then(|oid| oid_to_tag.get(oid).copied());
 
         let latest_tag_ms: i64 = latest_tag_ref
             .and_then(tag_ref_timestamp_ms)
@@ -1510,17 +1543,12 @@ pub async fn fetch_merged_prs_since_last_release(
             since_tags.push(latest_tag.to_string());
         }
 
-        let prs = match repo_node["pullRequests"]["nodes"].as_array() {
-            Some(a) => a,
-            None => continue,
-        };
+        let prs: &[serde_json::Value] = repo_node["pullRequests"]["nodes"]
+            .as_array()
+            .map(|a| a.as_slice())
+            .unwrap_or(&[]);
 
-        let (owner, repo_name) = match repo.split_once('/') {
-            Some(p) => (p.0, p.1),
-            None => continue,
-        };
-        let _ = (owner, repo_name); // suppress unused warning
-
+        let repo_start = result.len();
         for pr in prs {
             let merged_at = match pr["mergedAt"].as_str() {
                 Some(s) => s,
@@ -1561,10 +1589,114 @@ pub async fn fetch_merged_prs_since_last_release(
                 jira_keys,
             });
         }
+
+        if target_branch.is_none() {
+            continue;
+        }
+
+        // Commits after the tag that bring a story no PR above covers: cherry-picks
+        // pushed straight to the branch. Each becomes a record of its own, linked
+        // to the original PR when the message names one.
+        let mut covered: std::collections::HashSet<String> = result[repo_start..]
+            .iter()
+            .flat_map(|r| r.jira_keys.iter().cloned())
+            .collect();
+        let repo_url = repo_node["url"].as_str().unwrap_or("");
+        let since_tag_commits = &branch_history[..tagged_index.unwrap_or(branch_history.len())];
+        for commit in since_tag_commits {
+            let headline = commit["messageHeadline"].as_str().unwrap_or("");
+            let message = commit["message"].as_str().unwrap_or("");
+            let mut jira_keys = crate::jira::extract_all_jira_keys(headline);
+            if jira_keys.is_empty() {
+                jira_keys = crate::jira::extract_all_jira_keys(message);
+            }
+            jira_keys.retain(|k| covered.insert(k.clone()));
+            if jira_keys.is_empty() {
+                continue;
+            }
+
+            let original_pr = pr_number_in_message(message).filter(|_| !repo_url.is_empty());
+            let url = match original_pr {
+                Some(n) => format!("{repo_url}/pull/{n}"),
+                None => commit["url"].as_str().unwrap_or("").to_string(),
+            };
+            let author = commit["author"]["user"]["login"]
+                .as_str()
+                .or_else(|| commit["author"]["name"].as_str())
+                .unwrap_or("")
+                .to_string();
+
+            result.push(MergedPrRecord {
+                number: original_pr.unwrap_or(0),
+                title: headline.to_string(),
+                url,
+                merged_at: commit["committedDate"].as_str().unwrap_or("").to_string(),
+                head_ref: String::new(),
+                author,
+                author_avatar_url: commit["author"]["user"]["avatarUrl"].as_str().map(|s| s.to_string()),
+                jira_keys,
+            });
+        }
     }
 
     let since_tag = since_tags.join(" · ");
     (result, since_tag)
+}
+
+/// Branches whose name starts with `prefix` (case-insensitive) across `repos`,
+/// most recently updated first. A name present in several repos is listed once.
+pub async fn fetch_release_branches(
+    repos: &[String],
+    prefix: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Vec<String> {
+    if repos.is_empty() {
+        return vec![];
+    }
+
+    let mut q = String::from("{");
+    for (i, repo) in repos.iter().enumerate() {
+        if let Some((owner, name)) = repo.split_once('/') {
+            q.push_str(&format!(
+                r#" r_{i}: repository(owner:"{owner}", name:"{name}") {{
+                  refs(refPrefix:"refs/heads/", query: {query}, first: 100) {{
+                    nodes {{ name target {{ ... on Commit {{ committedDate }} }} }}
+                  }}
+                }}"#,
+                query = graphql_string(prefix),
+            ));
+        }
+    }
+    q.push('}');
+
+    let data = match graphql_request_raw(&q, settings, client).await {
+        Some(d) => d,
+        None => return vec![],
+    };
+
+    // `query` matches anywhere in the name; only a leading match counts here.
+    let prefix = prefix.to_lowercase();
+    let mut latest: HashMap<String, String> = HashMap::new();
+    for i in 0..repos.len() {
+        let nodes = data[&format!("r_{i}")]["refs"]["nodes"].as_array();
+        for node in nodes.into_iter().flatten() {
+            let Some(name) = node["name"].as_str() else { continue };
+            if !name.to_lowercase().starts_with(&prefix) {
+                continue;
+            }
+            let date = node["target"]["committedDate"].as_str().unwrap_or("").to_string();
+            let entry = latest.entry(name.to_string()).or_default();
+            if date > *entry {
+                *entry = date;
+            }
+        }
+    }
+
+    let mut branches: Vec<(String, String)> = latest.into_iter().collect();
+    // RFC 3339 timestamps from the same API sort correctly as strings.
+    branches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    branches.into_iter().map(|(name, _)| name).collect()
 }
 
 // ── Stale branches ───────────────────────────────────────────────────────────
@@ -1871,4 +2003,28 @@ pub async fn fetch_stale_branches(
         warnings,
         stale_days,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pr_number_in_message_follows_squash_and_merge_commits() {
+        assert_eq!(pr_number_in_message("PENT-12 Fix login (#345)"), Some(345));
+        assert_eq!(
+            pr_number_in_message("Merge pull request #78 from org/PENT-9-feature\n\nPENT-9 Feature"),
+            Some(78)
+        );
+        assert_eq!(
+            pr_number_in_message("PENT-12 Fix login (#345)\n\n(cherry picked from commit abc123)"),
+            Some(345)
+        );
+        assert_eq!(pr_number_in_message("PENT-12 Fix login"), None);
+    }
+
+    #[test]
+    fn graphql_string_escapes_quotes_and_backslashes() {
+        assert_eq!(graphql_string(r#"release/"x"\y"#), r#""release/\"x\"\\y""#);
+    }
 }
