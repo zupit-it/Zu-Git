@@ -123,6 +123,7 @@ pub fn run() {
             commands::toggl_get_proposal,
             commands::toggl_discard_proposal,
             commands::toggl_list_proposals,
+            commands::toggl_claim_reminder,
             commands::mcp_setup_info,
             commands::mcp_setup_status,
             commands::google_connect,

@@ -731,7 +731,7 @@ fn tool_definitions() -> Value {
         {
             "name": "toggl_propose_day",
             "title": "Propose a Toggl day to ZuGit",
-            "description": "Hands ZuGit a plan for the free time of one day. Nothing is written to Toggl: ZuGit shows the plan in its planner and the user reviews and submits it. Cover only free time (see toggl_get_day.freeTime), use local HH:MM times aligned to the rounding, never overlap entries. Put the Jira key first in story descriptions (e.g. 'PENT-12 Login page'). Omit projectId/tags/billable to let ZuGit fill them from history. Calling it again for the same date replaces the previous proposal.",
+            "description": "Hands ZuGit a plan for the free time of one day. Nothing is written to Toggl: ZuGit shows the plan in its planner and the user reviews and submits it. Cover only free time (see toggl_get_day.freeTime), use local HH:MM times aligned to the rounding, never overlap entries. Put the Jira key first in story descriptions (e.g. 'PENT-12 Login page'). One story per entry: never list several keys in one description — split the time between them instead. Work for the sprint as a whole (planning, analysis, estimates, stand-up) carries no key and gets the matching tag. Never put a tag on an entry with a key, except '05. Pair Programming', '06. Supporto al Team' or '07. Code Review'. Omit projectId/tags/billable to let ZuGit fill them from history. Calling it again for the same date replaces the previous proposal.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -815,7 +815,8 @@ together with others and say little; '(senza tuoi commit o sessioni)' moves past
 likely a review/merge of someone else's work, not time spent on the story). Use blocks of at least one hour, as few as possible; never \
 split every gap in half. Stories with no evidence get time only if nothing else explains the gap; \
 if gapFilling is enabled, share that unexplained time by gapFilling weight instead. Ignore \
-experimental work outside the stories listed.\n\
+experimental work outside the stories listed. One story per entry: never several keys in one \
+description; sprint-wide work (planning, analysis, estimates) has no key and a tag instead.\n\
 4. Use what you know from our conversation too: if we worked on something together today, that counts.\n\
 5. If something is genuinely ambiguous, ask me before proposing.\n\
 6. Call toggl_propose_day with the plan and a short note, then tell me to review it in ZuGit."

@@ -7,6 +7,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Toggl planner: the Zupit bot's checks, before you submit** — every row is checked against the
+  rules of the morning Toggl bot (same order, same story-id pattern) and shows what it would flag
+  on Slack, with the same emoji: a storyless tag next to a story id (🚫), billable on a project or
+  non-billable on Zupit (💰 0️⃣), tags on Zupit entries (🟦), no story id and no tag (🏷️), pair
+  programming without a story (🟢), a description that is only the key (👔), a missing project (👷),
+  T&M or SPIKE work off the client's T&M project (🧱). Each line carries its fix, and **Applica
+  suggerimenti** in the footer applies every fix that is certain, on all rows at once. Two more
+  hints the bot does not raise: a story key booked on a project other than the one history uses for
+  it (🔀), and several stories in one entry (🧩) — the bot only reads the first key — with **Dividi**
+  (one row per story, time shared on the grid) or **Lavoro di sprint** (no keys, tag 02).
+
+### Changed
+- **Toggl planner: no story bar** — the row of active stories and the colour legend above the plan
+  are gone: adding a row for a story is what **+ Row** or a click on free time already does, with
+  the stories first in the suggestions. Those suggestions now list every active story, not the
+  first eight.
+- **MCP connector: one story per entry** — the assistant is told to never list several Jira keys in
+  one entry, to book sprint-wide work (planning, analysis, estimates) with a tag and no key, and to
+  put no tag on a story entry except pair programming, team support and code review.
+
 ---
 
 ## [1.0.2] - 2026-10-02

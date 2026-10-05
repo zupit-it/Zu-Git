@@ -228,6 +228,11 @@ Toggl is configured — the notification also respects the global notifications 
 at 17:00 on a day it never fired still triggers it: the timesheet is still unfilled, which is the
 point. It never reopens over a planner you already have open, so rows being edited are safe.
 
+The "already fired today" mark lives in `toggl-reminder.txt` in the app data folder, so a forced quit
+or a second ZuGit instance cannot fire it again. Every notification ZuGit sends is appended to
+`notifications.log` in the same folder (`~/Library/Application Support/dev.giorgio.zugit` on macOS):
+a repeat that isn't in the log was re-shown by the OS, not sent by ZuGit.
+
 The **Toggl** button in the toolbar appears only when the integration is enabled *and* a token is
 saved: without one the panel could only show an error.
 
@@ -279,14 +284,20 @@ any event whose slot is already covered by a Toggl entry (that one is tracked al
 
 Setup, once:
 
-1. In the Google Cloud console create an OAuth client (Desktop app or Web application) and enable the
-   Google Calendar API.
-2. Only for a **Web application** client: add `http://127.0.0.1:43117` to the authorised redirect
-   URIs — Settings shows the exact string. A **Desktop app** client needs nothing: Google accepts
-   loopback redirects for those on its own, and the console has no field for them.
-3. Paste client id and secret into Settings, save, then press **Collega account**. ZuGit opens the
+1. In the Google Cloud console pick a project and **enable the Google Calendar API** in it — the same
+   project the OAuth client belongs to. Skipping this is what makes the connection end with a 403.
+2. Under *Google Auth Platform → Audience* choose **Internal** for a Workspace account; an **External**
+   app still in testing only lets in the addresses listed as *Test users*.
+3. Create an OAuth client, preferably of type **Desktop app**. Only for a **Web application** client:
+   add `http://127.0.0.1:43117` to the authorised redirect URIs — Settings shows the exact string. A
+   Desktop app client needs nothing: Google accepts loopback redirects for those on its own.
+4. Paste client id and secret into Settings, save, then press **Collega account**. ZuGit opens the
    consent page in your browser, catches the redirect on that loopback port, and keeps only the
-   refresh token, in the system keychain.
+   refresh token, in the system keychain. Leave the calendar checkbox ticked on the consent page:
+   if the scope isn't granted, ZuGit says so instead of connecting.
+
+If Google refuses a request, the error in Settings names the cause — API not enabled (with the link
+to enable it) or calendar permission not granted — rather than a bare status code.
 
 The requested scope is `calendar.readonly`: ZuGit can list events and nothing else. The authorisation
 code exchange uses PKCE (S256) with a random `state`, both verified before the code is used.

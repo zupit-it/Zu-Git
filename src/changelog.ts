@@ -21,6 +21,10 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Toggl — the bot's checks, before you submit",
+        body: "No more surprises on Slack the next morning: every row of the planner is checked against the rules of the <strong>Zupit Toggl bot</strong> and shows, with the same emoji, what it would flag — a tag next to a story id 🚫, the wrong billable flag 💰, a tag on a Zupit entry 🟦, no story and no tag 🏷️, and the rest. Each line has its fix one click away, and <strong>Applica suggerimenti</strong> in the footer applies every fix that is certain, on all rows at once. ZuGit also spots what the bot lets through but gets wrong: a story booked on an unusual project 🔀, and <strong>several stories in one entry</strong> 🧩 — the bot only reads the first key — which you can <strong>split</strong> into one row per story, or turn into sprint work with no keys and a tag. Your AI assistant is now told the same rules, so its plans start clean. The story bar above the plan is gone too: <strong>+ Row</strong> or a click on free time already lists every active story first.",
+      },
+      {
         title: "Toggl — edit the plan like a calendar",
         body: "The timeline on the left is now yours to drag: <strong>move</strong> a block, <strong>resize</strong> it from its top or bottom edge, or drag the <strong>seam between two blocks</strong> to say \"this story ended at 11, not 10:30\" — the next one follows, so the day never gets a hole or an overlap. A <strong>click on free time</strong> adds a row covering exactly that gap. The pencil is gone: times and length are always editable, with <strong>↑ ↓</strong> for ±15 minutes or typed the quick way (<code>930</code>, <code>+45m</code>, <code>1h30</code>). The description <strong>suggests</strong> today's stories and what you booked before — pick one, or just type a Jira key, and project, tag and billable come from your history. Project and tag open a <strong>searchable picker</strong>, most used first.",
         imgs: ["/assets/changelog/toggl-editing.png"],

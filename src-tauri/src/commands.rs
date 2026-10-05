@@ -152,6 +152,44 @@ pub async fn show_native_notification(
     }
 
     builder.show().map_err(|e| e.to_string())?;
+    log_notification(&app, &title, body.as_deref());
+    Ok(true)
+}
+
+/// Appends every notification ZuGit sends to `notifications.log` in the app data
+/// folder — the way to tell a repeat sent by ZuGit from one macOS re-shows.
+fn log_notification(app: &tauri::AppHandle, title: &str, body: Option<&str>) {
+    use std::io::Write;
+    let Ok(dir) = storage::data_dir(app) else { return };
+    let path = dir.join("notifications.log");
+    // Keep it small: start over once it passes 256 KB.
+    if std::fs::metadata(&path).map(|m| m.len() > 256 * 1024).unwrap_or(false) {
+        let _ = std::fs::remove_file(&path);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(
+            file,
+            "{}\tpid {}\t{}\t{}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            std::process::id(),
+            title,
+            body.unwrap_or_default()
+        );
+    }
+}
+
+/// Claims the end-of-day Toggl reminder for `day` ("YYYY-MM-DD"): true the first
+/// time, false afterwards. Kept in a file rather than the webview's localStorage,
+/// which WebKit flushes lazily and can lose on a crash or forced quit.
+#[tauri::command]
+pub async fn toggl_claim_reminder(app: tauri::AppHandle, day: String) -> Result<bool, String> {
+    let dir = storage::data_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("toggl-reminder.txt");
+    if std::fs::read_to_string(&path).map(|last| last.trim() == day).unwrap_or(false) {
+        return Ok(false);
+    }
+    std::fs::write(&path, &day).map_err(|e| e.to_string())?;
     Ok(true)
 }
 

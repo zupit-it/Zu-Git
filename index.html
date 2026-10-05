@@ -645,9 +645,15 @@
                       <label class="field-label" for="googleClientSecret">OAuth client secret</label>
                       <input id="googleClientSecret" name="googleClientSecret" type="password" placeholder="GOCSPX-…" />
                     </div>
+                    <p class="field-hint settings-field-wide">
+                      Li trovi nel client OAuth su <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noreferrer">Google Auth Platform → Clients</a>.
+                      Il secret si vede per intero solo alla creazione: se l'hai perso, aprilo e aggiungine uno nuovo.
+                    </p>
                     <div class="settings-field">
                       <label class="field-label" for="googleCalendarId">Calendar id</label>
                       <input id="googleCalendarId" name="googleCalendarId" type="text" placeholder="primary" />
+                      <p class="field-hint">Vuoto = il tuo calendario principale. Per un altro calendario copia l'id da
+                        <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noreferrer">Impostazioni → Integra calendario</a>.</p>
                     </div>
                     <div class="settings-field">
                       <label class="field-label">Autorizzazione</label>
@@ -656,6 +662,38 @@
                         <button class="secondary-button" data-google-disconnect type="button" hidden>Scollega</button>
                       </div>
                       <p class="field-hint" data-google-status></p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Configurazione, una volta sola (~5 minuti)</label>
+                      <p class="field-hint">
+                        Tutti i passi sono nella <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer">Google Cloud Console</a>.
+                        Prima di ogni passo controlla in alto che sia selezionato <strong>lo stesso progetto</strong>:
+                        API e client in progetti diversi sono la causa più comune del 403.
+                      </p>
+                      <ol class="field-hint">
+                        <li><strong>Progetto</strong> — <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noreferrer">creane uno</a> (es. "ZuGit") o riusane uno tuo.</li>
+                        <li><strong>API</strong> — <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noreferrer">Google Calendar API</a> → <em>Abilita</em>.</li>
+                        <li><strong>Consenso</strong> — in <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noreferrer">Google Auth Platform</a> premi <em>Get started</em>:
+                          nome app "ZuGit", la tua email come supporto e contatto.
+                          Come <em>Audience</em> scegli <strong>Internal</strong> (account aziendale Workspace).
+                          Con un Gmail personale scegli <strong>External</strong> e aggiungi la tua email fra i
+                          <a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noreferrer">Test users</a>.</li>
+                        <li><strong>Client</strong> — <a href="https://console.cloud.google.com/auth/clients/create" target="_blank" rel="noreferrer">Create client</a> →
+                          tipo <strong>Desktop app</strong>, nome a piacere → copia client id e secret nei campi qui sopra e premi <em>Salva</em>.</li>
+                        <li><strong>Collega</strong> — premi <em>Collega account</em>, scegli l'account e
+                          <strong>spunta la casella del calendario</strong> prima di continuare.
+                          Se Google avvisa che l'app non è verificata: <em>Avanzate → Vai a ZuGit</em> (l'app è la tua).</li>
+                      </ol>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Se qualcosa va storto</label>
+                      <ul class="field-hint">
+                        <li><strong>403 / API non abilitata</strong> — ripeti il passo 2 nel progetto del client, attendi un paio di minuti e ricollega.</li>
+                        <li><strong>access_denied</strong> — app External: la tua email non è fra i Test users (passo 3).</li>
+                        <li><strong>admin_policy_enforced</strong> — l'amministratore Workspace blocca le app non approvate: chiedigli di consentire il client id.</li>
+                        <li><strong>redirect_uri_mismatch</strong> — il client è <em>Web application</em>: ricrealo come Desktop app o registra l'URI qui sotto.</li>
+                        <li><strong>Nessun refresh token</strong> — togli ZuGit dalle <a href="https://myaccount.google.com/connections" target="_blank" rel="noreferrer">app collegate al tuo account</a> e ricollega.</li>
+                      </ul>
                     </div>
                     <div class="settings-field settings-field-wide">
                       <label class="field-label">Redirect URI usato da ZuGit</label>

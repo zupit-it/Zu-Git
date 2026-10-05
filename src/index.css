@@ -2959,6 +2959,14 @@ img.avatar { object-fit: cover; }
   line-height: 1.5;
 }
 
+ol.field-hint,
+ul.field-hint {
+  margin-bottom: 0;
+  padding-left: 18px;
+}
+
+:is(ol, ul).field-hint li + li { margin-top: 3px; }
+
 .field-action-button {
   display: inline-flex;
   align-items: center;
@@ -4756,63 +4764,6 @@ img.avatar { object-fit: cover; }
   cursor: pointer;
 }
 
-/* ── Story chips + legend ── */
-
-.tg-chips {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 10px 20px 0;
-  flex-shrink: 0;
-}
-
-.tg-story-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 22px;
-  padding: 0 4px 0 9px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-bd);
-  color: var(--accent-ink);
-  font: 700 11px/1 var(--font-mono);
-}
-.tg-story-status { color: var(--accent); opacity: .6; font-family: var(--font); font-weight: 600; }
-
-.tg-story-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--accent-ink);
-  opacity: .55;
-  cursor: pointer;
-}
-.tg-story-add:hover { opacity: 1; background: rgba(79,70,229,.14); }
-
-.tg-legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  max-width: 420px;
-}
-.tg-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font: 600 10.5px/1 var(--font);
-  color: var(--ink-muted);
-  white-space: nowrap;
-}
-.tg-legend-dot { width: 8px; height: 8px; border-radius: 2px; border: 1px solid; }
-
 /* ── Body ── */
 
 .tg-body {
@@ -5771,3 +5722,25 @@ img.avatar { object-fit: cover; }
 
 .mcp-status { margin-left: 6px; vertical-align: 1px; }
 .mcp-status-note { overflow-wrap: anywhere; }
+
+/* ── Zupit bot rules: what the morning check would flag ── */
+
+.tg-band--advice { border-color: var(--border); color: var(--ink-muted); }
+.tg-band-emoji { font-size: 12px; line-height: 1; }
+.tg-totals strong.tg-totals-warn { color: var(--warn); }
+
+.tg-fix-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font: 650 12px/1 var(--font);
+  cursor: pointer;
+}
+.tg-fix-all:hover:not(:disabled) { background: var(--surface-alt); color: var(--ink); }
+.tg-fix-all:disabled { color: var(--ink-faint); cursor: default; }

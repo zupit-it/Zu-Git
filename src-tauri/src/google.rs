@@ -139,6 +139,10 @@ struct TokenResponse {
     refresh_token: Option<String>,
     #[serde(default)]
     expires_in: Option<u64>,
+    /// Space-separated scopes actually granted — with granular consent the user
+    /// can untick the calendar checkbox and still finish the flow.
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 async fn post_token(
@@ -228,6 +232,12 @@ pub async fn authorize(
     )
     .await?;
 
+    if let Some(granted) = &tokens.scope {
+        if !granted.split_whitespace().any(|scope| scope == SCOPE) {
+            return Err(SCOPE_NOT_GRANTED.to_string());
+        }
+    }
+
     let refresh_token = tokens.refresh_token.ok_or_else(|| {
         "Google did not return a refresh token. Revoke ZuGit's access in your Google account and connect again.".to_string()
     })?;
@@ -259,6 +269,51 @@ pub async fn refresh_access_token(
 
 // ── Calendar reads ───────────────────────────────────────────────────────────
 
+const SCOPE_NOT_GRANTED: &str = "Nella pagina di consenso Google non è stato concesso l'accesso al calendario. \
+Premi di nuovo «Collega account» e spunta la casella «Visualizzare gli eventi di tutti i tuoi calendari».";
+
+/// Turns a Calendar API error into something the user can act on.
+///
+/// The two 403s that show up during setup — API not enabled in the Cloud project,
+/// calendar scope unticked on the consent page — are spelled out; anything else
+/// falls back to Google's own message.
+fn describe_api_error(status: reqwest::StatusCode, body: &str) -> String {
+    let json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+    let error = &json["error"];
+    let message = error["message"].as_str().unwrap_or_default();
+    let reasons: Vec<&str> = error["errors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(error["details"].as_array().into_iter().flatten())
+        .filter_map(|entry| entry["reason"].as_str())
+        .collect();
+    let has = |reason: &str| reasons.contains(&reason);
+
+    if has("accessNotConfigured") || has("SERVICE_DISABLED") {
+        let activation_url = error["details"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find_map(|entry| entry["metadata"]["activationUrl"].as_str())
+            .unwrap_or("https://console.cloud.google.com/apis/library/calendar-json.googleapis.com");
+        return format!(
+            "La Google Calendar API non è abilitata nel progetto Google Cloud del client OAuth. \
+Abilitala da {activation_url}, aspetta un paio di minuti e premi di nuovo «Collega account»."
+        );
+    }
+    if has("insufficientPermissions") || has("ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+        return SCOPE_NOT_GRANTED.to_string();
+    }
+
+    let detail = if message.is_empty() {
+        body.chars().take(200).collect::<String>()
+    } else {
+        message.to_string()
+    };
+    format!("Google Calendar rejected the request ({status}): {detail}")
+}
+
 #[derive(Debug, Deserialize)]
 struct RawCalendar {
     id: String,
@@ -279,7 +334,8 @@ pub async fn fetch_primary_calendar(
 
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("Google Calendar rejected the request ({status})"));
+        let body = response.text().await.unwrap_or_default();
+        return Err(describe_api_error(status, &body));
     }
 
     let calendar: RawCalendar = response
@@ -396,11 +452,8 @@ pub async fn fetch_events_paged(
 
         let status = response.status();
         if !status.is_success() {
-            let detail = response.text().await.unwrap_or_default();
-            return Err(format!(
-                "Google Calendar rejected the request ({status}): {}",
-                detail.chars().take(200).collect::<String>()
-            ));
+            let body = response.text().await.unwrap_or_default();
+            return Err(describe_api_error(status, &body));
         }
 
         let list: RawEventList = response
@@ -466,6 +519,32 @@ mod tests {
         let b = random_token(32);
         assert_ne!(a, b);
         assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn disabled_api_points_to_the_activation_page() {
+        let body = r#"{"error":{"code":403,"message":"Google Calendar API has not been used in project 123 before or it is disabled.","errors":[{"reason":"accessNotConfigured"}],"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"SERVICE_DISABLED","metadata":{"activationUrl":"https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=123"}}]}}"#;
+        let message = describe_api_error(reqwest::StatusCode::FORBIDDEN, body);
+        assert!(message.contains("non è abilitata"));
+        assert!(message.contains("?project=123"));
+    }
+
+    #[test]
+    fn missing_scope_asks_to_tick_the_checkbox() {
+        let body = r#"{"error":{"code":403,"message":"Request had insufficient authentication scopes.","errors":[{"reason":"insufficientPermissions"}],"status":"PERMISSION_DENIED"}}"#;
+        assert_eq!(
+            describe_api_error(reqwest::StatusCode::FORBIDDEN, body),
+            SCOPE_NOT_GRANTED
+        );
+    }
+
+    #[test]
+    fn unknown_errors_keep_googles_message() {
+        let body = r#"{"error":{"code":404,"message":"Not Found"}}"#;
+        assert_eq!(
+            describe_api_error(reqwest::StatusCode::NOT_FOUND, body),
+            "Google Calendar rejected the request (404 Not Found): Not Found"
+        );
     }
 
     #[test]

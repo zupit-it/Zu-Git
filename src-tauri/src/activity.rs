@@ -324,7 +324,29 @@ pub fn discover_repo_dirs() -> Vec<PathBuf> {
         }
     }
 
-    dirs.into_iter().filter(|dir| dir.is_dir()).collect()
+    let home = home();
+    dirs.into_iter()
+        .filter(|dir| !is_privacy_protected(dir, home.as_deref()))
+        .filter(|dir| dir.is_dir())
+        .collect()
+}
+
+/// Folders macOS guards behind a privacy prompt: merely checking that a path
+/// inside them exists makes the system ask the user to grant ZuGit access.
+/// AI sessions often run there (the Codex app works in `~/Documents/Codex`),
+/// yet they are scratch folders, not repositories worth a permission dialog.
+fn is_privacy_protected(dir: &Path, home: Option<&Path>) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    // Removable and network volumes have their own prompt.
+    if dir.starts_with("/Volumes") {
+        return true;
+    }
+    let Some(home) = home else { return false };
+    ["Documents", "Desktop", "Downloads", "Library/Mobile Documents"]
+        .iter()
+        .any(|folder| dir.starts_with(home.join(folder)))
 }
 
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
@@ -443,6 +465,19 @@ mod tests {
         assert_eq!(keys_in_branch("feature/pent-12-login"), vec!["PENT-12"]);
         assert!(keys_in_branch("main").is_empty());
         assert!(keys_in_branch("SKILLS/add-review-skill").is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn privacy_protected_folders_are_skipped() {
+        let home = Path::new("/Users/me");
+        let protected = |dir: &str| is_privacy_protected(Path::new(dir), Some(home));
+        assert!(protected("/Users/me/Documents/Codex/2026-10-01/pu"));
+        assert!(protected("/Users/me/Desktop/repo"));
+        assert!(protected("/Users/me/Library/Mobile Documents/com~apple~CloudDocs/x"));
+        assert!(protected("/Volumes/USB/repo"));
+        assert!(!protected("/Users/me/WebstormProjects/zugit"));
+        assert!(!protected("/Users/me/DocumentsArchive/repo"));
     }
 
     #[test]

@@ -8,6 +8,8 @@ import {
   floorTo, freeGaps, gapAt, midnightOf, minutesFromMidnight, moveEdge, moveRow, normalizeDescription,
   overlappingIds, parseClock, parseDurationInput, parseTimeInput, planStories, shouldRemind, toIsoWithOffset,
 } from "./toggl-plan";
+import type { RuleContext, RuleIssue } from "./toggl-rules";
+import { checkEntry, fixableCount, fixEntry, storyIds } from "./toggl-rules";
 
 // ── Backend types ─────────────────────────────────────────────────────────────
 
@@ -589,7 +591,12 @@ async function maybeRemind() {
   if (!due) return;
 
   // Marked before doing anything, so a failure cannot turn into a loop.
-  localStorage.setItem(REMINDER_KEY, todayIso());
+  const today = todayIso();
+  localStorage.setItem(REMINDER_KEY, today);
+  // The file on the backend is the real guard: localStorage can be lost on a
+  // forced quit, and would let the same evening's reminder fire again.
+  const claimed = await invoke<boolean>("toggl_claim_reminder", { day: today }).catch(() => true);
+  if (!claimed) return;
   if (state.notificationsEnabled) void notifyTogglReminder();
 
   // Never reopen over an open planner: that would throw away rows being edited.
@@ -926,9 +933,13 @@ export async function openTogglPanel(date?: string) {
       }
       return;
     }
-    const storyBtn = target.closest<HTMLElement>("[data-tg-story-add]");
-    if (storyBtn) {
-      addStoryRow(storyBtn.dataset.tgStoryAdd ?? "");
+    const fixBtn = target.closest<HTMLElement>("[data-tg-fix]");
+    if (fixBtn) {
+      applyRuleAction(fixBtn.dataset.tgFix ?? "", fixBtn.dataset.tgFixAt ?? "");
+      return;
+    }
+    if (target.closest("[data-tg-fix-all]")) {
+      applyAllFixes();
       return;
     }
     const quick = target.closest<HTMLElement>("[data-tg-quick]");
@@ -1338,26 +1349,6 @@ export async function openTogglPanel(date?: string) {
     openPicker(id, "description", `${id}:description`);
   }
 
-  /** Adds a row already pointing at one of the active stories. */
-  function addStoryRow(key: string) {
-    st.edited = true;
-    const context = st.context;
-    const issue = context?.issues.find((candidate) => candidate.key === key);
-    if (!context || !issue) return;
-    const startMin = nextSlotStart();
-    const row = makeRow(
-      `row-story-${Date.now()}`,
-      startMin,
-      startMin + state.togglSlotMinutes * 2,
-      issue.key,
-      issue.summary,
-      context.rules,
-    );
-    st.rows.push(row);
-    st.focus = `${row.id}:description`;
-    render();
-  }
-
   /** Hands a row over to another plausible story, keeping its time slot. */
   function swapStory(rowId: string, key: string) {
     st.edited = true;
@@ -1415,6 +1406,72 @@ export async function openTogglPanel(date?: string) {
     });
     st.focus = `${id}:description`;
     render();
+  }
+
+  /** One fix picked from a row's rule band. */
+  function applyRuleAction(rowId: string, at: string) {
+    const row = rowById(rowId);
+    const context = st.context;
+    if (!row || !context) return;
+    const [issueIndex, actionIndex] = at.split(":").map(Number);
+    const action = rowIssues(row, context)[issueIndex]?.actions[actionIndex];
+    if (!action) return;
+    st.edited = true;
+    if (action.kind === "split") {
+      splitRow(row, action.descriptions);
+    } else {
+      Object.assign(row, action.patch);
+      // Keys taken out of the description: the row is no longer about that story.
+      if (row.issueKey && !storyIds(row.description).includes(row.issueKey)) row.issueKey = null;
+    }
+    render();
+  }
+
+  /** Every fix the bot rules can make on their own, on every row still to submit. */
+  function applyAllFixes() {
+    const context = st.context;
+    if (!context) return;
+    const rules = ruleContext(context);
+    let total = 0;
+    for (const row of st.rows) {
+      if (row.submitted === "ok") continue;
+      const { entry, fixed } = fixEntry(row, rules);
+      if (fixed === 0) continue;
+      Object.assign(row, entry);
+      total += fixed;
+    }
+    if (total > 0) st.edited = true;
+    st.notice = {
+      text: total > 0 ? `${total} ${total === 1 ? "correzione applicata" : "correzioni applicate"}.` : "Niente da correggere in automatico.",
+      tone: total > 0 ? "success" : "info",
+    };
+    render();
+  }
+
+  /** One row per story over the same slot, the time shared equally on the grid. */
+  function splitRow(row: PlanRow, descriptions: string[]) {
+    const context = st.context;
+    const index = st.rows.indexOf(row);
+    if (!context || index < 0 || !canSplit(row, descriptions.length)) return;
+    const slot = state.togglSlotMinutes;
+    const length = row.endMin - row.startMin;
+    const count = descriptions.length;
+    const rules = ruleContext(context);
+    const parts = descriptions.map((description, i): PlanRow => {
+      const part: PlanRow = {
+        ...row,
+        id: `${row.id}-${i}`,
+        startMin: row.startMin + floorTo((length * i) / count, slot),
+        endMin: i === count - 1 ? row.endMin : row.startMin + floorTo((length * (i + 1)) / count, slot),
+        description,
+        issueKey: storyIds(description)[0] ?? null,
+        tags: [...row.tags],
+        alternatives: [],
+        calendarRef: undefined,
+      };
+      return { ...part, ...fixEntry(part, rules).entry };
+    });
+    st.rows.splice(index, 1, ...parts);
   }
 
   async function submit() {
@@ -1490,6 +1547,40 @@ function canSubmit(st: PanelState): boolean {
   return rows.every((row) => row.description.trim().length > 0 && row.endMin > row.startMin);
 }
 
+// ── Bot rules ─────────────────────────────────────────────────────────────────
+
+const ruleContexts = new WeakMap<TogglDayContext, RuleContext>();
+
+/** What the Zupit Toggl bot needs to know about the account, built once per load. */
+function ruleContext(context: TogglDayContext): RuleContext {
+  let rules = ruleContexts.get(context);
+  if (!rules) {
+    rules = {
+      projects: context.account.projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        clientName: project.clientName,
+      })),
+      tags: knownTags(context),
+      projectForPrefix: (prefix) => context.rules.byPrefix[prefix]?.projectId ?? null,
+      summaryOf: (key) => context.issues.find((issue) => issue.key === key)?.summary ?? null,
+    };
+    ruleContexts.set(context, rules);
+  }
+  return rules;
+}
+
+/** A row still being written is left alone: it cannot be submitted anyway. */
+function rowIssues(row: PlanRow, context: TogglDayContext): RuleIssue[] {
+  if (!row.description.trim()) return [];
+  return checkEntry(row, ruleContext(context));
+}
+
+/** A split needs at least one slot per story. */
+function canSplit(row: PlanRow, count: number): boolean {
+  return row.endMin - row.startMin >= count * state.togglSlotMinutes;
+}
+
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
 function renderShell(st: PanelState): string {
@@ -1507,7 +1598,6 @@ function renderShell(st: PanelState): string {
     ${renderProposal(st)}
     ${renderOtherProposals(st)}
     ${renderNotice(st)}
-    ${st.loading || complete || noStory ? "" : renderStoryChips(st)}
     <div class="tg-body">
       ${
         st.loading
@@ -1625,52 +1715,6 @@ function renderNotice(st: PanelState): string {
     <div class="tg-banner tg-banner--${st.notice.tone}">
       ${icon}
       <span class="tg-banner-text">${escHtml(st.notice.text)}</span>
-    </div>`;
-}
-
-function renderStoryChips(st: PanelState): string {
-  const issues = st.context?.issues ?? [];
-  if (issues.length === 0) return "";
-  return `
-    <div class="tg-chips">
-      ${issues
-        .map(
-          (issue) => `
-        <span class="tg-story-chip">
-          ${escHtml(issue.key)}<span class="tg-story-status">· ${escHtml(issue.status)}</span>
-          <button class="tg-story-add" data-tg-story-add="${escHtml(issue.key)}" type="button"
-                  title="Add a row for ${escHtml(issue.key)}">${I.plus}</button>
-        </span>`,
-        )
-        .join("")}
-      <div class="tg-spacer"></div>
-      ${renderLegend(st)}
-    </div>`;
-}
-
-/** Built from the tasks actually in today's proposal — the set changes daily,
- *  unlike the project, which rarely does. */
-function renderLegend(st: PanelState): string {
-  const seen = new Set<string>();
-  const tasks = st.rows.filter((row) => {
-    const key = taskKey(row);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  if (tasks.length === 0) return "";
-  const colors = buildTaskColors(st.rows);
-  return `
-    <div class="tg-legend">
-      ${tasks
-        .map((row) => {
-          const color = colorFor(colors, row);
-          return `<span class="tg-legend-item">
-            <span class="tg-legend-dot" style="background:${color.bg};border-color:${color.bd}"></span>
-            ${escHtml(row.issueKey || row.description || "Untitled")}
-          </span>`;
-        })
-        .join("")}
     </div>`;
 }
 
@@ -1882,6 +1926,7 @@ function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
       </div>
 
       ${renderEvidence(row)}
+      ${renderRules(row, context)}
       ${
         status === "clash"
           ? `<div class="tg-band tg-band--fail">${I.warn}
@@ -1897,6 +1942,29 @@ function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
           : ""
       }
     </div>`;
+}
+
+/** What the Zupit bot would say about the row, each line with its fixes. */
+function renderRules(row: PlanRow, context: TogglDayContext): string {
+  return rowIssues(row, context)
+    .map((issue, issueIndex) => {
+      const actions = issue.actions
+        .map((action, actionIndex) =>
+          action.kind === "split" && !canSplit(row, action.descriptions.length)
+            ? ""
+            : `<button class="tg-band-btn" data-tg-fix="${escHtml(row.id)}" data-tg-fix-at="${issueIndex}:${actionIndex}"
+                       type="button">${escHtml(action.label)}</button>`,
+        )
+        .join("");
+      return `
+        <div class="tg-band tg-band--${issue.severity === "bot" ? "warn" : "advice"}"
+             title="${issue.severity === "bot" ? "Il bot Toggl lo segnala su Slack" : "Il bot lo lascia passare, ma probabilmente non è quello che vuoi"}">
+          <span class="tg-band-emoji">${issue.emoji}</span>
+          <span class="tg-band-text">${escHtml(issue.message)}</span>
+          ${actions}
+        </div>`;
+    })
+    .join("");
 }
 
 // ── Pickers ───────────────────────────────────────────────────────────────────
@@ -2037,7 +2105,11 @@ function descriptionSuggestions(context: TogglDayContext, query: string): Sugges
     if (hint.description) add({ description: hint.description, issueKey: key, hint, meta: "storico" });
   }
 
-  return all.filter((suggestion) => matchesQuery(suggestion.description, query)).slice(0, 8);
+  // Every active story fits: this list is the only way to pick one, and the
+  // popover scrolls.
+  return all
+    .filter((suggestion) => matchesQuery(suggestion.description, query))
+    .slice(0, Math.max(8, context.issues.length));
 }
 
 function projectName(context: TogglDayContext, id: number | null | undefined): string {
@@ -2149,6 +2221,10 @@ function renderFooter(st: PanelState): string {
   const recurring = (st.context?.rules.recurring ?? []).slice(0, 4);
   const learned = st.context?.rules.entriesScanned ?? 0;
   const ready = canSubmit(st);
+  const context = st.context;
+  const issues = context ? pending.flatMap((row) => rowIssues(row, context)) : [];
+  const flagged = issues.filter((issue) => issue.severity === "bot").length;
+  const fixable = fixableCount(issues);
 
   return `
     <div class="tg-footer">
@@ -2169,9 +2245,17 @@ function renderFooter(st: PanelState): string {
           <strong>${pending.length}</strong> ${pending.length === 1 ? "entry" : "entries"} ·
           <strong>${totalDuration(pending)}</strong> total${
             learned ? ` · mapped from ${learned} past entries` : ""
-          }
+          }${flagged ? ` · <strong class="tg-totals-warn">${flagged}</strong> ${flagged === 1 ? "avviso" : "avvisi"} del bot` : ""}
         </span>
         <div class="tg-spacer"></div>
+        ${
+          fixable
+            ? `<button class="tg-fix-all" data-tg-fix-all type="button" ${st.submitting ? "disabled" : ""}
+                       title="Corregge quello che il bot Toggl segnalerebbe, dove la correzione è certa">
+                 ${I.check} Applica suggerimenti <span class="tg-submit-count">(${fixable})</span>
+               </button>`
+            : ""
+        }
         <button class="tg-submit" data-tg-submit type="button" ${ready ? "" : "disabled"}>
           ${
             st.submitting
