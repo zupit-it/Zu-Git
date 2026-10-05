@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [1.0.4] - 2026-10-05
 
+### Fixed
+- **Toggl planner: switching plans is instant** — **Usa il piano automatico** and **Mostra la
+  proposta** re-read the whole day from Toggl, Jira and Google Calendar before showing the other
+  plan. Both plans are built from the same data, so the switch now happens on the spot; only opening
+  the planner, changing day or ↻ read the day again.
+
 ---
 
 ## [1.0.3] - 2026-10-05

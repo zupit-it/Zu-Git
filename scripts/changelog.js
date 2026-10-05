@@ -21,6 +21,14 @@ if (!command || !version) {
 const content = readFileSync(CHANGELOG, "utf8");
 
 if (command === "bump") {
+  // A release with an empty [Unreleased] ships with no notes: the update
+  // modal then says "This release ships without notes". Stop it here, before
+  // anything is tagged.
+  const unreleased = content.match(/^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m);
+  if (unreleased && !unreleased[1].replace(/^-{3,}\s*$/gm, "").trim()) {
+    console.error("[Unreleased] in CHANGELOG.md is empty: write the notes for this release first.");
+    process.exit(1);
+  }
   const today = new Date().toISOString().slice(0, 10);
   const bumped = content.replace(
     /^## \[Unreleased\]/m,
