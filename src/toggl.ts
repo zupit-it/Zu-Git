@@ -661,7 +661,7 @@ export async function openTogglPanel(date?: string) {
       render();
       return;
     }
-    void load();
+    void showProposal();
   };
 
   function close() {
@@ -763,7 +763,7 @@ export async function openTogglPanel(date?: string) {
     endMin = ceilTo(endMin, slot);
 
     try {
-      const [context, proposal] = await Promise.all([
+      const [context, proposal, others] = await Promise.all([
         invoke<TogglDayContext>("toggl_prepare_day", {
           date: st.date,
           // Half a day of margin on both sides: the Toggl query filters on the
@@ -773,50 +773,14 @@ export async function openTogglPanel(date?: string) {
           rangeEnd: toIsoWithOffset(dateAt(st.date, endMin + FETCH_MARGIN_MIN)),
           forceRelearn,
         }),
-        automatic
-          ? Promise.resolve(null)
-          : invoke<TogglProposal | null>("toggl_get_proposal", { date: st.date }).catch(() => null),
+        automatic ? Promise.resolve(null) : fetchProposal(),
+        fetchOtherProposals(),
       ]);
       st.context = context;
-      const range = { from: startMin, to: endMin };
-      st.range = range;
-      st.locked = buildLockedRows(context, st.date, range);
-      st.picker = null;
-
-      const busy = busyIntervals(context.existing, st.date, slot, Date.now());
-      // Calendar events claim their slots first; the stories then fill what is
-      // left, so a meeting is never overwritten by "work on PENT-123".
-      const blocks = calendarBlocks(context.events ?? [], st.date, slot, range, busy);
-      const calendarRows = buildCalendarRows(blocks, context.rules);
-      const claimed = [...busy, ...blocks.map((block) => ({ from: block.from, to: block.to }))]
-        .sort((a, b) => a.from - b.from);
-      const gaps = freeGaps(range, claimed, slot);
-      st.proposal = proposal;
-      st.otherProposals = await invoke<{ date: string }[]>("toggl_list_proposals")
-        .then((pending) => pending.map((item) => item.date).filter((date) => date !== st.date))
-        .catch(() => []);
-      if (proposal) {
-        const proposed = buildProposalRows(proposal, context, blocks);
-        // Meetings the assistant left out still belong to the day.
-        const meetings = calendarRows.filter(
-          (row) => !proposed.some((other) => other.startMin < row.endMin && row.startMin < other.endMin),
-        );
-        st.rows = [...meetings, ...proposed].sort((a, b) => a.startMin - b.startMin);
-      } else {
-        const candidates = candidatesFor(context.issues, range, st.date, slot);
-        const storyRows = buildRows(
-          planStories(gaps, candidates, context.activity ?? [], st.date, slot, context.fill ?? []),
-          context.rules,
-        );
-        st.rows = [...calendarRows, ...storyRows].sort((a, b) => a.startMin - b.startMin);
-      }
-
-      if (context.warnings.length > 0) {
-        st.notice = { text: context.warnings.join(" · "), tone: "info" };
-      }
-      if (st.date !== todayIso()) {
-        st.notice = { text: `Planning ${dayLabel(st.date)}, not today.`, tone: "info" };
-      }
+      st.range = { from: startMin, to: endMin };
+      st.otherProposals = others;
+      buildPlan(context, proposal);
+      st.notice = dayNotice(context);
     } catch (error) {
       st.context = null;
       st.rows = [];
@@ -826,6 +790,76 @@ export async function openTogglPanel(date?: string) {
       st.loading = false;
       render();
     }
+  }
+
+  /** What the day itself has to say: a planned day other than today, or the
+   *  warnings collected while reading it. */
+  function dayNotice(context: TogglDayContext): PanelState["notice"] {
+    if (st.date !== todayIso()) return { text: `Planning ${dayLabel(st.date)}, not today.`, tone: "info" };
+    if (context.warnings.length > 0) return { text: context.warnings.join(" · "), tone: "info" };
+    return null;
+  }
+
+  function fetchProposal(): Promise<TogglProposal | null> {
+    return invoke<TogglProposal | null>("toggl_get_proposal", { date: st.date }).catch(() => null);
+  }
+
+  function fetchOtherProposals(): Promise<string[]> {
+    return invoke<{ date: string }[]>("toggl_list_proposals")
+      .then((pending) => pending.map((item) => item.date).filter((date) => date !== st.date))
+      .catch(() => []);
+  }
+
+  /** The rows of the day from data already loaded: the AI proposal when there
+   *  is one, otherwise ZuGit's own plan. No network — switching between the two
+   *  is immediate. */
+  function buildPlan(context: TogglDayContext, proposal: TogglProposal | null) {
+    const slot = state.togglSlotMinutes;
+    const range = st.range;
+    st.locked = buildLockedRows(context, st.date, range);
+    st.picker = null;
+    st.proposal = proposal;
+    st.proposalWaiting = false;
+    st.edited = false;
+
+    const busy = busyIntervals(context.existing, st.date, slot, Date.now());
+    // Calendar events claim their slots first; the stories then fill what is
+    // left, so a meeting is never overwritten by "work on PENT-123".
+    const blocks = calendarBlocks(context.events ?? [], st.date, slot, range, busy);
+    const calendarRows = buildCalendarRows(blocks, context.rules);
+    if (proposal) {
+      const proposed = buildProposalRows(proposal, context, blocks);
+      // Meetings the assistant left out still belong to the day.
+      const meetings = calendarRows.filter(
+        (row) => !proposed.some((other) => other.startMin < row.endMin && row.startMin < other.endMin),
+      );
+      st.rows = [...meetings, ...proposed].sort((a, b) => a.startMin - b.startMin);
+      return;
+    }
+    const claimed = [...busy, ...blocks.map((block) => ({ from: block.from, to: block.to }))]
+      .sort((a, b) => a.from - b.from);
+    const gaps = freeGaps(range, claimed, slot);
+    const candidates = candidatesFor(context.issues, range, st.date, slot);
+    const storyRows = buildRows(
+      planStories(gaps, candidates, context.activity ?? [], st.date, slot, context.fill ?? []),
+      context.rules,
+    );
+    st.rows = [...calendarRows, ...storyRows].sort((a, b) => a.startMin - b.startMin);
+  }
+
+  /** Swaps the plan on screen for the AI proposal of the day, reading only the
+   *  proposal file — the day itself is already loaded. */
+  async function showProposal() {
+    const context = st.context;
+    if (!context) {
+      await load();
+      return;
+    }
+    const proposal = await fetchProposal();
+    if (st.context !== context) return; // another day was loaded meanwhile
+    st.notice = dayNotice(context);
+    buildPlan(context, proposal);
+    render();
   }
 
   // ── Interactions ────────────────────────────────────────────────────────────
@@ -865,7 +899,7 @@ export async function openTogglPanel(date?: string) {
       return;
     }
     if (target.closest("[data-tg-proposal-load]")) {
-      void load();
+      void showProposal();
       return;
     }
     const otherDay = target.closest<HTMLElement>("[data-tg-proposal-open]");
@@ -1371,14 +1405,19 @@ export async function openTogglPanel(date?: string) {
     render();
   }
 
-  /** Drops the AI proposal and plans the day from the evidence instead. */
+  /** Drops the AI proposal and plans the day from the evidence already loaded. */
   async function discardProposal() {
-    try {
-      await invoke("toggl_discard_proposal", { date: st.date });
-    } catch {
-      // The plan below still replaces it on screen.
+    const context = st.context;
+    // The file goes in the background: the plan below replaces it on screen
+    // either way.
+    void invoke("toggl_discard_proposal", { date: st.date }).catch(() => {});
+    if (!context) {
+      await load(false, true);
+      return;
     }
-    await load(false, true);
+    st.notice = dayNotice(context);
+    buildPlan(context, null);
+    render();
   }
 
   /** Recurring meetings (retro, estimation…) replay the project and tags the user
