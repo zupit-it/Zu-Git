@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.0.3] - 2026-10-05
+
 ### Added
 - **Toggl planner: the Zupit bot's checks, before you submit** — every row is checked against the
   rules of the morning Toggl bot (same order, same story-id pattern) and shows what it would flag
