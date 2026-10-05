@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.0.5] - 2026-10-05
+
 ### Fixed
 - **Toggl planner: switching plans is instant** — **Usa il piano automatico** and **Mostra la
   proposta** re-read the whole day from Toggl, Jira and Google Calendar before showing the other
