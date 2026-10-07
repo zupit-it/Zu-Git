@@ -712,6 +712,40 @@ pub struct ReleaseDiffItem {
     /// Parent epic ("Principale" in Jira), used to group the release notes.
     pub epic_key: Option<String>,
     pub epic_name: Option<String>,
+    /// When the story landed on the compared branch (PR merge or cherry-pick
+    /// commit); None when it is not there, or only Jira says it is.
+    pub merged_at: Option<String>,
+}
+
+/// A PR merged into the default branch, as drawn on the release map.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MainlineCommit {
+    pub number: u64,
+    pub url: String,
+    pub title: String,
+    pub merged_at: String,
+    pub jira_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MainlineTag {
+    pub name: String,
+    pub date: String,
+}
+
+/// Recent history of the default branch: where each story was first merged
+/// and which tags sit on it. Only fetched when a release branch is compared,
+/// so the map can draw main above it and the cherry-picks between the two.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Mainline {
+    pub branch: String,
+    /// Oldest first.
+    pub commits: Vec<MainlineCommit>,
+    /// Oldest first; only tags reachable from the default branch.
+    pub tags: Vec<MainlineTag>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -724,6 +758,8 @@ pub struct ReleaseDiffResult {
     pub synced_at: String,
     pub repo: String,
     pub since_tag: String,
+    /// Set only when the diff runs on a release branch.
+    pub mainline: Option<Mainline>,
 }
 
 // ── Mock data ─────────────────────────────────────────────────────────────────

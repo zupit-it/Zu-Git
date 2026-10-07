@@ -497,14 +497,21 @@ pub async fn fetch_release_diff(
         .map(|b| b.trim().to_string())
         .filter(|b| !b.is_empty());
 
-    // RT1 — one batched GitHub GraphQL query for tag-bounded merged PRs.
-    let (merged_prs, since_tag) = crate::github::fetch_merged_prs_since_last_release(
+    // RT1 — one batched GitHub GraphQL query for tag-bounded merged PRs. On a
+    // release branch, main's recent history is fetched alongside it for the map.
+    let merged_fut = crate::github::fetch_merged_prs_since_last_release(
         &release_repos,
         target_branch.as_deref(),
         &settings,
         &state.http_client,
-    )
-    .await;
+    );
+    let mainline_fut = async {
+        match target_branch {
+            Some(_) => Some(crate::github::fetch_mainline(&release_repos, &settings, &state.http_client).await),
+            None => None,
+        }
+    };
+    let ((merged_prs, since_tag), mainline) = tokio::join!(merged_fut, mainline_fut);
 
     // Collect unique Jira keys found in merged PRs (flattened across all keys per PR).
     let merged_keys: Vec<String> = {
@@ -610,6 +617,7 @@ pub async fn fetch_release_diff(
             flag,
             epic_key: issue.epic.as_ref().and_then(|e| e.key.clone()),
             epic_name: issue.epic.as_ref().map(|e| e.name.clone()),
+            merged_at: merged.map(|m| m.merged_at.clone()).filter(|d| !d.is_empty()),
         }
     };
 
@@ -699,6 +707,7 @@ pub async fn fetch_release_diff(
                 flag: Some("no-jira".to_string()),
                 epic_key: None,
                 epic_name: None,
+                merged_at: merged.map(|m| m.merged_at.clone()).filter(|d| !d.is_empty()),
             });
         }
     }
@@ -719,6 +728,7 @@ pub async fn fetch_release_diff(
         synced_at,
         repo,
         since_tag,
+        mainline,
     })
 }
 

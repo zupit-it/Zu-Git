@@ -14,6 +14,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Jira URL setting and browse links are unchanged. Scoped tokens are now the recommended choice
   (Settings shows a hint under the token field); required scopes: `read:jira-work`,
   `write:jira-work`, `read:jira-user`. Classic tokens keep working.
+- **Release diff: release map** — the diff now opens with a metro map of the release above the
+  list. On main it is one line from the last tag to HEAD, then a dotted stretch to the next tag
+  through a ghost for each planned story not merged yet (with its open PR, if any). On a release
+  branch main runs on top and the branch below: each cherry-pick drops from its stop on main, and a
+  verified story still missing from the branch drops to a dashed ghost — the pick still to do.
+  Unplanned stories are diamonds, other main PRs fold into `+N` stops, beta tags flag main. Click a
+  stop to jump to its row; the map follows the active tab and can be hidden down to its legend. Zoom with − / + /
+  fit or pinch (⌘/Ctrl + scroll). Multi-story PRs (`feat(PENT-1,PENT-2): …`) are one stop, and a
+  verified story sharing its PR with one still in testing shows as held back, not as ready to pick.
+- **Release diff: bigger window** — the modal grows with the window, up to 1480×980.
 
 ---
 

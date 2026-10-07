@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { escHtml } from "./utils";
+import { state } from "./state";
+import { buildReleaseMapLayout, type Mainline, type MapLayout, type OpenPr } from "./release-map-layout";
+import { applyMapZoom, clampMapZoom, fitMapZoom, renderReleaseMap, renderTooltip } from "./release-map";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,6 +23,8 @@ interface ReleaseDiffItem {
   flag?: string; // "no-pr" | "no-jira"
   epicKey?: string;
   epicName?: string;
+  /** When it landed on the compared branch. */
+  mergedAt?: string;
 }
 
 type ItemKind = "done" | "missing" | "extra";
@@ -35,6 +40,8 @@ interface ReleaseDiffResult {
   syncedAt: string;
   repo: string;
   sinceTag: string;
+  /** Main's recent history — only when a release branch is compared. */
+  mainline?: Mainline | null;
 }
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -168,6 +175,9 @@ interface ModalState {
   targetBranch: string;
   /** Branches matching the release prefix, loaded after the modal opens. */
   branches: string[];
+  /** Release map folded down to its legend. */
+  mapCollapsed: boolean;
+  mapZoom: number;
 }
 
 function branchLabel(st: ModalState): string {
@@ -202,6 +212,43 @@ function saveBranchFor(releaseName: string, branch: string) {
     localStorage.setItem(BRANCH_BY_RELEASE_KEY, JSON.stringify(saved));
   } catch {
     // Storage unavailable: the diff just starts on main next time.
+  }
+}
+
+const MAP_COLLAPSED_KEY = "zugit.releaseDiff.mapCollapsed";
+
+function readMapCollapsed(): boolean {
+  try {
+    return localStorage.getItem(MAP_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+const MAP_ZOOM_KEY = "zugit.releaseDiff.mapZoom";
+
+function readMapZoom(): number {
+  try {
+    const zoom = Number(localStorage.getItem(MAP_ZOOM_KEY));
+    return zoom > 0 ? clampMapZoom(zoom) : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function saveMapZoom(zoom: number) {
+  try {
+    localStorage.setItem(MAP_ZOOM_KEY, String(zoom));
+  } catch {
+    // Storage unavailable: the map just opens at 100% next time.
+  }
+}
+
+function saveMapCollapsed(collapsed: boolean) {
+  try {
+    localStorage.setItem(MAP_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    // Storage unavailable: the map just opens expanded next time.
   }
 }
 
@@ -551,6 +598,44 @@ function renderBranchSelect(st: ModalState): string {
   return `${I.branch}<select class="rd-branch-select" data-rd-branch-select title="Branch the release is compared against">${options}</select>`;
 }
 
+// ── Release map ───────────────────────────────────────────────────────────────
+
+const JIRA_KEY_RE = /\b[A-Z][A-Z0-9]+-\d+\b/g;
+
+/** Open PRs on the dashboard by Jira key: tells a ghost about to land from one not started. */
+function openPrsByKey(repos: string[]): Record<string, OpenPr> {
+  const out: Record<string, OpenPr> = {};
+  for (const pr of state.currentDashboard?.prs ?? []) {
+    if (repos.length > 0 && !repos.includes(pr.repo)) continue;
+    // A multi-story PR — feat(PENT-1,PENT-2): … — opens the way for every key in its title.
+    const keys = new Set([pr.jiraKey, ...(pr.title.match(JIRA_KEY_RE) ?? [])].filter(Boolean));
+    keys.forEach(key => { out[key] = { number: pr.id, url: pr.url }; });
+  }
+  return out;
+}
+
+function buildMapLayout(st: ModalState, openPrs: Record<string, OpenPr>): MapLayout {
+  return buildReleaseMapLayout({
+    done: st.result.done,
+    missing: st.result.missing,
+    extra: st.result.extra,
+    sinceTag: st.result.sinceTag,
+    branch: st.targetBranch,
+    mainline: st.result.mainline,
+    openPrs,
+  });
+}
+
+/** Keys the current tab lists; the map fades the rest. */
+function visibleKeys(st: ModalState): Set<string> | null {
+  const { result, tab } = st;
+  if (tab === "all") return null;
+  const items = tab === "flagged"
+    ? [...result.done, ...result.missing, ...result.extra].filter(it => isFlagged(it, st.releaseName))
+    : result[tab];
+  return new Set(items.map(it => it.key));
+}
+
 // ── Modal construction ────────────────────────────────────────────────────────
 
 function buildModal(releaseName: string, result: ReleaseDiffResult, repos: string[] = [], projectKey?: string, targetBranch = ""): HTMLElement {
@@ -570,6 +655,8 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     notesGroupBy: null,
     targetBranch,
     branches: [],
+    mapCollapsed: readMapCollapsed(),
+    mapZoom: readMapZoom(),
   };
 
   const counts = computeCounts(result, releaseName);
@@ -603,6 +690,9 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
       <div class="rd-tabs" data-rd-tabs>
         ${renderTabs(st.tab, counts, result.sinceTag)}
       </div>
+
+      <!-- Release map -->
+      <div class="rm-panel" data-rd-map></div>
 
       <!-- Body -->
       <div class="rd-body" data-rd-body>${renderBody(st)}</div>
@@ -661,7 +751,165 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     if (footerEl) footerEl.innerHTML = renderFooter(st, freshCounts);
     footerEl?.classList.toggle("rd-footer--active", st.selected.size > 0);
     flipNoteMenuIfClipped();
+    renderMap();
   }
+
+  // ── Release map ───────────────────────────────────────────────────────────
+
+  let mapLayout: MapLayout | null = null;
+  let mapOpenPrs: Record<string, OpenPr> = {};
+  /** The first render scrolls to HEAD; later ones keep where the user scrolled. */
+  let mapScrolled = false;
+
+  function renderMap() {
+    const panel = overlay.querySelector<HTMLElement>("[data-rd-map]");
+    if (!panel) return;
+    panel.hidden = st.notesOpen;
+    mapOpenPrs = openPrsByKey(st.repos);
+    mapLayout = buildMapLayout(st, mapOpenPrs);
+    const prevScroll = panel.querySelector<HTMLElement>("[data-rm-scroll]")?.scrollLeft;
+    panel.innerHTML = renderReleaseMap(mapLayout, { visibleKeys: visibleKeys(st), collapsed: st.mapCollapsed, zoom: st.mapZoom });
+    panel.classList.toggle("rm-panel--collapsed", st.mapCollapsed);
+    applyMapZoom(panel, st.mapZoom);
+    const scroller = panel.querySelector<HTMLElement>("[data-rm-scroll]");
+    if (!scroller) return;
+    scroller.addEventListener("scroll", () => updateMapFades(scroller), { passive: true });
+    if (mapScrolled && prevScroll !== undefined) {
+      scroller.scrollLeft = prevScroll;
+      updateMapFades(scroller);
+      return;
+    }
+    // HEAD and what is still missing sit at the right end: start there. The
+    // first render happens before the modal is attached, so wait for layout.
+    requestAnimationFrame(() => {
+      if (!scroller.isConnected) return;
+      scroller.scrollLeft = scroller.scrollWidth;
+      mapScrolled = true;
+      updateMapFades(scroller);
+    });
+  }
+
+  /**
+   * Zooms the map keeping the point under `anchorX` (px from the scroller's
+   * left edge; the middle by default) where it is.
+   */
+  function setMapZoom(zoom: number, anchorX?: number) {
+    const panel = overlay.querySelector<HTMLElement>("[data-rd-map]");
+    const scroller = panel?.querySelector<HTMLElement>("[data-rm-scroll]");
+    if (!panel || !scroller) return;
+    const next = clampMapZoom(zoom);
+    if (Math.abs(next - st.mapZoom) < 0.001) return;
+    const anchor = anchorX ?? scroller.clientWidth / 2;
+    const ratio = next / st.mapZoom;
+    const target = (scroller.scrollLeft + anchor) * ratio - anchor;
+    st.mapZoom = next;
+    hideTooltip();
+    applyMapZoom(panel, next);
+    scroller.scrollLeft = target;
+    updateMapFades(scroller);
+    saveMapZoom(next);
+  }
+
+  /** Fades an edge only where the map continues beyond it. */
+  function updateMapFades(scroller: HTMLElement) {
+    const max = scroller.scrollWidth - scroller.clientWidth;
+    scroller.classList.toggle("rm-scroll--more-left", scroller.scrollLeft > 2);
+    scroller.classList.toggle("rm-scroll--more-right", scroller.scrollLeft < max - 2);
+  }
+
+  function highlightKeys(keys: string[], on: boolean) {
+    const panel = overlay.querySelector<HTMLElement>("[data-rd-map]");
+    if (!panel) return;
+    for (const key of keys) {
+      panel.querySelectorAll(`[data-rm-keys~="${CSS.escape(key)}"]`).forEach(el => el.classList.toggle("rm-hl", on));
+    }
+    panel.classList.toggle("rm-panel--focus", on && keys.length > 0);
+  }
+
+  function showTooltip(stationEl: Element) {
+    const panel = overlay.querySelector<HTMLElement>("[data-rd-map]");
+    const tip = panel?.querySelector<HTMLElement>("[data-rm-tip]");
+    const canvas = panel?.querySelector<HTMLElement>(".rm-canvas");
+    const id = (stationEl as HTMLElement).dataset.rmId;
+    const station = mapLayout?.stations.find(s => s.id === id);
+    if (!tip || !canvas || !station || !mapLayout) return;
+    tip.innerHTML = renderTooltip(mapLayout, station, renderStatusChip, mapOpenPrs);
+    tip.hidden = false;
+
+    const box = canvas.getBoundingClientRect();
+    const target = stationEl.querySelector(".rm-shape, .rm-pill") ?? stationEl;
+    const at = target.getBoundingClientRect();
+    const cx = at.left + at.width / 2 - box.left;
+    const left = Math.min(Math.max(cx - tip.offsetWidth / 2, 8), box.width - tip.offsetWidth - 8);
+    // Above the stop when there is room inside the modal, otherwise below.
+    const shellTop = overlay.querySelector(".rd-shell")?.getBoundingClientRect().top ?? 0;
+    const above = at.top - tip.offsetHeight - 10 > shellTop;
+    tip.style.left = `${left}px`;
+    tip.style.top = above ? `${at.top - box.top - tip.offsetHeight - 10}px` : `${at.bottom - box.top + 10}px`;
+    tip.classList.toggle("rm-tip--below", !above);
+  }
+
+  function hideTooltip() {
+    const tip = overlay.querySelector<HTMLElement>("[data-rm-tip]");
+    if (tip) tip.hidden = true;
+  }
+
+  /**
+   * Brings the stop's rows into view — every story of a multi-story PR —
+   * switching to "All" when the tab hides one of them.
+   */
+  function revealRows(keys: string[]) {
+    const find = () => keys
+      .map(key => overlay.querySelector<HTMLElement>(`[data-rd-item="${CSS.escape(key)}"]`))
+      .filter((row): row is HTMLElement => row !== null);
+    if (find().length < keys.length) {
+      st.tab = "all";
+      rerender();
+    }
+    const rows = find();
+    if (rows.length === 0) return;
+    rows[0].scrollIntoView({ block: "center", behavior: "smooth" });
+    for (const row of rows) {
+      row.classList.remove("rd-item--flash");
+      void row.offsetWidth;
+      row.classList.add("rd-item--flash");
+    }
+  }
+
+  overlay.addEventListener("mouseover", (e) => {
+    const target = e.target as Element;
+    const station = target.closest<HTMLElement>("[data-rm-id]");
+    if (station) {
+      highlightKeys((station.dataset.rmKeys ?? "").split(" ").filter(Boolean), true);
+      showTooltip(station);
+      return;
+    }
+    const row = target.closest<HTMLElement>("[data-rd-item]");
+    if (row?.dataset.rdItem) highlightKeys([row.dataset.rdItem], true);
+  });
+
+  overlay.addEventListener("mouseout", (e) => {
+    const target = e.target as Element;
+    const from = target.closest<HTMLElement>("[data-rm-id], [data-rd-item]");
+    if (!from || from.contains(e.relatedTarget as Node | null)) return;
+    overlay.querySelectorAll(".rm-hl").forEach(el => el.classList.remove("rm-hl"));
+    overlay.querySelector("[data-rd-map]")?.classList.remove("rm-panel--focus");
+    hideTooltip();
+  });
+
+  overlay.querySelector("[data-rd-map]")?.addEventListener("scroll", hideTooltip, true);
+
+  // Pinch on a trackpad arrives as ctrl + wheel; ⌘/Ctrl + wheel does the same with a mouse.
+  overlay.querySelector("[data-rd-map]")?.addEventListener("wheel", (e) => {
+    const we = e as WheelEvent;
+    const scroller = (we.target as Element).closest<HTMLElement>("[data-rm-scroll]");
+    if (!scroller || !(we.ctrlKey || we.metaKey)) return;
+    we.preventDefault();
+    const anchor = we.clientX - scroller.getBoundingClientRect().left;
+    // A mouse wheel notch is a big delta, a pinch many small ones: cap each step.
+    const step = Math.max(-30, Math.min(30, we.deltaY));
+    setMapZoom(st.mapZoom * Math.exp(-step * 0.008), anchor);
+  }, { passive: false });
 
   /** Opens the note menu upwards when the row sits near the bottom of the list. */
   function flipNoteMenuIfClipped() {
@@ -722,6 +970,38 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
 
     // Close
     if (target.closest("[data-rd-close]")) { closeModal(); return; }
+
+    // Release map — fold / unfold
+    if (target.closest("[data-rm-toggle]")) {
+      st.mapCollapsed = !st.mapCollapsed;
+      saveMapCollapsed(st.mapCollapsed);
+      renderMap(); return;
+    }
+
+    // Release map — zoom controls
+    const zoomBtn = target.closest<HTMLElement>("[data-rm-zoom]");
+    if (zoomBtn) {
+      const panel = overlay.querySelector<HTMLElement>("[data-rd-map]");
+      const action = zoomBtn.dataset.rmZoom;
+      if (action === "in") setMapZoom(st.mapZoom * 1.25);
+      else if (action === "out") setMapZoom(st.mapZoom / 1.25);
+      else if (action === "reset") setMapZoom(1);
+      else if (action === "fit" && panel) {
+        setMapZoom(fitMapZoom(panel));
+        const scroller = panel.querySelector<HTMLElement>("[data-rm-scroll]");
+        if (scroller) { scroller.scrollLeft = 0; updateMapFades(scroller); }
+      }
+      return;
+    }
+
+    // Release map — a stop leads to its row in the list
+    const mapStation = target.closest<HTMLElement>("[data-rm-id]");
+    if (mapStation) {
+      const keys = (mapStation.dataset.rmKeys ?? "").split(" ").filter(Boolean);
+      const kind = mapLayout?.stations.find(s => s.id === mapStation.dataset.rmId)?.kind;
+      if (keys.length > 0 && kind !== "earlier") revealRows(keys);
+      return;
+    }
 
     // Tab switch
     const tabBtn = target.closest<HTMLElement>("[data-rd-tab]");
@@ -902,6 +1182,8 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     const notesEl = overlay.querySelector<HTMLElement>("[data-rd-notes-panel]");
     if (bodyEl)  bodyEl.hidden  = open;
     if (notesEl) notesEl.hidden = !open;
+    const mapEl = overlay.querySelector<HTMLElement>("[data-rd-map]");
+    if (mapEl) mapEl.hidden = open;
     // Closing re-renders because the tab may have changed while notes were up.
     if (open) refreshNotes();
     else rerender();
@@ -962,6 +1244,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
   }
 
   void loadOverrides();
+  renderMap();
 
   // Notes copy button
   overlay.querySelector("[data-rd-notes-copy]")?.addEventListener("click", async () => {
@@ -1059,6 +1342,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
       });
       st.result = fresh;
       st.selected.clear();
+      mapScrolled = false;
       // The version may have changed — overrides are stored per release.
       await loadOverrides();
       const syncedEl = overlay.querySelector<HTMLElement>(".rd-synced strong");

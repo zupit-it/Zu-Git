@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::models::{
-    ApiError, AppSettings, DraftPrInfo, StaleBranch, StaleBranchesResult, PipelineState,
+    ApiError, AppSettings, DraftPrInfo, Mainline, MainlineCommit, MainlineTag, StaleBranch,
+    StaleBranchesResult, PipelineState,
 };
 
 // ── GraphQL query ─────────────────────────────────────────────────────────────
@@ -1570,13 +1571,7 @@ pub async fn fetch_merged_prs_since_last_release(
             let author = pr["author"]["login"].as_str().unwrap_or("").to_string();
             let author_avatar_url = pr["author"]["avatarUrl"].as_str().map(|s| s.to_string());
 
-            // Extract all Jira keys: scan title first, fall back to headRefName + body.
-            let mut jira_keys = crate::jira::extract_all_jira_keys(&title);
-            if jira_keys.is_empty() {
-                let fallback = format!("{}\n{}", head_ref, body);
-                jira_keys = crate::jira::extract_all_jira_keys(&fallback);
-            }
-            jira_keys.dedup();
+            let jira_keys = pr_jira_keys(&title, &head_ref, &body);
 
             result.push(MergedPrRecord {
                 number,
@@ -1641,6 +1636,134 @@ pub async fn fetch_merged_prs_since_last_release(
 
     let since_tag = since_tags.join(" · ");
     (result, since_tag)
+}
+
+/// Jira keys a PR is about: the title first, then the head branch and body.
+fn pr_jira_keys(title: &str, head_ref: &str, body: &str) -> Vec<String> {
+    let mut jira_keys = crate::jira::extract_all_jira_keys(title);
+    if jira_keys.is_empty() {
+        jira_keys = crate::jira::extract_all_jira_keys(&format!("{head_ref}\n{body}"));
+    }
+    jira_keys.dedup();
+    jira_keys
+}
+
+/// Date of the commit a tag points at — where the tag sits on the branch —
+/// falling back to the tagger date.
+fn tag_commit_date(tag_ref: &serde_json::Value) -> Option<String> {
+    let target = &tag_ref["target"];
+    target["committedDate"]
+        .as_str()
+        .or_else(|| target["target"]["committedDate"].as_str())
+        .or_else(|| target["tagger"]["date"].as_str())
+        .map(|s| s.to_string())
+}
+
+/// Recent history of the default branch for the release map: the last merged
+/// PRs into it and the tags reachable from it. One batched GraphQL query.
+pub async fn fetch_mainline(
+    repos: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Mainline {
+    if repos.is_empty() {
+        return Mainline::default();
+    }
+
+    let mut q = String::from("{");
+    for (i, repo) in repos.iter().enumerate() {
+        if let Some((owner, name)) = repo.split_once('/') {
+            q.push_str(&format!(
+                r#" r_{i}: repository(owner:"{owner}", name:"{name}") {{
+                  defaultBranchRef {{
+                    name
+                    target {{ ... on Commit {{ history(first: 100) {{ nodes {{ oid }} }} }} }}
+                  }}
+                  refs(refPrefix:"refs/tags/", first: 30, orderBy: {{field: TAG_COMMIT_DATE, direction: DESC}}) {{
+                    nodes {{
+                      name
+                      target {{
+                        oid
+                        ... on Commit {{ committedDate }}
+                        ... on Tag {{
+                          tagger {{ date }}
+                          target {{ oid ... on Commit {{ committedDate }} }}
+                        }}
+                      }}
+                    }}
+                  }}
+                  pullRequests(states: [MERGED], first: 100, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
+                    nodes {{ number title body headRefName baseRefName mergedAt url }}
+                  }}
+                }}"#
+            ));
+        }
+    }
+    q.push('}');
+
+    match graphql_request_raw(&q, settings, client).await {
+        Some(data) => parse_mainline(&data, repos.len()),
+        None => Mainline::default(),
+    }
+}
+
+fn parse_mainline(data: &serde_json::Value, repo_count: usize) -> Mainline {
+    let mut mainline = Mainline::default();
+    let mut tag_names = std::collections::HashSet::new();
+
+    for i in 0..repo_count {
+        let repo_node = &data[&format!("r_{i}")];
+        let Some(default_branch) = repo_node["defaultBranchRef"]["name"].as_str() else {
+            continue;
+        };
+        if mainline.branch.is_empty() {
+            mainline.branch = default_branch.to_string();
+        }
+
+        // A tag counts only when its commit is in the branch history — tags cut
+        // on release branches must not show up on main.
+        let history: std::collections::HashSet<&str> = repo_node["defaultBranchRef"]["target"]["history"]["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["oid"].as_str())
+            .collect();
+        for tag in repo_node["refs"]["nodes"].as_array().into_iter().flatten() {
+            let oid = tag["target"]["target"]["oid"]
+                .as_str()
+                .or_else(|| tag["target"]["oid"].as_str());
+            let (Some(name), Some(oid), Some(date)) = (tag["name"].as_str(), oid, tag_commit_date(tag)) else {
+                continue;
+            };
+            if history.contains(oid) && tag_names.insert(name.to_string()) {
+                mainline.tags.push(MainlineTag { name: name.to_string(), date });
+            }
+        }
+
+        for pr in repo_node["pullRequests"]["nodes"].as_array().into_iter().flatten() {
+            if pr["baseRefName"].as_str() != Some(default_branch) {
+                continue;
+            }
+            let Some(merged_at) = pr["mergedAt"].as_str() else { continue };
+            let title = pr["title"].as_str().unwrap_or("");
+            mainline.commits.push(MainlineCommit {
+                number: pr["number"].as_u64().unwrap_or(0),
+                url: pr["url"].as_str().unwrap_or("").to_string(),
+                title: title.to_string(),
+                merged_at: merged_at.to_string(),
+                jira_keys: pr_jira_keys(
+                    title,
+                    pr["headRefName"].as_str().unwrap_or(""),
+                    pr["body"].as_str().unwrap_or(""),
+                ),
+            });
+        }
+    }
+
+    // RFC 3339 timestamps from the same API sort correctly as strings.
+    mainline.commits.sort_by(|a, b| a.merged_at.cmp(&b.merged_at));
+    mainline.tags.sort_by(|a, b| a.date.cmp(&b.date));
+    mainline
 }
 
 /// Branches whose name starts with `prefix` (case-insensitive) across `repos`,
@@ -2021,6 +2144,44 @@ mod tests {
             Some(345)
         );
         assert_eq!(pr_number_in_message("PENT-12 Fix login"), None);
+    }
+
+    #[test]
+    fn mainline_keeps_default_branch_prs_and_reachable_tags_oldest_first() {
+        let data = serde_json::json!({
+            "r_0": {
+                "defaultBranchRef": {
+                    "name": "main",
+                    "target": { "history": { "nodes": [{ "oid": "c2" }, { "oid": "c1" }] } }
+                },
+                "refs": { "nodes": [
+                    { "name": "v1.1.0-beta.2", "target": { "oid": "c2", "committedDate": "2026-05-02T10:00:00Z" } },
+                    { "name": "v1.0.1", "target": { "oid": "rel", "committedDate": "2026-05-03T10:00:00Z" } },
+                    { "name": "v1.1.0-beta.1", "target": {
+                        "oid": "tagobj",
+                        "tagger": { "date": "2026-05-09T10:00:00Z" },
+                        "target": { "oid": "c1", "committedDate": "2026-05-01T10:00:00Z" }
+                    } }
+                ] },
+                "pullRequests": { "nodes": [
+                    { "number": 9, "title": "PENT-9 Later", "body": "", "headRefName": "x", "baseRefName": "main", "mergedAt": "2026-05-04T10:00:00Z", "url": "u9" },
+                    { "number": 8, "title": "Hotfix", "body": "", "headRefName": "PENT-8-fix", "baseRefName": "release/1.0", "mergedAt": "2026-05-03T09:00:00Z", "url": "u8" },
+                    { "number": 7, "title": "Earlier", "body": "", "headRefName": "feature/PENT-7", "baseRefName": "main", "mergedAt": "2026-05-01T09:00:00Z", "url": "u7" }
+                ] }
+            }
+        });
+
+        let mainline = parse_mainline(&data, 1);
+
+        assert_eq!(mainline.branch, "main");
+        let numbers: Vec<u64> = mainline.commits.iter().map(|c| c.number).collect();
+        assert_eq!(numbers, vec![7, 9]);
+        assert_eq!(mainline.commits[0].jira_keys, vec!["PENT-7".to_string()]);
+        let tags: Vec<(&str, &str)> = mainline.tags.iter().map(|t| (t.name.as_str(), t.date.as_str())).collect();
+        assert_eq!(tags, vec![
+            ("v1.1.0-beta.1", "2026-05-01T10:00:00Z"),
+            ("v1.1.0-beta.2", "2026-05-02T10:00:00Z"),
+        ]);
     }
 
     #[test]

@@ -52,3 +52,39 @@ When a release branch is picked:
 - a story with a terminal Jira status (Verified, Done…) is **not** assumed to be on the branch: without a matching PR or commit it stays *Missing*, flagged "Jira ahead of git" — that is the cherry-pick still to do
 
 The branch picked is remembered per release name on this machine, so reopening the diff of a minor release lands on its branch again.
+
+## Release Map
+
+Above the list, the diff draws the release as a metro map. Every stop is a Jira story; click one to
+jump to its row, hover it for the details. The map follows the active tab (stories outside it fade)
+and can be hidden down to its legend (**Hide map** / **Show map**); the choice is remembered on this machine.
+
+On **main** (beta and major releases) it is a single line:
+
+- it starts at the latest tag, with a `+N` chip for the planned stories that are Done without a
+  merge after that tag — they shipped in an earlier one;
+- every story merged since the tag is a stop, in merge order, up to HEAD: a circle when it is planned
+  for this release, a diamond when it is not (it ships in the next tag anyway);
+- past HEAD a dotted stretch leads to the next tag (the last tag's trailing number + 1) through a
+  dashed ghost for each planned story not merged yet, captioned with its open PR when the dashboard
+  has one.
+
+On a **release branch** main runs on top and the branch underneath, forking off at the branch's
+latest tag. Main's last 100 merged PRs are fetched for this, together with the tags reachable from
+main; a story's stop on main is its last PR there.
+
+- a story on the branch gets a solid drop line from its stop on main;
+- a story Verified (or Closed, Released, Done) on main but missing from the branch gets a dashed drop
+  line to a ghost on the branch — the cherry-pick still to do;
+- a story on main that is not verified yet is an open ring: nothing to pick;
+- main PRs of other releases collapse into `+N` stops, and beta tags show as flags above main;
+- what reached the branch without a stop on main (a hotfix, or a story older than main's window)
+  and stories not merged on main yet are queued after HEAD.
+
+A PR carrying several stories — `feat(PENT-1234,PENT-1235): …` — is a single stop labelled
+`PENT-1234 +1`, on main, on the branch and among the ghosts (an open PR counts for every key in its
+title). Its colour is the PR's as a whole: on the branch if any of its stories is (a diamond if one of
+them is unplanned), and since a PR is cherry-picked whole, a verified story sharing it with one still
+in testing is not "to cherry-pick" but held back — the stop reads `1/2 verified` and the legend counts
+it apart. Hovering the stop lists every story with its status; clicking it flashes all their rows.
+

@@ -21,6 +21,11 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Release status — see the release as a map",
+        body: "The release diff now opens with a <strong>metro map</strong> of the release above the list. On <strong>main</strong> it is one line from the last tag to HEAD, a stop per story merged since, then a dotted stretch to the <strong>next tag</strong> through a dashed ghost for every planned story not merged yet — with its open PR when there is one. On a <strong>release branch</strong> main runs on top and the branch below: every <strong>cherry-pick</strong> drops from its stop on main, and a story <em>Verified</em> on main but missing from the branch drops to a <strong>ghost</strong> — the pick still to do, at a glance. A PR with several stories (<code>feat(PENT-1,PENT-2): …</code>) is one stop, and since it is picked whole, a verified story sharing it with one still in testing shows as <strong>held back</strong>, not as ready. Unplanned stories are diamonds, other PRs on main fold into <code>+N</code> stops, beta tags flag main. Hover a stop for its stories, click it to jump to their rows; the map follows the tab you are on, zooms with <strong>− / + / fit</strong> or a pinch, and <strong>Hide map</strong> folds it down to its legend. The window is bigger too, growing with your screen.",
+        imgs: ["/assets/changelog/release-map.png"],
+      },
+      {
         title: "Jira — API tokens with scopes work too",
         body: "A Jira token created <strong>with scopes</strong> used to fail with an authentication error: Atlassian only accepts it through its own gateway, not on your site's address. ZuGit now recognises the token type on the first call and uses the right address on its own — <strong>nothing to change in Settings</strong>, the Jira URL stays your site and links still open there. Scoped tokens are now the <strong>recommended choice</strong>: they give ZuGit only what it uses, and Atlassian is phasing out the classic ones. Create one from <strong>Create token</strong> in <strong>Settings → Jira</strong> with <em>Create API token with scopes</em>, app Jira, and the scopes <code>read:jira-work</code>, <code>write:jira-work</code> and <code>read:jira-user</code>. Classic tokens keep working.",
       },
