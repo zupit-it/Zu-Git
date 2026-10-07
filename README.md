@@ -111,6 +111,28 @@ If no key is found for an internal PR, a warning is shown in the Status tab.
 
 ZuGit integrates with Jira in two ways: **read-only enrichment** (ticket data shown in the PR list) and **write-back actions** (checklist updates and workflow transitions triggered on publish).
 
+### Authentication: classic or scoped API tokens
+
+Both kinds of Atlassian API token work, with the same email + token pair in Settings. Classic
+tokens call the site directly (`https://<site>.atlassian.net/rest/api/3/...`). Tokens created
+**with scopes** are rejected there and only work through the platform gateway
+(`https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/...`): ZuGit detects this on the first
+call — a 401 from the site that the gateway does not repeat — reads the site's cloud id from
+`/_edge/tenant_info` and sends every following call through the gateway. Browse links keep pointing
+to the site. Nothing to configure: the **Jira URL** setting stays the site URL.
+
+**Recommended: use a token with scopes.** It grants ZuGit only what it needs, instead of
+everything your account can do, and it is the kind of token Atlassian is moving to — classic tokens
+are being phased out. Create it from
+[id.atlassian.com → API tokens](https://id.atlassian.com/manage-profile/security/api-tokens) with
+**Create API token with scopes**, app **Jira**, and these classic scopes:
+
+| Scope | Used for |
+|---|---|
+| `read:jira-work` | issue search, fields, changelog, fix versions, transitions list |
+| `write:jira-work` | checklist write-back, workflow transitions, fix version moves |
+| `read:jira-user` | `/myself` (credential check, your transitions in the Toggl planner) |
+
 ### Ticket enrichment
 
 On each refresh ZuGit issues a single bulk JQL query (`POST /rest/api/3/search/jql`) for all Jira keys found in the current PR list. Results are kept in memory only as a fallback: a ticket the next refresh cannot load keeps its last known data instead of losing its release and priority. Fields fetched: `summary`, `priority`, `status`, `fixVersions`, `assignee`.
@@ -372,7 +394,7 @@ incoming version** with *Install and restart* or *Later*.
 ## Requirements
 
 - GitHub personal access token (classic or fine-grained, `repo` scope)
-- Jira API token (optional — enables ticket enrichment)
+- Jira API token, with scopes recommended — classic still works (optional — enables ticket enrichment)
 - Toggl Track API token (optional — enables the timesheet autofill; found in your Toggl profile page)
 - Google OAuth client id + secret (optional — enables the calendar import)
 

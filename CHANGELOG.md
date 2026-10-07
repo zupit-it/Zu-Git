@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Jira: API tokens with scopes** — tokens created with scopes only work through Atlassian's
+  gateway (`api.atlassian.com/ex/jira/{cloudId}`), so with one ZuGit used to fail with 401. The
+  token type is now detected on the first call and the right endpoint is used automatically; the
+  Jira URL setting and browse links are unchanged. Scoped tokens are now the recommended choice
+  (Settings shows a hint under the token field); required scopes: `read:jira-work`,
+  `write:jira-work`, `read:jira-user`. Classic tokens keep working.
+
 ---
 
 ## [1.0.5] - 2026-10-05

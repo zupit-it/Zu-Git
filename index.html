@@ -345,7 +345,13 @@
                           Create token
                         </button>
                       </div>
-                      <input id="jiraToken" name="jiraToken" type="password" placeholder="Atlassian API token" />
+                      <input id="jiraToken" name="jiraToken" type="password" placeholder="Atlassian API token (classic or with scopes)" />
+                      <p class="field-hint">
+                        Consigliato: <strong>Create API token with scopes</strong>, con gli scope
+                        <code>read:jira-work</code>, <code>write:jira-work</code> e <code>read:jira-user</code>.
+                        Dà a ZuGit solo i permessi che usa; i token classici funzionano ancora, ma
+                        Atlassian li sta dismettendo.
+                      </p>
                     </div>
                     <div class="settings-field settings-field-wide">
                       <label class="field-label" for="jiraRepoBoards">Repo → Jira board mapping</label>

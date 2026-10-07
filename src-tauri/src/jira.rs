@@ -279,6 +279,96 @@ fn cache_key(base_url: &str, issue_key: &str) -> String {
     format!("{}::{}", base_url, issue_key)
 }
 
+// ── API base resolution ───────────────────────────────────────────────────────
+
+const ATLASSIAN_GATEWAY: &str = "https://api.atlassian.com/ex/jira";
+
+/// Resolved REST base per (site, email, token fingerprint). Classic API tokens
+/// talk to the site itself; tokens created "with scopes" are rejected there
+/// (401) and only work through the platform gateway
+/// `api.atlassian.com/ex/jira/{cloudId}` — still with email + token Basic auth.
+static API_BASE_CACHE: Lazy<Mutex<HashMap<String, String>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn api_base_cache_key(settings: &AppSettings) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(settings.jira_token.as_bytes());
+    let fingerprint: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+    format!("{}::{}::{}", settings.jira_base_url, settings.jira_email, fingerprint)
+}
+
+/// The site's Atlassian cloud id, read from the unauthenticated tenant endpoint.
+async fn fetch_cloud_id(site: &str, client: &reqwest::Client) -> Option<String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TenantInfo {
+        cloud_id: String,
+    }
+    let resp = client.get(format!("{site}/_edge/tenant_info")).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.json::<TenantInfo>().await.ok().map(|info| info.cloud_id)
+}
+
+async fn probe_myself(base: &str, settings: &AppSettings, client: &reqwest::Client) -> Option<u16> {
+    client
+        .get(format!("{base}/rest/api/3/myself"))
+        .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+        .send()
+        .await
+        .ok()
+        .map(|resp| resp.status().as_u16())
+}
+
+/// Base URL for Jira REST calls (`{base}/rest/api/3/...`). Browse links keep
+/// using `settings.jira_base_url`. The token type is detected on first use: a
+/// 401 from the site that the gateway does not repeat means a scoped token.
+/// Transient failures fall back to the site URL without caching, so the next
+/// call retries the detection.
+async fn api_base(settings: &AppSettings, client: &reqwest::Client) -> String {
+    let site = settings.jira_base_url.as_str();
+    // Scoped tokens exist only on Jira Cloud; self-hosted sites (and a gateway
+    // URL entered by hand) are used as they are.
+    let is_cloud_site = reqwest::Url::parse(site)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.ends_with(".atlassian.net")))
+        .unwrap_or(false);
+    if !is_cloud_site {
+        return site.to_string();
+    }
+    let key = api_base_cache_key(settings);
+    if let Some(cached) = API_BASE_CACHE.lock().get(&key) {
+        return cached.clone();
+    }
+
+    let resolved = match probe_myself(site, settings, client).await {
+        Some(401) => match fetch_cloud_id(site, client).await {
+            Some(cloud_id) => {
+                let gateway = format!("{ATLASSIAN_GATEWAY}/{cloud_id}");
+                // A scoped token without `read:jira-user` gets 403 on /myself:
+                // the gateway still accepted it, so it is the right base.
+                match probe_myself(&gateway, settings, client).await {
+                    Some(401) => Some(site.to_string()),
+                    Some(_) => Some(gateway),
+                    None => None,
+                }
+            }
+            None => None,
+        },
+        Some(_) => Some(site.to_string()),
+        None => None,
+    };
+
+    match resolved {
+        Some(base) => {
+            API_BASE_CACHE.lock().insert(key, base.clone());
+            base
+        }
+        None => site.to_string(),
+    }
+}
+
 // ── Public fetch ──────────────────────────────────────────────────────────────
 
 /// Lightweight credential probe: `GET /rest/api/3/myself` validates the email +
@@ -289,7 +379,7 @@ pub async fn verify_credentials(
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Result<(), ApiError> {
-    let url = format!("{}/rest/api/3/myself", settings.jira_base_url);
+    let url = format!("{}/rest/api/3/myself", api_base(settings, client).await);
     let response = client
         .get(&url)
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
@@ -367,7 +457,7 @@ async fn fetch_chunk(
     });
 
     let response = client
-        .post(format!("{}/rest/api/3/search/jql", settings.jira_base_url))
+        .post(format!("{}/rest/api/3/search/jql", api_base(settings, client).await))
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
         .json(&body)
         .send()
@@ -427,7 +517,7 @@ async fn fetch_single_issue(
 ) -> Option<Option<JiraIssueSummary>> {
     let url = format!(
         "{}/rest/api/3/issue/{}?fields=summary,priority,status,fixVersions,assignee",
-        settings.jira_base_url, key
+        api_base(settings, client).await, key
     );
 
     let response = client
@@ -482,7 +572,7 @@ async fn discover_checklist_field(
         }
     }
 
-    let url = format!("{}/rest/api/3/field", settings.jira_base_url);
+    let url = format!("{}/rest/api/3/field", api_base(settings, client).await);
     let resp = client
         .get(&url)
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
@@ -549,7 +639,7 @@ pub async fn discover_epic_field(
         }
     }
 
-    let url = format!("{}/rest/api/3/field", settings.jira_base_url);
+    let url = format!("{}/rest/api/3/field", api_base(settings, client).await);
     let fields: Vec<JiraField> = match client
         .get(&url)
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
@@ -732,7 +822,7 @@ pub async fn fetch_checklist(
 
     let url = format!(
         "{}/rest/api/3/issue/{}?fields={}",
-        settings.jira_base_url, issue_key, field_id
+        api_base(settings, client).await, issue_key, field_id
     );
     let resp = match client
         .get(&url)
@@ -776,7 +866,7 @@ pub async fn write_checklist(
         }
     };
     let payload = serialize_checklist(items);
-    let put_url = format!("{}/rest/api/3/issue/{}", settings.jira_base_url, issue_key);
+    let put_url = format!("{}/rest/api/3/issue/{}", api_base(settings, client).await, issue_key);
     client
         .put(&put_url)
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
@@ -841,7 +931,7 @@ pub async fn transition_issue(
 ) -> Result<(), String> {
     let transitions_url = format!(
         "{}/rest/api/3/issue/{}/transitions",
-        settings.jira_base_url, issue_key
+        api_base(settings, client).await, issue_key
     );
     let get_resp = client
         .get(&transitions_url)
@@ -916,7 +1006,7 @@ pub async fn fetch_release_issues(
     }
     let map = |issue: &JiraIssueResponse| map_issue_with_epic(issue, epic_field_id);
 
-    let search_jql_url = format!("{}/rest/api/3/search/jql", settings.jira_base_url);
+    let search_jql_url = format!("{}/rest/api/3/search/jql", api_base(settings, client).await);
     let max_results = 100;
     let first_body = serde_json::json!({
         "jql": jql,
@@ -946,7 +1036,7 @@ pub async fn fetch_release_issues(
                 "startAt": start_at,
             });
             let resp2 = client
-                .post(format!("{}/rest/api/3/search", settings.jira_base_url))
+                .post(format!("{}/rest/api/3/search", api_base(settings, client).await))
                 .basic_auth(&settings.jira_email, Some(&settings.jira_token))
                 .json(&body2)
                 .send()
@@ -1034,7 +1124,7 @@ pub async fn fetch_project_versions(
 ) -> Vec<String> {
     let base_url = format!(
         "{}/rest/api/3/project/{}/version",
-        settings.jira_base_url, project_key
+        api_base(settings, client).await, project_key
     );
 
     let mut all: Vec<JiraVersionEntry> = vec![];
@@ -1100,7 +1190,7 @@ pub async fn move_fix_version(
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Result<(), String> {
-    let url = format!("{}/rest/api/3/issue/{}", settings.jira_base_url, key);
+    let url = format!("{}/rest/api/3/issue/{}", api_base(settings, client).await, key);
     let mut ops = Vec::new();
     if let Some(from) = from {
         if from != to {
@@ -1214,10 +1304,10 @@ async fn fetch_changelog_tail(
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Option<Vec<JiraChangelogEntry>> {
+    let api = api_base(settings, client).await;
     let fetch = |start_at: u32| {
         let url = format!(
-            "{}/rest/api/3/issue/{}/changelog?maxResults={CHANGELOG_PAGE}&startAt={start_at}",
-            settings.jira_base_url, key
+            "{api}/rest/api/3/issue/{key}/changelog?maxResults={CHANGELOG_PAGE}&startAt={start_at}"
         );
         client
             .get(url)
@@ -1273,7 +1363,7 @@ async fn fetch_my_account_id(
     }
 
     let resp = client
-        .get(format!("{}/rest/api/3/myself", settings.jira_base_url))
+        .get(format!("{}/rest/api/3/myself", api_base(settings, client).await))
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
         .send()
         .await
@@ -1399,7 +1489,7 @@ async fn story_point_fields(settings: &AppSettings, client: &reqwest::Client) ->
         name: String,
     }
     let Ok(resp) = client
-        .get(format!("{}/rest/api/3/field", settings.jira_base_url))
+        .get(format!("{}/rest/api/3/field", api_base(settings, client).await))
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
         .send()
         .await
@@ -1425,9 +1515,10 @@ async fn search_raw(
     client: &reqwest::Client,
 ) -> Result<Vec<serde_json::Value>, ApiError> {
     let body = serde_json::json!({ "jql": jql, "fields": fields, "maxResults": 100 });
+    let api = api_base(settings, client).await;
     let send = |path: &str| {
         client
-            .post(format!("{}{path}", settings.jira_base_url))
+            .post(format!("{api}{path}"))
             .basic_auth(&settings.jira_email, Some(&settings.jira_token))
             .json(&body)
             .send()
@@ -1558,7 +1649,7 @@ async fn search_issues(
     });
 
     let resp = client
-        .post(format!("{}/rest/api/3/search/jql", settings.jira_base_url))
+        .post(format!("{}/rest/api/3/search/jql", api_base(settings, client).await))
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
         .json(&body)
         .send()
@@ -1568,7 +1659,7 @@ async fn search_issues(
     let status = resp.status();
     let parsed: JiraSearchResponse = if status == 404 || status == 405 || status == 410 {
         let legacy = client
-            .post(format!("{}/rest/api/3/search", settings.jira_base_url))
+            .post(format!("{}/rest/api/3/search", api_base(settings, client).await))
             .basic_auth(&settings.jira_email, Some(&settings.jira_token))
             .json(&body)
             .send()
@@ -1722,7 +1813,7 @@ pub async fn drop_fix_version(
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Result<(), String> {
-    let url = format!("{}/rest/api/3/issue/{}", settings.jira_base_url, key);
+    let url = format!("{}/rest/api/3/issue/{}", api_base(settings, client).await, key);
     let ops = match version {
         Some(v) => serde_json::json!([{ "remove": { "name": v } }]),
         None => serde_json::json!([{ "set": [] }]),
