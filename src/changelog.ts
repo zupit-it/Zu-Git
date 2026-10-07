@@ -29,6 +29,11 @@ const VERSIONS: VersionBlock[] = [
         title: "Jira — API tokens with scopes work too",
         body: "A Jira token created <strong>with scopes</strong> used to fail with an authentication error: Atlassian only accepts it through its own gateway, not on your site's address. ZuGit now recognises the token type on the first call and uses the right address on its own — <strong>nothing to change in Settings</strong>, the Jira URL stays your site and links still open there. Scoped tokens are now the <strong>recommended choice</strong>: they give ZuGit only what it uses, and Atlassian is phasing out the classic ones. Create one from <strong>Create token</strong> in <strong>Settings → Jira</strong> with <em>Create API token with scopes</em>, app Jira, and the scopes <code>read:jira-work</code>, <code>write:jira-work</code> and <code>read:jira-user</code>. Classic tokens keep working.",
       },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
       {
         title: "Toggl — the bot's checks, before you submit",
         body: "No more surprises on Slack the next morning: every row of the planner is checked against the rules of the <strong>Zupit Toggl bot</strong> and shows, with the same emoji, what it would flag — a tag next to a story id 🚫, the wrong billable flag 💰, a tag on a Zupit entry 🟦, no story and no tag 🏷️, and the rest. Each line has its fix one click away, and <strong>Applica suggerimenti</strong> in the footer applies every fix that is certain, on all rows at once. ZuGit also spots what the bot lets through but gets wrong: a story booked on an unusual project 🔀, and <strong>several stories in one entry</strong> 🧩 — the bot only reads the first key — which you can <strong>split</strong> into one row per story, or turn into sprint work with no keys and a tag. Your AI assistant is now told the same rules, so its plans start clean. The story bar above the plan is gone too: <strong>+ Row</strong> or a click on free time already lists every active story first.",
@@ -65,11 +70,6 @@ const VERSIONS: VersionBlock[] = [
         title: "Settings — compact, open only what you need",
         body: "The settings page is now grouped into <strong>Connections</strong>, <strong>Dashboard features</strong>, <strong>Time tracking</strong> and <strong>General</strong>, and every section folds down to a single line with its state at a glance — <em>Configured</em> / <em>Needs setup</em>, <em>On</em> / <em>Off</em>. Open just the one you need, or use <strong>Expand all</strong> / <strong>Collapse all</strong>; ZuGit remembers which ones you left open. A dot next to a title marks unsaved edits, even when the section is closed.",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "Stale branches — find what everyone forgot to delete",
         body: "Turn it on in <strong>Settings → Stale branches</strong> and a tab appears next to <em>Status</em>, listing the remote branches with <strong>no open PR</strong> that nobody has pushed to in more than <strong>15 days</strong> — the threshold is yours to change, and so is the list of ignored prefixes (<strong>release</strong> out of the box). The default branch, protected branches and anything that is the head or the base of an open PR never show up. What is left is sorted oldest commit first, scoped to the repositories you have selected in the toolbar, and can be filtered by <strong>Internal / Collaborator</strong> or narrowed to <strong>Only mine</strong> — branches whose last commit is yours, the only owner GitHub records for a ref. <strong>Group by author</strong> turns it into one section per person, so you know who to ask. It is read-only: a row opens the branch on GitHub, ZuGit never deletes anything.",
