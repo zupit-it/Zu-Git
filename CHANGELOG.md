@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.1.0] - 2026-10-07
+
 ### Added
 - **Jira: API tokens with scopes** — tokens created with scopes only work through Atlassian's
   gateway (`api.atlassian.com/ex/jira/{cloudId}`), so with one ZuGit used to fail with 401. The
