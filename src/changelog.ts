@@ -21,6 +21,10 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Jira — API tokens with scopes work too",
+        body: "A Jira token created <strong>with scopes</strong> used to fail with an authentication error: Atlassian only accepts it through its own gateway, not on your site's address. ZuGit now recognises the token type on the first call and uses the right address on its own — <strong>nothing to change in Settings</strong>, the Jira URL stays your site and links still open there. Scoped tokens are now the <strong>recommended choice</strong>: they give ZuGit only what it uses, and Atlassian is phasing out the classic ones. Create one from <strong>Create token</strong> in <strong>Settings → Jira</strong> with <em>Create API token with scopes</em>, app Jira, and the scopes <code>read:jira-work</code>, <code>write:jira-work</code> and <code>read:jira-user</code>. Classic tokens keep working.",
+      },
+      {
         title: "Toggl — the bot's checks, before you submit",
         body: "No more surprises on Slack the next morning: every row of the planner is checked against the rules of the <strong>Zupit Toggl bot</strong> and shows, with the same emoji, what it would flag — a tag next to a story id 🚫, the wrong billable flag 💰, a tag on a Zupit entry 🟦, no story and no tag 🏷️, and the rest. Each line has its fix one click away, and <strong>Applica suggerimenti</strong> in the footer applies every fix that is certain, on all rows at once. ZuGit also spots what the bot lets through but gets wrong: a story booked on an unusual project 🔀, and <strong>several stories in one entry</strong> 🧩 — the bot only reads the first key — which you can <strong>split</strong> into one row per story, or turn into sprint work with no keys and a tag. Your AI assistant is now told the same rules, so its plans start clean. The story bar above the plan is gone too: <strong>+ Row</strong> or a click on free time already lists every active story first.",
       },
