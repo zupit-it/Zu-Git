@@ -659,6 +659,34 @@ pub struct StaleBranchesResult {
     pub stale_days: u32,
 }
 
+// ── Pull request diff ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrFileDiff {
+    pub filename: String,
+    /// Set on renames only.
+    pub previous_filename: Option<String>,
+    /// added | removed | modified | renamed | copied | changed | unchanged
+    pub status: String,
+    pub additions: u32,
+    pub deletions: u32,
+    /// Unified-diff hunks. GitHub leaves it out for binary files and for
+    /// diffs too large to inline — the view links to GitHub then.
+    pub patch: Option<String>,
+    pub blob_url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrDiff {
+    pub files: Vec<PrFileDiff>,
+    /// GitHub stops listing files at 3000.
+    pub truncated: bool,
+    /// The commit these files are the diff of — what a comment on them is anchored to.
+    pub head_sha: String,
+}
+
 // ── Draft PR info ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

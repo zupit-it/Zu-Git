@@ -7,6 +7,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **PR diff in the app** — click the `+N −N` chip on a PR row (it lights up on hover) to open its
+  changed files without leaving ZuGit: file list with a filter on the left, unified diff on the
+  right, green and red rows under syntax colours (VS Code's grammars, Angular templates and
+  control flow included; C#, Razor, SCSS, Python, Java too). Lockfiles, bundles and EF snapshots
+  start collapsed, as do diffs over 1500 lines; binary files link to GitHub. `j` / `k` move between
+  files, ⌘/Ctrl+F filters them, Esc closes. The diff is fetched once per push. **Unified / Split**
+  switches to a side-by-side view (base left, head right, long lines wrapped); the choice is
+  remembered.
+- **AI review, on request** — ask your own agent (Claude Code, Codex, Claude Desktop…) to review a
+  PR: **Copy review prompt** in the diff, or `/mcp__zugit__review_pr <PR URL>` in Claude Code. Through
+  the ZuGit MCP it reads the PR, its Jira story and checklist and the open threads
+  (`get_pr_review_context`), reads the code from git without touching your working tree, and hands
+  back a summary, a reading order and line comments (`propose_review`). They appear in the diff
+  under their lines, with a chip on the PR row: **Keep**, **Edit** or **Discard** each one. Nothing
+  is posted to GitHub.
+- **PR diff: reading order** — files are listed foundations first: the agent's order when it gave
+  one, otherwise by layer (models, data, logic, API, UI with each component's files together,
+  tests, config). **By path** switches back to GitHub's order.
+- **PR diff: your comments** — click a line number to comment on that line, or press on one and
+  drag over more to comment on a block (in the split view, on either side). ⌘/Ctrl+Enter adds the
+  comment; **Edit** and **Delete** are on every card. Keeping an AI comment makes it yours: it
+  survives a new review from the agent. Your comments stay in ZuGit until you publish them:
+  **Publish review** in the diff's top bar, always in view with what is waiting, opens your summary
+  and **Comment**, **Request changes** or **Approve** — one GitHub review, on your own PRs only
+  Comment, as on GitHub. Once GitHub has them they come back as its conversations.
+- **PR diff: GitHub conversations** — the review comments already on GitHub show in the diff as they
+  do there: under their line and side, ranges included, resolved ones folded, comments on a whole
+  file above it. Outdated ones, written on code that changed since, are listed above the files with
+  the code they were written on. **Reply…** under each one: **Add to review** sends the reply with
+  your review, **Reply now** posts it at once. **Resolve conversation** (and Unresolve) acts at once,
+  as on GitHub. They refresh when you come back to ZuGit.
+- **PR diff: new commits while you read** — ZuGit checks for new pushes when you come back to it and
+  every two minutes, and offers **Reload**, like GitHub's Refresh: nothing moves under your hands.
+  Your comments stay with their code as GitHub does — following it while it is unchanged, even
+  when lines move — and are listed as Outdated, with the code they were written on, once it changes.
+
 ---
 
 ## [1.1.0] - 2026-10-07

@@ -129,6 +129,8 @@ export const SVG = {
   threads: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h8M2 6h5M2 9h3"/></svg>`,
   behind: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v6M3 6l3 3 3-3"/><path d="M2 10h8"/></svg>`,
   conflict: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4M6 9v1"/></svg>`,
+  sparkle: `<svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor"><path d="M6 1l1.1 3.1L10 5.2 7.1 6.3 6 9.5 4.9 6.3 2 5.2l2.9-1.1z"/><path d="M10 8.5l.45 1.05L11.5 10l-1.05.45L10 11.5l-.45-1.05L8.5 10l1.05-.45z" opacity=".7"/></svg>`,
+  diff: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h7M7 2l2 2-2 2M10 8H3M5 6L3 8l2 2"/></svg>`,
   promote: `<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2M3 5l3-3 3 3"/><path d="M2 10h8"/></svg>`,
 };
 

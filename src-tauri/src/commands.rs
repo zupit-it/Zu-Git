@@ -232,6 +232,154 @@ pub async fn fetch_branch_stats(
     Ok(crate::github::fetch_compare(&repo, &base, &head, &settings, &state.http_client).await)
 }
 
+/// The review conversations on a PR, for the diff view. Not cached: they
+/// change whenever someone comments.
+#[tauri::command]
+pub async fn fetch_pr_threads(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+) -> Result<Vec<crate::github::ReviewThread>, String> {
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let settings = storage::load_settings(&app).await?;
+    Ok(crate::github::fetch_review_threads(&repo, number, &settings, &state.http_client).await?)
+}
+
+/// Files and patches of a pull request at its latest commit, together with
+/// that commit: comments on them are anchored to it. The files are read
+/// between two looks at the PR's head, so a push landing meanwhile can never
+/// pair them with the wrong commit. Cached by head: until someone pushes,
+/// reopening costs one small request.
+#[tauri::command]
+pub async fn fetch_pr_diff(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+) -> Result<crate::models::PrDiff, String> {
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let settings = storage::load_settings(&app).await?;
+    current_diff(&state, &settings, &repo, number).await
+}
+
+/// The PR's diff at its latest commit, with that commit — see `fetch_pr_diff`.
+async fn current_diff(
+    state: &AppState,
+    settings: &crate::models::AppSettings,
+    repo: &str,
+    number: u64,
+) -> Result<crate::models::PrDiff, String> {
+    const CACHE_LIMIT: usize = 32;
+    const ATTEMPTS: usize = 3;
+    let client = &state.http_client;
+    for _ in 0..ATTEMPTS {
+        let head = crate::github::fetch_pr_meta(repo, number, settings, client).await?.head_sha;
+        let key = format!("{repo}#{number}@{head}");
+        if let Some(hit) = state.pr_diff_cache.lock().get(&key) {
+            return Ok(hit.clone());
+        }
+        let mut diff = crate::github::fetch_pr_files(repo, number, settings, client).await?;
+        // A push landed while the files were read: read them again.
+        if crate::github::fetch_pr_meta(repo, number, settings, client).await?.head_sha != head {
+            continue;
+        }
+        diff.head_sha = head;
+        let mut cache = state.pr_diff_cache.lock();
+        if cache.len() >= CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, diff.clone());
+        return Ok(diff);
+    }
+    Err("The pull request is being pushed to right now — try again in a moment.".into())
+}
+
+/// Where each of the user's comments written on an older commit sits on the
+/// diff's: one compare per older commit, cached, since commits never change.
+/// When GitHub cannot be asked, a comment's own code decides.
+async fn carry_all(
+    state: &AppState,
+    settings: &crate::models::AppSettings,
+    repo: &str,
+    mine: &crate::pr_review::UserReview,
+    diff: &crate::models::PrDiff,
+) -> std::collections::HashMap<String, crate::pr_review::Carry> {
+    use crate::pr_review::{carry, is_sha, DiffIndex, Placement};
+    const CACHE_LIMIT: usize = 64;
+    let index = DiffIndex::new(&diff.files);
+    let head = diff.head_sha.to_lowercase();
+    let mut carried = std::collections::HashMap::new();
+    for comment in &mine.comments {
+        let from = comment.head_sha.to_lowercase();
+        if comment.placement != Placement::Inline || from.is_empty() || head.starts_with(&from) {
+            continue;
+        }
+        let key = format!("{repo}@{from}...{head}");
+        let cached = state.pr_compare_cache.lock().get(&key).cloned();
+        let compare = match cached {
+            Some(hit) => Some(hit),
+            None if is_sha(&from) => {
+                match crate::github::fetch_commit_compare(repo, &from, &head, settings, &state.http_client).await {
+                    Ok(fresh) => {
+                        let mut cache = state.pr_compare_cache.lock();
+                        if cache.len() >= CACHE_LIMIT {
+                            cache.clear();
+                        }
+                        cache.insert(key, fresh.clone());
+                        Some(fresh)
+                    }
+                    Err(_) => None,
+                }
+            }
+            None => None,
+        };
+        carried.insert(comment.id.clone(), carry(comment, compare.as_ref(), &index));
+    }
+    carried
+}
+
+/// Where the user's comments written on an older commit sit on the PR's
+/// latest one: moved with code that did not change, or outdated.
+#[tauri::command]
+pub async fn pr_comment_positions(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+) -> Result<Vec<crate::pr_review::CommentPosition>, String> {
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let mine = storage::load_user_review(&storage::data_dir(&app)?, &repo, number)?;
+    let settings = storage::load_settings(&app).await?;
+    let diff = current_diff(&state, &settings, &repo, number).await?;
+    let carried = carry_all(&state, &settings, &repo, &mine, &diff).await;
+    Ok(carried
+        .into_iter()
+        .map(|(id, carry)| crate::pr_review::CommentPosition::new(id, carry, &diff.head_sha))
+        .collect())
+}
+
+/// The PR's latest commit: an open diff compares it with its own to notice new pushes.
+#[tauri::command]
+pub async fn fetch_pr_head(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+) -> Result<String, String> {
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let settings = storage::load_settings(&app).await?;
+    Ok(crate::github::fetch_pr_meta(&repo, number, &settings, &state.http_client).await?.head_sha)
+}
+
 /// Remote branches with no open PR, untouched for longer than the configured
 /// threshold. Not part of the dashboard refresh: scanning every branch of every
 /// repo is expensive, so the view asks for it on demand.
@@ -1025,6 +1173,358 @@ pub async fn toggl_list_proposals(app: tauri::AppHandle) -> Result<Vec<PendingPr
         .into_iter()
         .map(|(date, created_at)| PendingProposal { date, created_at })
         .collect())
+}
+
+// ── AI review proposals ───────────────────────────────────────────────────────
+
+/// Every proposal an agent handed over through `zugit --mcp` — polled, so the
+/// PR rows can show what is waiting.
+#[tauri::command]
+pub async fn ai_review_list(app: tauri::AppHandle) -> Result<Vec<crate::pr_review::AiReviewSummary>, String> {
+    let dir = storage::data_dir(&app)?;
+    storage::prune_ai_reviews(&dir, chrono::Utc::now(), crate::pr_review::KEEP_DAYS);
+    Ok(storage::load_ai_reviews(&dir).iter().map(|review| review.summary()).collect())
+}
+
+#[tauri::command]
+pub async fn ai_review_get(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+) -> Result<Vec<crate::pr_review::AiReview>, String> {
+    Ok(storage::load_ai_reviews_for(&storage::data_dir(&app)?, &repo, number))
+}
+
+/// The proposal the diff view shows, or an error when the agent replaced it
+/// since: a new proposal numbers its comments from c1 again, so an id from the
+/// old one would land on another comment.
+fn shown_ai_review(
+    dir: &std::path::Path,
+    repo: &str,
+    number: u64,
+    source: &str,
+    created_at: &str,
+) -> Result<crate::pr_review::AiReview, String> {
+    storage::load_ai_reviews_for(dir, repo, number)
+        .into_iter()
+        .find(|review| review.source == source && review.created_at == created_at)
+        .ok_or_else(|| "This AI review was replaced or discarded meanwhile.".to_string())
+}
+
+/// Sends an AI comment back to triage, or discards it. Keeping goes through
+/// `ai_review_keep_comment`: a kept comment becomes the user's.
+#[tauri::command]
+pub async fn ai_review_set_status(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    source: String,
+    created_at: String,
+    id: String,
+    status: crate::pr_review::CommentStatus,
+) -> Result<crate::pr_review::AiReview, String> {
+    use crate::pr_review::CommentStatus;
+    if status == CommentStatus::Kept {
+        return Err("A comment is kept with ai_review_keep_comment.".into());
+    }
+    let dir = storage::data_dir(&app)?;
+    let mut review = shown_ai_review(&dir, &repo, number, &source, &created_at)?;
+    let comment = review
+        .comments
+        .iter_mut()
+        .find(|comment| comment.id == id)
+        .ok_or("This comment is gone — the agent may have replaced its review.")?;
+    if comment.status == CommentStatus::Kept {
+        return Err("This comment is yours now: delete it from your comments instead.".into());
+    }
+    comment.status = status;
+    storage::save_ai_review(&dir, &review)?;
+    Ok(review)
+}
+
+/// Makes an AI comment the user's, reworded when `body` is given: it moves to
+/// their comments, where a new proposal from the agent no longer touches it.
+#[tauri::command]
+pub async fn ai_review_keep_comment(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    source: String,
+    created_at: String,
+    id: String,
+    body: Option<String>,
+    diff_hunk: Option<String>,
+) -> Result<crate::pr_review::CommentChange, String> {
+    let dir = storage::data_dir(&app)?;
+    let mut review = shown_ai_review(&dir, &repo, number, &source, &created_at)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    // The user's copy first: should the second write fail, the comment shows
+    // twice rather than not at all.
+    let mine = storage::update_user_review(&dir, &repo, number, |mine| {
+        crate::pr_review::keep_comment(&mut review, &id, body.as_deref(), diff_hunk.as_deref(), mine, &now)
+    })?;
+    storage::save_ai_review(&dir, &review)?;
+    Ok(crate::pr_review::CommentChange { mine, review: Some(review) })
+}
+
+/// Drops a whole proposal — the one the user saw: a newer one from the same
+/// agent stays. Comments the user kept from it are theirs and stay too.
+#[tauri::command]
+pub async fn ai_review_discard(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    source: String,
+    created_at: String,
+) -> Result<(), String> {
+    let dir = storage::data_dir(&app)?;
+    if shown_ai_review(&dir, &repo, number, &source, &created_at).is_err() {
+        return Ok(());
+    }
+    storage::delete_ai_review(&dir, &repo, number, &source)
+}
+
+// ── The user's own PR comments ────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn pr_comments_get(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+) -> Result<crate::pr_review::UserReview, String> {
+    storage::load_user_review(&storage::data_dir(&app)?, &repo, number)
+}
+
+/// A comment on lines the user selected in the diff. Stays on this machine.
+#[tauri::command]
+pub async fn pr_comment_add(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    comment: crate::pr_review::NewComment,
+) -> Result<crate::pr_review::UserReview, String> {
+    let dir = storage::data_dir(&app)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    storage::update_user_review(&dir, &repo, number, |mine| mine.add(comment, &now))
+}
+
+#[tauri::command]
+pub async fn pr_comment_update(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    id: String,
+    body: String,
+) -> Result<crate::pr_review::UserReview, String> {
+    let dir = storage::data_dir(&app)?;
+    storage::update_user_review(&dir, &repo, number, |mine| mine.edit(&id, &body))
+}
+
+/// A reply to one of GitHub's conversations that goes out with the review —
+/// new when `id` is None, reworded otherwise.
+#[tauri::command]
+pub async fn pr_reply_save(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    id: Option<String>,
+    thread_id: String,
+    body: String,
+) -> Result<crate::pr_review::UserReview, String> {
+    let dir = storage::data_dir(&app)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    storage::update_user_review(&dir, &repo, number, |mine| match id {
+        Some(id) => mine.edit_reply(&id, &body),
+        None => mine.add_reply(&thread_id, &body, &now),
+    })
+}
+
+#[tauri::command]
+pub async fn pr_reply_delete(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    id: String,
+) -> Result<crate::pr_review::UserReview, String> {
+    let dir = storage::data_dir(&app)?;
+    storage::update_user_review(&dir, &repo, number, |mine| {
+        mine.remove_reply(&id);
+        Ok(())
+    })
+}
+
+/// Replies to a conversation on GitHub at once, as GitHub's "Add single comment".
+#[tauri::command]
+pub async fn pr_thread_reply_now(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    thread_id: String,
+    body: String,
+) -> Result<(), String> {
+    let body = body.trim();
+    if body.is_empty() {
+        return Err("The reply is empty.".into());
+    }
+    let settings = storage::load_settings(&app).await?;
+    crate::github::add_thread_reply(&thread_id, body, None, &settings, &state.http_client).await
+}
+
+/// Resolves a conversation on GitHub, or opens it again; returns whether it is resolved now.
+#[tauri::command]
+pub async fn pr_thread_resolve(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    thread_id: String,
+    resolved: bool,
+) -> Result<bool, String> {
+    if thread_id.trim().is_empty() {
+        return Err("This conversation is not known to ZuGit.".into());
+    }
+    let settings = storage::load_settings(&app).await?;
+    crate::github::set_thread_resolved(thread_id.trim(), resolved, &settings, &state.http_client).await
+}
+
+/// The text heading the user's review, kept until it is published.
+#[tauri::command]
+pub async fn pr_review_set_summary(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    summary: String,
+) -> Result<crate::pr_review::UserReview, String> {
+    let dir = storage::data_dir(&app)?;
+    storage::update_user_review(&dir, &repo, number, |mine| mine.set_summary(&summary))
+}
+
+/// Clears a PR from the publishing set however the publish ends.
+struct Publishing<'a> {
+    set: &'a parking_lot::Mutex<std::collections::HashSet<String>>,
+    key: String,
+}
+
+impl Drop for Publishing<'_> {
+    fn drop(&mut self) {
+        self.set.lock().remove(&self.key);
+    }
+}
+
+/// Publishes the user's comments as a GitHub review. The main review — on
+/// the latest commit, with the verdict and the summary — goes first: if GitHub
+/// refuses it, nothing is sent and nothing changes here. Comments on code that
+/// changed since follow, on the commits they were written on. What GitHub
+/// accepted leaves ZuGit: it comes back as GitHub's own conversations.
+/// `head_sha` is the commit the diff on screen is of: nothing goes out while
+/// the PR has newer ones, or a verdict would land on code nobody here has seen.
+#[tauri::command]
+pub async fn pr_review_publish(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+    event: crate::pr_review::ReviewEvent,
+    head_sha: String,
+) -> Result<crate::pr_review::PublishResult, String> {
+    use crate::pr_review::{plan_review, DiffIndex, FailedReview, PublishResult, PublishedReview};
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let key = format!("{repo}#{number}");
+    // One publish per PR at a time: a double click must not post twice.
+    if !state.publishing.lock().insert(key.clone()) {
+        return Err("This review is being published already.".into());
+    }
+    let _publishing = Publishing { set: &state.publishing, key };
+
+    let dir = storage::data_dir(&app)?;
+    let settings = storage::load_settings(&app).await?;
+    let mine = storage::load_user_review(&dir, &repo, number)?;
+    let diff = current_diff(&state, &settings, &repo, number).await?;
+    if !crate::pr_review::same_commit(&head_sha, &diff.head_sha) {
+        return Err("New commits on this PR since you opened the diff: reload it and look at them, then publish.".into());
+    }
+    let carried = carry_all(&state, &settings, &repo, &mine, &diff).await;
+    let client = &state.http_client;
+    let mut result = PublishResult::default();
+
+    // A reply to a conversation deleted on GitHub would sink the whole review:
+    // it stays here, said so. When GitHub cannot be asked, all of them go.
+    let mut planned = mine.clone();
+    if !mine.replies.is_empty() {
+        if let Ok(threads) = crate::github::fetch_review_threads(&repo, number, &settings, client).await {
+            let live: std::collections::HashSet<&str> = threads.iter().map(|t| t.id.as_str()).collect();
+            planned.replies.retain(|r| live.contains(r.thread_id.as_str()));
+            let gone = mine.replies.len() - planned.replies.len();
+            if gone > 0 {
+                result.failed.push(FailedReview {
+                    commit: diff.head_sha.clone(),
+                    error: "The conversation was deleted on GitHub.".into(),
+                    comments: gone,
+                });
+            }
+        }
+    }
+    let plan = plan_review(&planned, &diff.head_sha, event, &DiffIndex::new(&diff.files), &carried)?;
+    // GitHub has them: losing track of that here would publish them twice. The
+    // file is read again, not written from the copy above: what was added or
+    // kept while the review went out stays.
+    let forget = |ids: &[String], summary_too: bool| {
+        storage::update_user_review(&dir, &repo, number, |now| {
+            now.published(ids, &planned, summary_too);
+            Ok(())
+        })
+        .map_err(|e| {
+            format!("Published on GitHub, but ZuGit could not update its copy ({e}): delete the published comments here before publishing again.")
+        })
+    };
+
+    if let Some(main) = &plan.main {
+        let url = crate::github::create_review(&repo, number, main, &settings, client).await?;
+        forget(&main.ids, true)?;
+        result.published.push(PublishedReview { commit: main.commit.clone(), url, comments: main.ids.len() });
+    }
+    for older in &plan.older {
+        match crate::github::create_review(&repo, number, older, &settings, client).await {
+            Ok(url) => {
+                forget(&older.ids, false)?;
+                result.published.push(PublishedReview { commit: older.commit.clone(), url, comments: older.ids.len() });
+            }
+            Err(error) => {
+                result.failed.push(FailedReview { commit: older.commit.clone(), error, comments: older.ids.len() });
+            }
+        }
+    }
+    result.mine = storage::load_user_review(&dir, &repo, number).unwrap_or(mine);
+    Ok(result)
+}
+
+/// Deletes one of the user's comments. One kept from an AI review goes back
+/// to that proposal as discarded, where Undo can still bring it back.
+#[tauri::command]
+pub async fn pr_comment_delete(
+    app: tauri::AppHandle,
+    repo: String,
+    number: u64,
+    id: String,
+) -> Result<crate::pr_review::CommentChange, String> {
+    let dir = storage::data_dir(&app)?;
+    let mut removed = None;
+    let mine = storage::update_user_review(&dir, &repo, number, |mine| {
+        removed = mine.remove(&id);
+        Ok(())
+    })?;
+    let Some(removed) = removed else {
+        return Ok(crate::pr_review::CommentChange { mine, review: None });
+    };
+    let mut released = None;
+    if let Some(from) = &removed.kept_from {
+        if let Ok(mut review) = shown_ai_review(&dir, &repo, number, &from.source, &from.created_at) {
+            if crate::pr_review::release_kept(&mut review, from) {
+                storage::save_ai_review(&dir, &review)?;
+                released = Some(review);
+            }
+        }
+    }
+    Ok(crate::pr_review::CommentChange { mine, review: released })
 }
 
 #[derive(Debug, Serialize)]

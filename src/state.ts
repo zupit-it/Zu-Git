@@ -91,6 +91,10 @@ export const state = {
   // "repo/id" of PRs at the head of their queue, auto-merge-enabled, and conflicting.
   // Rebuilt from scratch on every processMergeQueue() call — read-only, for rendering.
   queueBlockedPrKeys: new Set<string>(),
+
+  // ── AI review ──────────────────────────────────────────────────────────────
+  // "repo/id" → AI comments still waiting for a keep/discard, across agents.
+  aiPending: new Map<string, number>(),
   // "repo/id" of PRs with a rebase already triggered and not yet confirmed settled.
   // Cleared once the PR is no longer reported as "behind" — see processMergeQueue.
   queueRebaseTriggeredFor: new Set<string>(),

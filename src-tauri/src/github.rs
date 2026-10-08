@@ -1106,6 +1106,440 @@ pub async fn fetch_compare(
     })
 }
 
+/// Changed files of a pull request with their patches. GitHub pages them 100 at
+/// a time and stops at 3000 files, i.e. 30 pages.
+pub async fn fetch_pr_files(
+    repo: &str,
+    number: u64,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<crate::models::PrDiff, ApiError> {
+    const PER_PAGE: usize = 100;
+    const MAX_PAGES: u32 = 30;
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+    let mut files = Vec::new();
+    for page in 1..=MAX_PAGES {
+        let url = format!(
+            "{}/repos/{}/pulls/{}/files?per_page={}&page={}",
+            api_base, repo, number, PER_PAGE, page
+        );
+        let batch: Vec<serde_json::Value> = github_request(&url, settings, client).await?;
+        let full_page = batch.len() == PER_PAGE;
+        files.extend(batch.iter().map(parse_pr_file));
+        if !full_page {
+            return Ok(crate::models::PrDiff { files, truncated: false, head_sha: String::new() });
+        }
+    }
+    Ok(crate::models::PrDiff { files, truncated: true, head_sha: String::new() })
+}
+
+/// What a reviewer reads before the code: the PR itself and both ends of its range.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrMeta {
+    pub url: String,
+    pub title: String,
+    pub description: String,
+    pub author: String,
+    pub state: String,
+    pub draft: bool,
+    pub base_ref: String,
+    pub base_sha: String,
+    pub head_ref: String,
+    pub head_sha: String,
+}
+
+pub async fn fetch_pr_meta(
+    repo: &str,
+    number: u64,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<PrMeta, ApiError> {
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+    let url = format!("{}/repos/{}/pulls/{}", api_base, repo, number);
+    let pr: serde_json::Value = github_request(&url, settings, client).await?;
+    let text = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+    Ok(PrMeta {
+        url: text(&pr["html_url"]),
+        title: text(&pr["title"]),
+        description: text(&pr["body"]),
+        author: text(&pr["user"]["login"]),
+        state: if pr["merged_at"].is_string() { "merged".into() } else { text(&pr["state"]) },
+        draft: pr["draft"].as_bool().unwrap_or(false),
+        base_ref: text(&pr["base"]["ref"]),
+        base_sha: text(&pr["base"]["sha"]),
+        head_ref: text(&pr["head"]["ref"]),
+        head_sha: text(&pr["head"]["sha"]),
+    })
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadComment {
+    pub author: String,
+    pub avatar_url: String,
+    pub body: String,
+    pub created_at: String,
+    pub url: String,
+    /// Part of the viewer's own review, not submitted yet on GitHub.
+    pub pending: bool,
+    /// Why GitHub hides it ("outdated", "spam"…), when it does.
+    pub minimized: Option<String>,
+}
+
+/// A review conversation on the PR, placed as GitHub places it: under a line
+/// of the latest diff, on the whole file, or outdated — written on code that
+/// changed since, and kept with the hunk it was written on.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewThread {
+    pub id: String,
+    pub path: String,
+    /// Last line of the range in the PR's latest diff; None when outdated or on the whole file.
+    pub line: Option<u64>,
+    pub start_line: Option<u64>,
+    /// The same on the commit the conversation started on, which GitHub keeps.
+    pub original_line: Option<u64>,
+    pub original_start_line: Option<u64>,
+    pub original_commit: String,
+    /// "new" (RIGHT) or "old" (LEFT).
+    pub side: String,
+    pub resolved: bool,
+    pub resolved_by: Option<String>,
+    pub outdated: bool,
+    /// The hunk it was written on, down to its line: what GitHub shows above an outdated conversation.
+    pub diff_hunk: String,
+    pub comments: Vec<ThreadComment>,
+    /// Replies past the ones fetched, left to read on GitHub.
+    pub more_comments: u64,
+}
+
+const REVIEW_THREADS_QUERY: &str = r#"
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id path line startLine originalLine originalStartLine diffSide isResolved isOutdated
+          resolvedBy { login }
+          comments(first: 50) {
+            totalCount
+            nodes {
+              author { login avatarUrl(size: 40) }
+              body createdAt url diffHunk state isMinimized minimizedReason
+              originalCommit { oid }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+/// Pages of 100 conversations; past this, the rest stays on GitHub.
+const MAX_THREAD_PAGES: usize = 10;
+
+pub async fn fetch_review_threads(
+    repo: &str,
+    number: u64,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<Vec<ReviewThread>, ApiError> {
+    let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+    let mut threads = Vec::new();
+    let mut after: Option<String> = None;
+    for _ in 0..MAX_THREAD_PAGES {
+        let data = graphql_data(
+            REVIEW_THREADS_QUERY,
+            serde_json::json!({ "owner": owner, "name": name, "number": number, "after": after }),
+            settings,
+            client,
+        )
+        .await?;
+        let page = &data["repository"]["pullRequest"]["reviewThreads"];
+        if let Some(nodes) = page["nodes"].as_array() {
+            threads.extend(nodes.iter().map(parse_review_thread));
+        }
+        after = page["pageInfo"]["endCursor"].as_str().map(str::to_string);
+        if page["pageInfo"]["hasNextPage"].as_bool() != Some(true) || after.is_none() {
+            break;
+        }
+    }
+    Ok(threads)
+}
+
+fn parse_review_thread(t: &serde_json::Value) -> ReviewThread {
+    let text = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+    let nodes = t["comments"]["nodes"].as_array().cloned().unwrap_or_default();
+    let first = nodes.first().cloned().unwrap_or_default();
+    let comments: Vec<ThreadComment> = nodes
+        .iter()
+        .map(|c| ThreadComment {
+            author: c["author"]["login"].as_str().unwrap_or("ghost").to_string(),
+            avatar_url: text(&c["author"]["avatarUrl"]),
+            body: text(&c["body"]),
+            created_at: text(&c["createdAt"]),
+            url: text(&c["url"]),
+            pending: c["state"].as_str() == Some("PENDING"),
+            minimized: (c["isMinimized"].as_bool() == Some(true)).then(|| text(&c["minimizedReason"]).to_lowercase()),
+        })
+        .collect();
+    let total = t["comments"]["totalCount"].as_u64().unwrap_or(comments.len() as u64);
+    ReviewThread {
+        id: text(&t["id"]),
+        path: text(&t["path"]),
+        line: t["line"].as_u64(),
+        start_line: t["startLine"].as_u64(),
+        original_line: t["originalLine"].as_u64(),
+        original_start_line: t["originalStartLine"].as_u64(),
+        original_commit: text(&first["originalCommit"]["oid"]),
+        side: if t["diffSide"].as_str() == Some("LEFT") { "old" } else { "new" }.to_string(),
+        resolved: t["isResolved"].as_bool().unwrap_or(false),
+        resolved_by: t["resolvedBy"]["login"].as_str().map(str::to_string),
+        outdated: t["isOutdated"].as_bool().unwrap_or(false),
+        diff_hunk: text(&first["diffHunk"]),
+        more_comments: total.saturating_sub(comments.len() as u64),
+        comments,
+    }
+}
+
+/// What changed between two commits of a PR, file by file: what carries a
+/// comment written on the older one over to the newer.
+pub async fn fetch_commit_compare(
+    repo: &str,
+    from: &str,
+    to: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<crate::pr_review::CommitCompare, ApiError> {
+    /// GitHub lists this many changed files at most.
+    const MAX_FILES: usize = 300;
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+    // The files come with the first page; one commit per page keeps it small.
+    let url = format!("{}/repos/{}/compare/{}...{}?per_page=1", api_base, repo, from, to);
+    let resp: serde_json::Value = github_request(&url, settings, client).await?;
+    let text = |v: &serde_json::Value| v.as_str().map(str::to_string);
+    let files: Vec<crate::pr_review::FileChange> = resp["files"]
+        .as_array()
+        .map(|files| {
+            files
+                .iter()
+                .map(|f| crate::pr_review::FileChange {
+                    path: text(&f["filename"]).unwrap_or_default(),
+                    previous_path: text(&f["previous_filename"]),
+                    status: text(&f["status"]).unwrap_or_default(),
+                    patch: text(&f["patch"]),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(crate::pr_review::CommitCompare {
+        linear: matches!(resp["status"].as_str(), Some("ahead" | "identical")),
+        complete: files.len() < MAX_FILES,
+        files,
+    })
+}
+
+/// Creates a pull request review: on its commit, with its verdict, text, line
+/// comments and replies. Without replies it is one request, which GitHub takes
+/// whole or not at all. Replies only join a review while it is pending, so then
+/// the review is created pending, given its replies and submitted — and
+/// deleted if any step fails, which leaves nothing half sent: a pending review
+/// is only ever visible to its author. Returns the review's page.
+pub async fn create_review(
+    repo: &str,
+    number: u64,
+    review: &crate::pr_review::PlannedReview,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<String, String> {
+    if review.replies.is_empty() {
+        return Ok(post_review(repo, number, review, true, settings, client).await?.url);
+    }
+    let pending = post_review(repo, number, review, false, settings, client).await?;
+    let finished = async {
+        for reply in &review.replies {
+            add_thread_reply(&reply.thread_id, &reply.body, Some(&pending.node_id), settings, client).await?;
+        }
+        submit_review(repo, number, pending.id, review, settings, client).await
+    }
+    .await;
+    if let Err(error) = &finished {
+        if let Err(cleanup) = delete_pending_review(repo, number, pending.id, settings, client).await {
+            // Left behind, it would make the next publish fail with no reason anyone could see.
+            // Discarded, not submitted: ZuGit still has every comment, and would send them twice.
+            return Err(format!(
+                "{error} — and the review begun for it could not be removed ({cleanup}). It waits on GitHub as your pending review, visible only to you, with a copy of these comments: discard it there, then publish again from here, where they all still are."
+            ));
+        }
+    }
+    finished
+}
+
+struct CreatedReview {
+    id: u64,
+    node_id: String,
+    url: String,
+}
+
+/// POSTs the review with its comments: submitted with its verdict, or pending.
+async fn post_review(
+    repo: &str,
+    number: u64,
+    review: &crate::pr_review::PlannedReview,
+    submit: bool,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<CreatedReview, String> {
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+    let mut payload = serde_json::json!({ "commit_id": review.commit, "comments": review.comments });
+    if submit {
+        payload["event"] = review.event.as_str().into();
+        if !review.body.is_empty() {
+            payload["body"] = review.body.clone().into();
+        }
+    }
+    let response = client
+        .post(format!("{api_base}/repos/{repo}/pulls/{number}/reviews"))
+        .headers(github_headers(settings))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let created = github_reply(response).await?;
+    Ok(CreatedReview {
+        id: created["id"].as_u64().ok_or("GitHub did not say which review it created.")?,
+        node_id: created["node_id"].as_str().unwrap_or_default().to_string(),
+        url: created["html_url"].as_str().unwrap_or_default().to_string(),
+    })
+}
+
+/// Submits a pending review with its verdict and text.
+async fn submit_review(
+    repo: &str,
+    number: u64,
+    review_id: u64,
+    review: &crate::pr_review::PlannedReview,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<String, String> {
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+    let mut payload = serde_json::json!({ "event": review.event.as_str() });
+    if !review.body.is_empty() {
+        payload["body"] = review.body.clone().into();
+    }
+    let response = client
+        .post(format!("{api_base}/repos/{repo}/pulls/{number}/reviews/{review_id}/events"))
+        .headers(github_headers(settings))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(github_reply(response).await?["html_url"].as_str().unwrap_or_default().to_string())
+}
+
+async fn delete_pending_review(
+    repo: &str,
+    number: u64,
+    review_id: u64,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<(), String> {
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+    let response = client
+        .delete(format!("{api_base}/repos/{repo}/pulls/{number}/reviews/{review_id}"))
+        .headers(github_headers(settings))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    github_reply(response).await.map(|_| ())
+}
+
+/// Replies to one of the PR's conversations: inside a pending review when
+/// `review` names one, or at once, as GitHub's "Add single comment" does.
+pub async fn add_thread_reply(
+    thread_id: &str,
+    body: &str,
+    review: Option<&str>,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<(), String> {
+    const MUTATION: &str = r#"
+mutation($thread: ID!, $body: String!, $review: ID) {
+  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body, pullRequestReviewId: $review }) {
+    comment { id }
+  }
+}
+"#;
+    graphql_data(MUTATION, serde_json::json!({ "thread": thread_id, "body": body, "review": review }), settings, client)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("GitHub refused the reply: {e}"))
+}
+
+/// Resolves a conversation, or opens it again — at once, as on GitHub: it is
+/// not part of a review. GitHub lets the PR's author and those with write
+/// access do it, and says so to anyone else. Returns whether it is resolved now.
+pub async fn set_thread_resolved(
+    thread_id: &str,
+    resolved: bool,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<bool, String> {
+    const RESOLVE: &str = "mutation($thread: ID!) { resolveReviewThread(input: { threadId: $thread }) { thread { isResolved } } }";
+    const UNRESOLVE: &str = "mutation($thread: ID!) { unresolveReviewThread(input: { threadId: $thread }) { thread { isResolved } } }";
+    let (mutation, field) = if resolved { (RESOLVE, "resolveReviewThread") } else { (UNRESOLVE, "unresolveReviewThread") };
+    let data = graphql_data(mutation, serde_json::json!({ "thread": thread_id }), settings, client)
+        .await
+        .map_err(|e| format!("GitHub refused: {e}"))?;
+    Ok(data[field]["thread"]["isResolved"].as_bool().unwrap_or(resolved))
+}
+
+/// The JSON of a successful response, or why GitHub refused.
+async fn github_reply(response: reqwest::Response) -> Result<serde_json::Value, String> {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("GitHub refused the review ({status}): {}", github_error(&body)));
+    }
+    Ok(serde_json::from_str(&body).unwrap_or_default())
+}
+
+/// Why GitHub refused a request: the `errors` it lists, or its message.
+fn github_error(body: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return body.chars().take(300).collect();
+    };
+    let errors: Vec<String> = value["errors"]
+        .as_array()
+        .map(|errors| {
+            errors
+                .iter()
+                .filter_map(|e| e.as_str().or_else(|| e["message"].as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if errors.is_empty() {
+        value["message"].as_str().unwrap_or("no reason given").to_string()
+    } else {
+        errors.join("; ")
+    }
+}
+
+fn parse_pr_file(f: &serde_json::Value) -> crate::models::PrFileDiff {
+    let text = |key: &str| f[key].as_str().map(str::to_string);
+    crate::models::PrFileDiff {
+        filename: text("filename").unwrap_or_default(),
+        previous_filename: text("previous_filename"),
+        status: text("status").unwrap_or_default(),
+        additions: f["additions"].as_u64().unwrap_or(0) as u32,
+        deletions: f["deletions"].as_u64().unwrap_or(0) as u32,
+        patch: text("patch"),
+        blob_url: text("blob_url").unwrap_or_default(),
+    }
+}
 
 /// Creates a pull request via the GitHub REST API and optionally assigns reviewers.
 /// Returns the URL of the newly created PR.
@@ -2187,5 +2621,54 @@ mod tests {
     #[test]
     fn graphql_string_escapes_quotes_and_backslashes() {
         assert_eq!(graphql_string(r#"release/"x"\y"#), r#""release/\"x\"\\y""#);
+    }
+
+    #[test]
+    fn github_says_why_it_refused() {
+        assert_eq!(
+            github_error(r#"{"message":"Unprocessable Entity","errors":["Review Can not request changes on your own pull request"]}"#),
+            "Review Can not request changes on your own pull request"
+        );
+        assert_eq!(
+            github_error(r#"{"message":"Validation Failed","errors":[{"message":"line must be part of the diff"}]}"#),
+            "line must be part of the diff"
+        );
+        assert_eq!(github_error(r#"{"message":"Not Found"}"#), "Not Found");
+        assert_eq!(github_error("Bad gateway"), "Bad gateway");
+    }
+
+    #[test]
+    fn review_threads_keep_where_github_placed_them() {
+        let thread = parse_review_thread(&serde_json::json!({
+            "id": "PRRT_1", "path": "src/a.ts",
+            "line": null, "startLine": null, "originalLine": 14, "originalStartLine": 12,
+            "diffSide": "LEFT", "isResolved": true, "isOutdated": true,
+            "resolvedBy": { "login": "anna" },
+            "comments": {
+                "totalCount": 3,
+                "nodes": [
+                    {
+                        "author": { "login": "anna", "avatarUrl": "https://avatars.githubusercontent.com/u/1" },
+                        "body": "Why?", "createdAt": "2026-10-01T10:00:00Z", "url": "https://github.com/o/r/pull/1#discussion_r1",
+                        "diffHunk": "@@ -10,5 +10,5 @@\n a\n-b", "state": "SUBMITTED",
+                        "isMinimized": false, "minimizedReason": null, "originalCommit": { "oid": "abc123" }
+                    },
+                    {
+                        "author": null, "body": "Spam", "createdAt": "2026-10-02T10:00:00Z", "url": "u2",
+                        "diffHunk": "", "state": "PENDING", "isMinimized": true, "minimizedReason": "SPAM",
+                        "originalCommit": { "oid": "abc123" }
+                    }
+                ]
+            }
+        }));
+        assert_eq!((thread.line, thread.original_line, thread.original_start_line), (None, Some(14), Some(12)));
+        assert_eq!((thread.side.as_str(), thread.outdated, thread.resolved), ("old", true, true));
+        assert_eq!(thread.resolved_by.as_deref(), Some("anna"));
+        assert_eq!((thread.original_commit.as_str(), thread.diff_hunk.as_str()), ("abc123", "@@ -10,5 +10,5 @@\n a\n-b"));
+        assert_eq!(thread.more_comments, 1);
+        assert_eq!(thread.comments[1].author, "ghost");
+        assert!(thread.comments[1].pending);
+        assert_eq!(thread.comments[1].minimized.as_deref(), Some("spam"));
+        assert_eq!(thread.comments[0].minimized, None);
     }
 }

@@ -13,6 +13,8 @@ import {
 } from "./api";
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
+import { openPrDiff } from "./pr-diff";
+import { startAiReviewPolling } from "./ai-review";
 import {
   loadStaleBranches, restoreStaleFilters,
   setStaleAuthorType, setStaleGroupByAuthor, setStaleOnlyMine,
@@ -273,6 +275,13 @@ window.addEventListener("DOMContentLoaded", () => {
     const staleUrl = staleRow?.dataset.staleOpen;
     if (staleUrl) { void openExternal(staleUrl); return; }
 
+    const diffButton = target.closest<HTMLElement>("[data-pr-diff]");
+    if (diffButton) {
+      const pr = state.currentDashboard?.prs.find(p => `${p.repo}/${p.id}` === diffButton.dataset.prDiff);
+      if (pr) void openPrDiff(pr);
+      return;
+    }
+
     const prButton = target.closest<HTMLElement>("[data-pr-link]");
     const prUrl = prButton?.dataset.prLink;
     if (prUrl) { void openExternal(prUrl); return; }
@@ -427,6 +436,7 @@ window.addEventListener("DOMContentLoaded", () => {
   syncSettingsSaveButton();
   setView(state.currentView);
   void bootstrap();
+  startAiReviewPolling();
 
   void getVersion().then((v) => {
     const el = document.querySelector("[data-app-version]");

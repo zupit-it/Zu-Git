@@ -74,7 +74,7 @@ Title normalisation is Unicode-aware on both sides (`normalize_description` in R
 | `toggl_propose_day` | validates and saves a plan to `toggl-proposals/<date>.json`; nothing is written to Toggl |
 | `toggl_get_entries` | entries booked over up to 31 days, with totals per task |
 
-Prompt: `fill_toggl_day`.
+Prompt: `fill_toggl_day`. The same server serves the review tools (`get_pr_review_context`, `propose_review`, prompt `review_pr`) — see [pr-review.md](pr-review.md).
 
 ZuGit polls for proposals every 15 seconds and notifies. An AI plan always comes first: with the planner closed it opens on that date showing the proposal; with the planner open on that date the proposal replaces the automatic plan at once, unless rows were edited (then a "Mostra la proposta" banner waits). Unconfirmed proposals for other days are listed in a banner; proposals older than 7 days are deleted. Proposal rows replace the automatic story rows; meetings the proposal does not cover are kept. *Use the automatic plan* deletes the proposal; a successful submit deletes it too.
 

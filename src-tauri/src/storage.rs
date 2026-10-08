@@ -653,6 +653,133 @@ pub fn list_toggl_proposals(dir: &Path) -> Vec<(String, String)> {
     found
 }
 
+// ── AI review proposals (written by `zugit --mcp`) ───────────────────────────
+
+fn ai_reviews_dir(dir: &Path) -> PathBuf {
+    dir.join("ai-reviews")
+}
+
+/// One file per PR and agent: proposing again replaces that agent's review.
+/// The name is built from checked parts only, so nothing a client sends can
+/// climb out of the folder; the file's content says which PR it is about.
+fn ai_review_path(dir: &Path, repo: &str, number: u64, source: &str) -> Result<PathBuf, String> {
+    if !crate::pr_review::valid_repo(repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let safe = |s: &str| -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '.') { c } else { '_' })
+            .collect()
+    };
+    let source = safe(source);
+    let source = if source.is_empty() { "agent".to_string() } else { source };
+    Ok(ai_reviews_dir(dir).join(format!("{}~{}~{}.json", safe(&repo.replace('/', "~")), number, source)))
+}
+
+pub fn save_ai_review(dir: &Path, review: &crate::pr_review::AiReview) -> Result<(), String> {
+    write_json(ai_review_path(dir, &review.repo, review.number, &review.source)?, review)
+}
+
+pub fn delete_ai_review(dir: &Path, repo: &str, number: u64, source: &str) -> Result<(), String> {
+    match std::fs::remove_file(ai_review_path(dir, repo, number, source)?) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Every stored proposal, newest first.
+pub fn load_ai_reviews(dir: &Path) -> Vec<crate::pr_review::AiReview> {
+    let Ok(entries) = std::fs::read_dir(ai_reviews_dir(dir)) else {
+        return vec![];
+    };
+    let mut reviews: Vec<crate::pr_review::AiReview> = entries
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .filter_map(|entry| serde_json::from_str(&std::fs::read_to_string(entry.path()).ok()?).ok())
+        .collect();
+    reviews.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    reviews
+}
+
+pub fn load_ai_reviews_for(dir: &Path, repo: &str, number: u64) -> Vec<crate::pr_review::AiReview> {
+    load_ai_reviews(dir)
+        .into_iter()
+        .filter(|review| review.repo == repo && review.number == number)
+        .collect()
+}
+
+/// Drops proposals older than `keep_days`: by then the PR has moved on.
+pub fn prune_ai_reviews(dir: &Path, now: chrono::DateTime<chrono::Utc>, keep_days: i64) {
+    for review in load_ai_reviews(dir) {
+        let Ok(created) = chrono::DateTime::parse_from_rfc3339(&review.created_at) else { continue };
+        if (now - created.with_timezone(&chrono::Utc)).num_days() > keep_days {
+            let _ = delete_ai_review(dir, &review.repo, review.number, &review.source);
+        }
+    }
+}
+
+// ── The user's own PR comments ───────────────────────────────────────────────
+
+/// One file per PR. `valid_repo` lets through letters, digits, '-', '_' and '.'
+/// only, so the name cannot leave the folder.
+fn user_review_path(dir: &Path, repo: &str, number: u64) -> Result<PathBuf, String> {
+    if !crate::pr_review::valid_repo(repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    Ok(dir.join("pr-comments").join(format!("{}~{}.json", repo.replace('/', "~"), number)))
+}
+
+/// The user's comments on a PR; none yet when there is no file. A file that
+/// does not parse is an error, not an empty list: saving must never write over
+/// comments it could not read.
+pub fn load_user_review(dir: &Path, repo: &str, number: u64) -> Result<crate::pr_review::UserReview, String> {
+    let path = user_review_path(dir, repo, number)?;
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content)
+            .map_err(|e| format!("Your comments on {repo}#{number} could not be read ({e}): {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(crate::pr_review::UserReview::new(repo, number))
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// One change to a user's comments at a time, across PRs: each reads the file,
+/// changes it and writes it back, so two at once would lose one of them.
+static USER_REVIEWS: parking_lot::Mutex<()> = parking_lot::const_mutex(());
+
+/// Reads the user's comments, changes them and writes them back with no other
+/// change in between: a comment kept while a publish is out is not written over.
+pub fn update_user_review(
+    dir: &Path,
+    repo: &str,
+    number: u64,
+    change: impl FnOnce(&mut crate::pr_review::UserReview) -> Result<(), String>,
+) -> Result<crate::pr_review::UserReview, String> {
+    let _one_at_a_time = USER_REVIEWS.lock();
+    let mut mine = load_user_review(dir, repo, number)?;
+    change(&mut mine)?;
+    save_user_review(dir, &mine)?;
+    Ok(mine)
+}
+
+/// Written beside the old file and renamed over it, so a crash mid-write
+/// leaves the previous comments rather than half a file. Nothing written, no file.
+fn save_user_review(dir: &Path, review: &crate::pr_review::UserReview) -> Result<(), String> {
+    let path = user_review_path(dir, &review.repo, review.number)?;
+    if review.is_empty() {
+        return match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        };
+    }
+    let draft = path.with_extension("json.tmp");
+    write_json(draft.clone(), review)?;
+    std::fs::rename(&draft, &path).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -684,5 +811,96 @@ mod tests {
     #[test]
     fn proposal_dates_cannot_escape_the_folder() {
         assert!(proposal_path(Path::new("/tmp"), "../settings").is_err());
+    }
+
+    fn ai_review(repo: &str, number: u64, source: &str) -> crate::pr_review::AiReview {
+        crate::pr_review::AiReview {
+            repo: repo.into(),
+            number,
+            head_sha: "abc".into(),
+            source: source.into(),
+            created_at: "2026-10-01T10:00:00Z".into(),
+            summary: None,
+            order: vec![],
+            comments: vec![],
+        }
+    }
+
+    #[test]
+    fn ai_reviews_are_one_per_pr_and_agent() {
+        let dir = std::env::temp_dir().join(format!("zugit-ai-reviews-{}", std::process::id()));
+        save_ai_review(&dir, &ai_review("org/app", 7, "claude-code")).unwrap();
+        save_ai_review(&dir, &ai_review("org/app", 7, "claude-code")).unwrap();
+        save_ai_review(&dir, &ai_review("org/app", 7, "codex/mcp client")).unwrap();
+        save_ai_review(&dir, &ai_review("org/app", 8, "claude-code")).unwrap();
+        assert_eq!(load_ai_reviews_for(&dir, "org/app", 7).len(), 2);
+        delete_ai_review(&dir, "org/app", 7, "codex/mcp client").unwrap();
+        assert_eq!(load_ai_reviews_for(&dir, "org/app", 7).len(), 1);
+        assert!(ai_review_path(&dir, "../x", 1, "a").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn user_comments_round_trip_and_a_corrupt_file_is_never_overwritten() {
+        let dir = std::env::temp_dir().join(format!("zugit-user-reviews-{}", std::process::id()));
+        let mut mine = load_user_review(&dir, "org/app", 7).unwrap();
+        assert!(mine.comments.is_empty());
+        let comment = crate::pr_review::NewComment {
+            path: "a.ts".into(),
+            line: 3,
+            end_line: None,
+            side: crate::pr_review::Side::New,
+            head_sha: "abc1234".into(),
+            diff_hunk: None,
+            body: "check this".into(),
+        };
+        mine.add(comment, "2026-10-08T10:00:00Z").unwrap();
+        save_user_review(&dir, &mine).unwrap();
+        assert_eq!(load_user_review(&dir, "org/app", 7).unwrap().comments[0].body, "check this");
+
+        let path = user_review_path(&dir, "org/app", 7).unwrap();
+        std::fs::write(&path, "{ half a fi").unwrap();
+        assert!(load_user_review(&dir, "org/app", 7).is_err());
+
+        save_user_review(&dir, &crate::pr_review::UserReview::new("org/app", 7)).unwrap();
+        assert!(!path.exists());
+        assert!(load_user_review(&dir, "../x", 1).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_comment_added_while_a_review_goes_out_stays() {
+        let dir = std::env::temp_dir().join(format!("zugit-user-reviews-publish-{}", std::process::id()));
+        let comment = |line: u32, body: &str| crate::pr_review::NewComment {
+            path: "a.ts".into(),
+            line,
+            end_line: None,
+            side: crate::pr_review::Side::New,
+            head_sha: "abc1234".into(),
+            diff_hunk: None,
+            body: body.into(),
+        };
+        update_user_review(&dir, "org/app", 7, |m| m.add(comment(3, "sent"), "t1")).unwrap();
+        // The publish reads the comments, then talks to GitHub for a while…
+        let sent = load_user_review(&dir, "org/app", 7).unwrap();
+        // …during which one more is written.
+        update_user_review(&dir, "org/app", 7, |m| m.add(comment(9, "written meanwhile"), "t2")).unwrap();
+        let ids: Vec<String> = sent.comments.iter().map(|c| c.id.clone()).collect();
+        let now = update_user_review(&dir, "org/app", 7, |m| {
+            m.published(&ids, &sent, true);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(now.comments.iter().map(|c| c.body.as_str()).collect::<Vec<_>>(), vec!["written meanwhile"]);
+        assert_eq!(load_user_review(&dir, "org/app", 7).unwrap().comments.len(), 1);
+
+        // A change that fails writes nothing, and a file that does not parse is left alone.
+        assert!(update_user_review(&dir, "org/app", 7, |m| m.edit("u9", "x")).is_err());
+        assert_eq!(load_user_review(&dir, "org/app", 7).unwrap().comments.len(), 1);
+        let path = user_review_path(&dir, "org/app", 7).unwrap();
+        std::fs::write(&path, "{ half a fi").unwrap();
+        assert!(update_user_review(&dir, "org/app", 7, |m| m.add(comment(1, "y"), "t3")).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ half a fi");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

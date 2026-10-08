@@ -518,7 +518,15 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
         ? chip(isDraft ? "mute" : "fail", "Conflicts", SVG.conflict)
         : "";
 
-  const diffChip = renderDiffStat(pr.additions, pr.deletions, isDraft);
+  const prKey = `${escHtml(pr.repo)}/${pr.id}`;
+  const diffStat = renderDiffStat(pr.additions, pr.deletions, isDraft);
+  const diffChip = diffStat
+    ? `<button class="diffstat-btn" data-pr-diff="${prKey}" type="button" title="View diff">${diffStat}<span class="diffstat-btn__icon" aria-hidden="true">${SVG.diff}</span></button>`
+    : "";
+  const aiPending = state.aiPending.get(`${pr.repo}/${pr.id}`) ?? 0;
+  const aiChip = aiPending > 0
+    ? `<button class="ai-review-chip" data-pr-diff="${prKey}" type="button" title="${aiPending} AI review comment${aiPending === 1 ? "" : "s"} to triage">${SVG.sparkle}<span>${aiPending}</span></button>`
+    : "";
 
   const queueBlocked = state.mergeQueueEnabled && state.queueBlockedPrKeys.has(`${pr.repo}/${pr.id}`);
   const queueBlockedChip = queueBlocked
@@ -549,7 +557,7 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
           <span style="font-size:12px;color:${authorColor};font-weight:500;font-family:var(--font-mono)">${escHtml(pr.author)}</span>
           <span style="font-size:11px;color:${metaColor};font-weight:400">·</span>
           <span style="font-size:11px;color:${metaColor};font-weight:400">${escHtml(pr.updatedAt)}</span>
-          ${diffChip}
+          ${diffChip}${aiChip}
           ${authorChip}${agingChip}
         </div>
         ${pr.jiraSummary ? `<div style="font-size:12.5px;color:${descColor};line-height:1.45;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${pr.jiraSummary}</div>` : ""}

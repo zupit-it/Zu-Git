@@ -21,6 +21,20 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "PR diff — review a pull request without leaving ZuGit",
+        body: "Click the <strong>+N −N</strong> chip on a PR row to open its changed files right in ZuGit: files listed foundations first, <strong>Unified</strong> or <strong>Split</strong> view, syntax colours. Click a line number — or press and drag over several — to <strong>comment</strong>. GitHub's conversations show under their lines as they do there, outdated ones above the files with the code they were written on, and you can <strong>reply</strong> to them or <strong>resolve</strong> them. Your comments stay in ZuGit until you press <strong>Publish review</strong> in the top bar: add a summary and choose <strong>Comment</strong>, <strong>Request changes</strong> or <strong>Approve</strong> — one GitHub review. If someone pushes while you read, ZuGit offers <strong>Reload</strong> and never publishes on code you have not seen; your comments follow their code, as on GitHub.",
+        imgs: ["/assets/changelog/pr-review.png"],
+      },
+      {
+        title: "AI review — Claude or Codex reads the PR first",
+        body: "Press <strong>Copy review prompt</strong> in the diff and paste it into Claude Code, Codex or Claude Desktop — or run <code>/mcp__zugit__review_pr</code> in Claude Code. Through the ZuGit connector your agent reads the PR, its Jira story and checklist and the open conversations, reads the code with <strong>read-only git</strong> — your working tree is never touched — and hands back a summary, a reading order and line comments. They appear in the diff under their lines, with a chip on the PR row: <strong>Keep</strong>, <strong>Edit</strong> or <strong>Discard</strong> each one. Kept ones become your comments; <strong>nothing reaches GitHub</strong> until you publish your review.",
+      },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
+      {
         title: "Release status — see the release as a map",
         body: "The release diff now opens with a <strong>metro map</strong> of the release above the list. On <strong>main</strong> it is one line from the last tag to HEAD, a stop per story merged since, then a dotted stretch to the <strong>next tag</strong> through a dashed ghost for every planned story not merged yet — with its open PR when there is one. On a <strong>release branch</strong> main runs on top and the branch below: every <strong>cherry-pick</strong> drops from its stop on main, and a story <em>Verified</em> on main but missing from the branch drops to a <strong>ghost</strong> — the pick still to do, at a glance. A PR with several stories (<code>feat(PENT-1,PENT-2): …</code>) is one stop, and since it is picked whole, a verified story sharing it with one still in testing shows as <strong>held back</strong>, not as ready. Unplanned stories are diamonds, other PRs on main fold into <code>+N</code> stops, beta tags flag main. Hover a stop for its stories, click it to jump to their rows; the map follows the tab you are on, zooms with <strong>− / + / fit</strong> or a pinch, and <strong>Hide map</strong> folds it down to its legend. The window is bigger too, growing with your screen.",
         imgs: ["/assets/changelog/release-map.png"],
@@ -29,11 +43,6 @@ const VERSIONS: VersionBlock[] = [
         title: "Jira — API tokens with scopes work too",
         body: "A Jira token created <strong>with scopes</strong> used to fail with an authentication error: Atlassian only accepts it through its own gateway, not on your site's address. ZuGit now recognises the token type on the first call and uses the right address on its own — <strong>nothing to change in Settings</strong>, the Jira URL stays your site and links still open there. Scoped tokens are now the <strong>recommended choice</strong>: they give ZuGit only what it uses, and Atlassian is phasing out the classic ones. Create one from <strong>Create token</strong> in <strong>Settings → Jira</strong> with <em>Create API token with scopes</em>, app Jira, and the scopes <code>read:jira-work</code>, <code>write:jira-work</code> and <code>read:jira-user</code>. Classic tokens keep working.",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "Toggl — the bot's checks, before you submit",
         body: "No more surprises on Slack the next morning: every row of the planner is checked against the rules of the <strong>Zupit Toggl bot</strong> and shows, with the same emoji, what it would flag — a tag next to a story id 🚫, the wrong billable flag 💰, a tag on a Zupit entry 🟦, no story and no tag 🏷️, and the rest. Each line has its fix one click away, and <strong>Applica suggerimenti</strong> in the footer applies every fix that is certain, on all rows at once. ZuGit also spots what the bot lets through but gets wrong: a story booked on an unusual project 🔀, and <strong>several stories in one entry</strong> 🧩 — the bot only reads the first key — which you can <strong>split</strong> into one row per story, or turn into sprint work with no keys and a tag. Your AI assistant is now told the same rules, so its plans start clean. The story bar above the plan is gone too: <strong>+ Row</strong> or a click on free time already lists every active story first.",

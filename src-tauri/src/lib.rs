@@ -7,6 +7,7 @@ mod jira;
 mod mcp;
 mod mcp_setup;
 mod models;
+mod pr_review;
 mod secret_store;
 mod storage;
 mod toggl;
@@ -30,6 +31,12 @@ pub struct AppState {
     pub toggl_account: Mutex<Option<(String, toggl::TogglAccount)>>,
     /// Google access token with its expiry — refreshed from the stored refresh token.
     pub google_access: Mutex<Option<(String, std::time::Instant)>>,
+    /// PR diffs keyed by `repo#number@headSha`.
+    pub pr_diff_cache: Mutex<HashMap<String, models::PrDiff>>,
+    /// Changes between two commits of a PR, keyed by `repo@from...to`: commits never change.
+    pub pr_compare_cache: Mutex<HashMap<String, pr_review::CommitCompare>>,
+    /// PRs whose review is being published (`repo#number`): one publish at a time.
+    pub publishing: Mutex<std::collections::HashSet<String>>,
 }
 
 /// `zugit --mcp`: serve the Model Context Protocol on stdio instead of opening
@@ -89,6 +96,9 @@ pub fn run() {
             last_save_used_vault: Mutex::new(None),
             toggl_account: Mutex::new(None),
             google_access: Mutex::new(None),
+            pr_diff_cache: Mutex::new(HashMap::new()),
+            pr_compare_cache: Mutex::new(HashMap::new()),
+            publishing: Mutex::new(std::collections::HashSet::new()),
         })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
@@ -103,6 +113,25 @@ pub fn run() {
             commands::install_update,
             commands::get_draft_pr_info,
             commands::fetch_branch_stats,
+            commands::fetch_pr_diff,
+            commands::fetch_pr_head,
+            commands::fetch_pr_threads,
+            commands::ai_review_list,
+            commands::ai_review_get,
+            commands::ai_review_set_status,
+            commands::ai_review_keep_comment,
+            commands::ai_review_discard,
+            commands::pr_comments_get,
+            commands::pr_comment_positions,
+            commands::pr_review_set_summary,
+            commands::pr_review_publish,
+            commands::pr_reply_save,
+            commands::pr_reply_delete,
+            commands::pr_thread_reply_now,
+            commands::pr_thread_resolve,
+            commands::pr_comment_add,
+            commands::pr_comment_update,
+            commands::pr_comment_delete,
             commands::fetch_stale_branches,
             commands::fetch_release_diff,
             commands::fetch_release_branches,

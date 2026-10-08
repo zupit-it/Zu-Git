@@ -755,6 +755,112 @@ fn adf_inline_text(content: &serde_json::Value) -> String {
         .join("")
 }
 
+/// An ADF document as readable plain text: blocks on their own lines, list
+/// items prefixed with "- ", code blocks fenced. Marks (bold, links…) are dropped.
+pub fn adf_to_text(node: &serde_json::Value) -> String {
+    fn walk(node: &serde_json::Value, out: &mut String, list_depth: usize) {
+        let children = node["content"].as_array().map(|v| v.as_slice()).unwrap_or(&[]);
+        match node["type"].as_str() {
+            Some("text") => out.push_str(node["text"].as_str().unwrap_or("")),
+            Some("hardBreak") => out.push('\n'),
+            Some("mention") | Some("emoji") => {
+                out.push_str(node["attrs"]["text"].as_str().unwrap_or(""));
+            }
+            Some("inlineCard") => out.push_str(node["attrs"]["url"].as_str().unwrap_or("")),
+            Some("bulletList") | Some("orderedList") => {
+                for item in children {
+                    walk(item, out, list_depth + 1);
+                }
+            }
+            Some("listItem") => {
+                out.push_str(&"  ".repeat(list_depth.saturating_sub(1)));
+                out.push_str("- ");
+                let start = out.len();
+                for child in children {
+                    walk(child, out, list_depth);
+                }
+                // A nested paragraph ends with a newline already.
+                if out.len() == start || !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+            Some("codeBlock") => {
+                out.push_str("```\n");
+                for child in children {
+                    walk(child, out, list_depth);
+                }
+                out.push_str("\n```\n");
+            }
+            Some("paragraph") | Some("heading") | Some("blockquote") => {
+                for child in children {
+                    walk(child, out, list_depth);
+                }
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+            _ => {
+                for child in children {
+                    walk(child, out, list_depth);
+                }
+            }
+        }
+    }
+    if let Some(text) = node.as_str() {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    walk(node, &mut out, 0);
+    out.trim().to_string()
+}
+
+/// What a reviewer needs from the story behind a PR.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryContext {
+    pub key: String,
+    pub url: String,
+    pub summary: String,
+    pub issue_type: String,
+    pub status: String,
+    pub description: String,
+    /// Acceptance checklist, when the site has a checklist field.
+    pub checklist: Vec<crate::models::ChecklistItem>,
+}
+
+pub async fn fetch_story_context(
+    key: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<StoryContext, ApiError> {
+    let url = format!(
+        "{}/rest/api/3/issue/{}?fields=summary,status,issuetype,description",
+        api_base(settings, client).await,
+        key
+    );
+    let response = client
+        .get(&url)
+        .basic_auth(&settings.jira_email, Some(&settings.jira_token))
+        .send()
+        .await
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ApiError::from_status(status.as_u16(), format!("Jira returned {status} for {key}")));
+    }
+    let issue: serde_json::Value = response.json().await.map_err(|e| ApiError::Other(e.to_string()))?;
+    let fields = &issue["fields"];
+    Ok(StoryContext {
+        key: key.to_string(),
+        url: format!("{}/browse/{}", settings.jira_base_url.trim_end_matches('/'), key),
+        summary: fields["summary"].as_str().unwrap_or("").to_string(),
+        issue_type: fields["issuetype"]["name"].as_str().unwrap_or("").to_string(),
+        status: fields["status"]["name"].as_str().unwrap_or("").to_string(),
+        description: adf_to_text(&fields["description"]),
+        checklist: fetch_checklist(key, settings, client).await,
+    })
+}
+
 /// Wraps a plain-text checklist string in an ADF paragraph document.
 fn checklist_text_to_adf(text: &str) -> serde_json::Value {
     serde_json::json!({
@@ -1838,5 +1944,42 @@ pub async fn drop_fix_version(
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         Err(format!("Failed to drop fix version for {key} ({status}): {text}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adf_reads_as_plain_text() {
+        let doc = serde_json::json!({
+            "type": "doc",
+            "content": [
+                { "type": "heading", "content": [{ "type": "text", "text": "Goal" }] },
+                { "type": "paragraph", "content": [
+                    { "type": "text", "text": "Users see " },
+                    { "type": "text", "text": "signals", "marks": [{ "type": "strong" }] },
+                    { "type": "hardBreak" },
+                    { "type": "text", "text": "second line" }
+                ] },
+                { "type": "bulletList", "content": [
+                    { "type": "listItem", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "AC one" }] }] },
+                    { "type": "listItem", "content": [
+                        { "type": "paragraph", "content": [{ "type": "text", "text": "AC two" }] },
+                        { "type": "bulletList", "content": [
+                            { "type": "listItem", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "nested" }] }] }
+                        ] }
+                    ] }
+                ] },
+                { "type": "codeBlock", "content": [{ "type": "text", "text": "x = 1" }] }
+            ]
+        });
+        assert_eq!(
+            adf_to_text(&doc),
+            "Goal\nUsers see signals\nsecond line\n- AC one\n- AC two\n  - nested\n```\nx = 1\n```"
+        );
+        assert_eq!(adf_to_text(&serde_json::Value::Null), "");
+        assert_eq!(adf_to_text(&serde_json::json!("plain")), "plain");
     }
 }
