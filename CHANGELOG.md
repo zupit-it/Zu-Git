@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2.0.3] - 2026-10-08
+
 ### Added
 - **Toggl planner: tasks** — projects split into Toggl tasks ("Incontri" → "Feedback 1v1") list them
   in the project picker, indented under the project: unfolded for the projects you use often and
