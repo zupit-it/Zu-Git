@@ -34,6 +34,15 @@ agent's order when its review gives one — files it left out follow under *Othe
 otherwise ZuGit's layer order: models & contracts → data access → logic → API → UI (a component's
 `.ts`, `.html`, `.scss` together) → tests → config → generated.
 
+By path can be a folder tree (the folder button beside it; `pathTree`), as GitHub's file tree:
+folders before files, each by name, and a folder holding only one folder shown on one row
+(`src/app`). Folders fold with a click; the filter shows matches inside folded ones. The diff
+follows the tree (`treeOrder`), so the list and the files read in the same order.
+
+The list's right edge drags to widen it (double-click: back to 280px; ←/→ when focused), between
+200px and what leaves the diff 360px. Order, tree, width and Unified / Split are remembered on this
+machine (`localStorage`, `zugit.prDiff.*`).
+
 ## AI Review
 
 ZuGit does not run agents and does not fetch code for them: the reviewer asks their own agent
@@ -104,7 +113,8 @@ The review comments already on the PR show as GitHub shows them:
 - Outdated ones — written on code that changed since — have no line on the latest diff: they are
   listed above the files, folded, with the file and line they were written on, that commit, and the
   end of their `diffHunk` — the code they were written on. So are conversations on a line or file
-  this diff does not show.
+  this diff does not show. Above the files, comments — these, and the reviewer's own outdated ones —
+  take the whole width, so that code reads whole; under a line they stop at 820px.
 - Under a line, GitHub's conversations come first, then the agent's comments, then the reviewer's.
 - *Reply…* under a conversation opens an editor. **Add to review** keeps the reply in ZuGit, shown
   inside the conversation as *Pending*, until the review is published — as a reply added to a

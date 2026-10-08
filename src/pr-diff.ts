@@ -12,8 +12,8 @@ import type { PullRequestSummary } from "./shared/pr-model";
 import { openExternal } from "./api";
 import { SVG, errorMessage, escHtml, formatDiffNum } from "./utils";
 import {
-  alignSides, hunkFor, hunkSides, isGeneratedFile, languageFor, layerOrder, parsePatch, sameCode, splitRows,
-  withAgentOrder, type DiffHunk, type DiffLang, type DiffLine, type FileGroup,
+  alignSides, hunkFor, hunkSides, isGeneratedFile, languageFor, layerOrder, parsePatch, pathTree, sameCode, splitRows,
+  treeOrder, withAgentOrder, type DiffHunk, type DiffLang, type DiffLine, type FileGroup, type PathTree,
 } from "./pr-diff-parse";
 import type { Token } from "./pr-diff-highlight";
 import {
@@ -80,6 +80,11 @@ const THREADS_REFRESH_MS = 60_000;
 const HEAD_POLL_MS = 120_000;
 const ORDER_KEY = "zugit.prDiff.order";
 const VIEW_KEY = "zugit.prDiff.view";
+const TREE_KEY = "zugit.prDiff.tree";
+const SIDE_KEY = "zugit.prDiff.sideWidth";
+/** The file list's width (280px by default, in the CSS): dragged down to SIDE_MIN_PX, the diff keeping DIFF_MIN_PX. */
+const SIDE_MIN_PX = 200;
+const DIFF_MIN_PX = 360;
 const UNSAVED = "Not saved yet — save it, or Cancel to drop it.";
 
 const STATUS: Record<string, { letter: string; label: string; kind: string }> = {
@@ -125,6 +130,28 @@ function saveViewMode(mode: ViewMode) {
   try { localStorage.setItem(VIEW_KEY, mode); } catch { /* a preference, not data */ }
 }
 
+/** By path, as a folder tree rather than a flat list. */
+function readTreeMode(): boolean {
+  try { return localStorage.getItem(TREE_KEY) === "1"; } catch { return false; }
+}
+
+function saveTreeMode(on: boolean) {
+  try { localStorage.setItem(TREE_KEY, on ? "1" : "0"); } catch { /* a preference, not data */ }
+}
+
+function readSideWidth(): number | null {
+  try {
+    const px = Number(localStorage.getItem(SIDE_KEY));
+    return px >= SIDE_MIN_PX ? px : null;
+  } catch { return null; }
+}
+
+function saveSideWidth(px: number | null) {
+  try {
+    if (px === null) localStorage.removeItem(SIDE_KEY); else localStorage.setItem(SIDE_KEY, String(Math.round(px)));
+  } catch { /* a preference, not data */ }
+}
+
 // ── Markup ────────────────────────────────────────────────────────────────────
 
 function splitPath(path: string): { dir: string; base: string } {
@@ -143,7 +170,8 @@ function renderStatus(status: string): string {
   return `<span class="pd-status pd-status--${s.kind}" title="${escHtml(s.label)}">${s.letter}</span>`;
 }
 
-function renderFileButton(v: FileView, i: number, notes: { open: number; pending: number }): string {
+/** A file of the list; in the folder tree (`depth` set) its name alone, the folders giving the rest. */
+function renderFileButton(v: FileView, i: number, notes: { open: number; pending: number }, depth?: number): string {
   const { dir, base } = splitPath(v.file.filename);
   const title = notes.pending
     ? `${notes.pending} AI comment${notes.pending === 1 ? "" : "s"} to triage`
@@ -151,12 +179,32 @@ function renderFileButton(v: FileView, i: number, notes: { open: number; pending
   const badge = notes.open
     ? `<span class="pd-file__ai${notes.pending ? " pd-file__ai--pending" : ""}" title="${title}">${notes.open}</span>`
     : "";
-  return `<button class="pd-file" type="button" data-pd-file="${i}" title="${escHtml(v.file.filename)}">` +
+  const inTree = depth !== undefined;
+  return `<button class="pd-file${inTree ? " pd-file--tree" : ""}" type="button" data-pd-file="${i}" title="${escHtml(v.file.filename)}"` +
+    (inTree ? ` style="--depth:${depth}"` : "") + `>` +
     renderStatus(v.file.status) +
-    `<span class="pd-file__name"><span class="pd-file__base">${escHtml(base)}</span><span class="pd-file__dir">${escHtml(dir)}</span></span>` +
+    `<span class="pd-file__name"><span class="pd-file__base">${escHtml(base)}</span>` +
+    (inTree ? "" : `<span class="pd-file__dir">${escHtml(dir)}</span>`) + `</span>` +
     badge +
     renderStat(v.file.additions, v.file.deletions) +
     `</button>`;
+}
+
+const TREE_ICON = `<svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 2h3.5M3 2v7.5h2.5M3 5.5h2.5"/><rect x="6.5" y="4.2" width="4" height="2.6" rx=".6"/><rect x="6.5" y="8.2" width="4" height="2.6" rx=".6"/></svg>`;
+const FOLDER_ICON = `<svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M1.5 3.3c0-.5.4-.9.9-.9h2.3l1.1 1.2h3.8c.5 0 .9.4.9.9v4.7c0 .5-.4.9-.9.9H2.4c-.5 0-.9-.4-.9-.9z"/></svg>`;
+
+/** The folder tree of By path: folders fold, and a filter shows its matches whatever is folded. */
+function renderTree(node: PathTree, depth: number, file: (path: string, depth: number) => string, folded: Set<string>): string {
+  const dirs = node.dirs.map(dir => {
+    const open = !folded.has(dir.path);
+    return `<div class="pd-dir${open ? "" : " pd-dir--folded"}" data-pd-group>` +
+      `<button class="pd-dir__head" type="button" data-pd-dir="${escHtml(dir.path)}" aria-expanded="${open}" title="${escHtml(dir.path)}" style="--depth:${depth}">` +
+        `<span class="pd-dir__icon" aria-hidden="true">${FOLDER_ICON}</span><span class="pd-dir__name">${escHtml(dir.name)}</span>` +
+      `</button>` +
+      `<div class="pd-dir__files">${renderTree(dir, depth + 1, file, folded)}</div>` +
+    `</div>`;
+  });
+  return dirs.join("") + node.files.map(path => file(path, depth)).join("");
 }
 
 function placeholderHeight(v: FileView): number {
@@ -332,11 +380,16 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
       <div class="pd-main">
         <aside class="pd-side">
           <input class="pd-filter" type="search" placeholder="Filter files…" data-pd-filter spellcheck="false" />
-          <div class="pd-order rd-seg" data-pd-order>
-            <button class="rd-seg-btn" type="button" data-pd-order-mode="suggested" title="Foundations first: the agent's order when it gave one, by layer otherwise">Suggested</button>
-            <button class="rd-seg-btn" type="button" data-pd-order-mode="path" title="GitHub's order">By path</button>
+          <div class="pd-order-row">
+            <div class="pd-order rd-seg" data-pd-order>
+              <button class="rd-seg-btn" type="button" data-pd-order-mode="suggested" title="Foundations first: the agent's order when it gave one, by layer otherwise">Suggested</button>
+              <button class="rd-seg-btn" type="button" data-pd-order-mode="path" title="GitHub's order">By path</button>
+            </div>
+            <button class="pd-tree-toggle" type="button" data-pd-tree aria-pressed="false" title="Group by folder" hidden>${TREE_ICON}</button>
           </div>
           <div class="pd-files" data-pd-files></div>
+          <div class="pd-side__resize" data-pd-resize role="separator" aria-orientation="vertical" aria-label="Resize the file list"
+            tabindex="0" title="Drag to resize · double-click to reset"></div>
         </aside>
         <div class="pd-content" data-pd-content></div>
       </div>
@@ -360,6 +413,9 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   let activeIndex = -1;
   let orderMode = readOrderMode();
   let viewMode = readViewMode();
+  let treeMode = readTreeMode();
+  /** Folders of the tree the reader folded, by path. */
+  const folded = new Set<string>();
 
   // Comments: the agents' proposals, the user's own, and what is being written.
   let reviews: AiReview[] = [];
@@ -505,6 +561,11 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     const discard = target.closest<HTMLElement>("[data-pd-ai-discard]");
     if (discard) { void onDiscardReview(discard.dataset.pdAiDiscard ?? ""); return; }
 
+    if (target.closest("[data-pd-tree]")) { setTreeMode(!treeMode); return; }
+
+    const dir = target.closest<HTMLElement>("[data-pd-dir]");
+    if (dir) { toggleDir(dir); return; }
+
     const view = target.closest<HTMLElement>("[data-pd-view-mode]");
     if (view) { setViewMode(view.dataset.pdViewMode === "split" ? "split" : "unified"); return; }
 
@@ -559,6 +620,50 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   });
 
   filter.addEventListener("input", applyFilter);
+
+  // ── File list width ─────────────────────────────────────────────────────────
+
+  const main = $<HTMLElement>(".pd-main");
+  const side = $<HTMLElement>(".pd-side");
+  const resizer = $<HTMLElement>("[data-pd-resize]");
+
+  /** Sets the list's width within its bounds, or back to the default; returns what was set. */
+  function setSideWidth(px: number | null): number | null {
+    if (px === null) { main.style.removeProperty("--pd-side-w"); return null; }
+    const width = Math.round(Math.min(Math.max(SIDE_MIN_PX, main.clientWidth - DIFF_MIN_PX), Math.max(SIDE_MIN_PX, px)));
+    main.style.setProperty("--pd-side-w", `${width}px`);
+    return width;
+  }
+  setSideWidth(readSideWidth());
+
+  resizer.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = side.getBoundingClientRect().width;
+    let width: number | null = startWidth;
+    // The drag goes on past the handle's few pixels.
+    try { resizer.setPointerCapture(e.pointerId); } catch { /* a pointer already gone */ }
+    overlay.classList.add("pd-resizing");
+    const move = (ev: PointerEvent) => { width = setSideWidth(startWidth + ev.clientX - startX); };
+    const end = () => {
+      resizer.removeEventListener("pointermove", move);
+      resizer.removeEventListener("pointerup", end);
+      resizer.removeEventListener("pointercancel", end);
+      overlay.classList.remove("pd-resizing");
+      saveSideWidth(width);
+    };
+    resizer.addEventListener("pointermove", move);
+    resizer.addEventListener("pointerup", end);
+    resizer.addEventListener("pointercancel", end);
+  });
+  resizer.addEventListener("dblclick", () => saveSideWidth(setSideWidth(null)));
+  resizer.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const step = e.key === "ArrowRight" ? 16 : -16;
+    saveSideWidth(setSideWidth(side.getBoundingClientRect().width + step));
+  });
 
   // ── Navigation ──────────────────────────────────────────────────────────────
 
@@ -632,6 +737,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
 
   function applyFilter() {
     const q = filter.value.trim().toLowerCase();
+    // Matches show inside folded folders too.
+    fileList.classList.toggle("pd-files--filtering", q !== "");
     views.forEach((v, i) => {
       const hide = q !== "" && !v.file.filename.toLowerCase().includes(q);
       const btn = fileList.querySelector<HTMLElement>(`[data-pd-file="${i}"]`);
@@ -647,11 +754,29 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
 
   // ── Order ───────────────────────────────────────────────────────────────────
 
+  /** By path in a tree: the diff follows the tree, so list and files read in the same order. */
+  const asTree = () => orderMode === "path" && treeMode;
+
   function groups(): FileGroup[] {
     const paths = views.map(v => v.file.filename);
-    if (orderMode === "path") return [{ title: "", why: "", files: paths }];
+    if (orderMode === "path") return [{ title: "", why: "", files: asTree() ? treeOrder(pathTree(paths)) : paths }];
     const agent = reviews.find(r => r.order.length > 0);
     return agent ? withAgentOrder(agent.order, paths) : layerOrder(paths);
+  }
+
+  function setTreeMode(on: boolean) {
+    treeMode = on;
+    saveTreeMode(on);
+    layout();
+  }
+
+  /** Folds a folder of the tree, or unfolds it: only the list changes, the diff stays. */
+  function toggleDir(head: HTMLElement) {
+    const path = head.dataset.pdDir ?? "";
+    const unfold = folded.has(path);
+    if (unfold) folded.delete(path); else folded.add(path);
+    head.setAttribute("aria-expanded", String(unfold));
+    head.parentElement?.classList.toggle("pd-dir--folded", !unfold);
   }
 
   function setViewMode(mode: ViewMode) {
@@ -1687,15 +1812,21 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   function layout() {
     const scroll = content.scrollTop;
     const ordered = groups();
-    fileList.innerHTML = ordered.map(g => {
-      const files = g.files.map(path => {
-        const i = indexByPath.get(path) ?? -1;
-        return i === -1 ? "" : renderFileButton(views[i], i, countsFor(path));
+    const fileButton = (path: string, depth?: number) => {
+      const i = indexByPath.get(path) ?? -1;
+      return i === -1 ? "" : renderFileButton(views[i], i, countsFor(path), depth);
+    };
+    fileList.innerHTML = asTree()
+      ? renderTree(pathTree(views.map(v => v.file.filename)), 0, fileButton, folded)
+      : ordered.map(g => {
+        const files = g.files.map(path => fileButton(path)).join("");
+        return g.title
+          ? `<div class="pd-group" data-pd-group><div class="pd-group__title" title="${escHtml(g.why)}">${escHtml(g.title)}</div>${files}</div>`
+          : files;
       }).join("");
-      return g.title
-        ? `<div class="pd-group" data-pd-group><div class="pd-group__title" title="${escHtml(g.why)}">${escHtml(g.title)}</div>${files}</div>`
-        : files;
-    }).join("");
+    const tree = $<HTMLElement>("[data-pd-tree]");
+    tree.hidden = orderMode !== "path";
+    tree.setAttribute("aria-pressed", String(treeMode));
     overlay.querySelectorAll<HTMLElement>("[data-pd-order-mode]").forEach(btn => {
       btn.classList.toggle("rd-seg-btn--active", btn.dataset.pdOrderMode === orderMode);
     });

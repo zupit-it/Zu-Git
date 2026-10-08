@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **PR diff: a wider file list, and a folder tree** — drag the file list's right edge to widen it
+  (double-click goes back to the default width); the width is remembered. Next to **By path**, the
+  folder button shows the files as a tree, as on GitHub: folders first, a folder holding only one
+  folder on a single row (`src/app`), each folder folding with a click. The filter still finds
+  files in folded folders, and the diff follows the tree's order. The choice is remembered, like
+  Unified / Split.
+
+### Changed
+- **PR diff: outdated comments at full width** — comments listed above the files (outdated, or with
+  no line in this diff), yours and GitHub's, take the whole width, so the code they were written on
+  reads without scrolling sideways.
+
 ---
 
 ## [2.0.1] - 2026-10-08

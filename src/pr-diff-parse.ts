@@ -356,3 +356,54 @@ export function withAgentOrder(agent: FileGroup[], paths: string[]): FileGroup[]
   }
   return groups;
 }
+
+/** A folder of the changed files: its sub-folders, then its files, as full paths. */
+export interface PathTree {
+  /** Shown name: one folder, or a chain of folders with nothing else in them ("src/app"). */
+  name: string;
+  /** Full path of the folder, "" for the root. */
+  path: string;
+  dirs: PathTree[];
+  files: string[];
+}
+
+const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+
+/**
+ * The changed files as a folder tree, like GitHub's file tree: folders before
+ * files, each by name, and a folder holding only one folder shown as one row.
+ */
+export function pathTree(paths: string[]): PathTree {
+  const root: PathTree = { name: "", path: "", dirs: [], files: [] };
+  for (const path of paths) {
+    const parts = path.split("/");
+    let node = root;
+    for (const part of parts.slice(0, -1)) {
+      const at = node.path ? `${node.path}/${part}` : part;
+      let next = node.dirs.find(d => d.path === at);
+      if (!next) node.dirs.push(next = { name: part, path: at, dirs: [], files: [] });
+      node = next;
+    }
+    node.files.push(path);
+  }
+  const tidy = (node: PathTree): PathTree => {
+    let folder = node;
+    // Compact folders: "src" holding only "app" reads as "src/app".
+    while (folder !== root && folder.files.length === 0 && folder.dirs.length === 1) {
+      const only = folder.dirs[0];
+      folder = { ...only, name: `${folder.name}/${only.name}` };
+    }
+    const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
+    return {
+      ...folder,
+      dirs: folder.dirs.map(tidy).sort((a, b) => byName(a.name, b.name)),
+      files: [...folder.files].sort((a, b) => byName(base(a), base(b))),
+    };
+  };
+  return tidy(root);
+}
+
+/** The files in the order the tree shows them: each folder's sub-folders, then its files. */
+export function treeOrder(tree: PathTree): string[] {
+  return [...tree.dirs.flatMap(treeOrder), ...tree.files];
+}

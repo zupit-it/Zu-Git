@@ -6107,17 +6107,47 @@ ul.field-hint {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  /* The list's width is the reader's (dragged); the diff keeps 360px whatever the window. */
+  grid-template-columns: min(var(--pd-side-w, 280px), max(200px, calc(100% - 360px))) minmax(0, 1fr);
 }
 
 /* File list */
 .pd-side {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--surface-alt);
 }
+
+/* Its right edge: drag to widen, double-click for the default width. */
+.pd-side__resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.pd-side__resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background .15s;
+}
+.pd-side__resize:hover::after,
+.pd-side__resize:focus-visible::after,
+.pd-resizing .pd-side__resize::after { background: var(--accent); }
+.pd-side__resize:focus { outline: none; }
+.pd-resizing, .pd-resizing * { cursor: col-resize !important; user-select: none; }
 
 .pd-filter {
   margin: 10px;
@@ -6361,7 +6391,49 @@ ul.field-hint {
 }
 .ai-review-chip:hover { border-color: var(--accent); }
 
-.pd-order { margin: 0 10px 8px; align-self: flex-start; }
+.pd-order-row { display: flex; align-items: center; gap: 6px; margin: 0 10px 8px; }
+
+/* By path as a folder tree, like GitHub's file tree. */
+.pd-tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.pd-tree-toggle:hover { color: var(--ink); }
+.pd-tree-toggle[aria-pressed="true"] { border-color: var(--accent-bd); background: var(--accent-soft); color: var(--accent-ink); }
+.pd-tree-toggle[hidden] { display: none; }
+
+.pd-dir__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 4px 6px 4px calc(4px + var(--depth, 0) * 14px);
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: 500 12px var(--font);
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+}
+.pd-dir__head:hover { background: var(--surface); }
+.pd-dir__head::before { content: "▾"; flex-shrink: 0; width: 10px; font-size: 10px; color: var(--ink-faint); }
+.pd-dir--folded > .pd-dir__head::before { content: "▸"; }
+.pd-dir__icon { display: inline-flex; flex-shrink: 0; color: var(--ink-muted); }
+.pd-dir__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-dir--folded > .pd-dir__files { display: none; }
+.pd-files--filtering .pd-dir--folded > .pd-dir__files { display: block; }
+/* A file sits under its folder's name. */
+.pd-file--tree { padding-left: calc(19px + var(--depth, 0) * 14px); }
 
 .pd-group { margin-top: 4px; }
 .pd-group__title {
@@ -6507,6 +6579,8 @@ ul.field-hint {
   font-weight: 700;
 }
 .pd-ai-panel--mine { border-color: var(--border-strong); }
+/* Outdated comments, and those with no line in this diff, take the panel's whole width: their code reads whole. */
+.pd-ai-panel .pd-ai-card, .pd-ai-panel .pd-gh-thread { max-width: none; }
 .pd-hint { margin: 0 2px 10px; font-size: 12px; color: var(--ink-muted); }
 
 .pd-ai-sev {

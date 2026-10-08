@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  alignSides, hunkFor, hunkSides, hunkTail, isGeneratedFile, languageFor, layerOrder, parsePatch, sameCode, splitRows,
-  withAgentOrder,
+  alignSides, hunkFor, hunkSides, hunkTail, isGeneratedFile, languageFor, layerOrder, parsePatch, pathTree, sameCode,
+  splitRows, treeOrder, withAgentOrder,
 } from "../src/pr-diff-parse.ts";
 
 test("the tail of a GitHub diff hunk is the code a comment was written on", () => {
@@ -174,4 +174,41 @@ test("on a newer commit a comment stays under its line only while its code is th
   assert.ok(!sameCode(onRole, "new", 11, 12, pushed));
   // Removed lines are compared on the base side.
   assert.ok(sameCode(hunkFor([hunk], "old", 11, null) ?? "", "old", 11, null, pushed));
+});
+
+test("the files group into folders as on GitHub: folders first, lone folders as one row", () => {
+  const tree = pathTree([
+    "src/app/transfers/transfer.service.ts",
+    "README.md",
+    "src/app/transfers/schedule/schedule.component.ts",
+    "src/app/transfers/transfer.model.ts",
+    "src/app/app.config.ts",
+    "src/app/transfers/schedule/schedule.component.html",
+    "docs/item10.md",
+    "docs/item9.md",
+  ]);
+  const shape = (node: ReturnType<typeof pathTree>): unknown => ({
+    name: node.name, dirs: node.dirs.map(shape), files: node.files.map(f => f.slice(f.lastIndexOf("/") + 1)),
+  });
+  assert.deepEqual(shape(tree), {
+    name: "", files: ["README.md"], dirs: [
+      { name: "docs", dirs: [], files: ["item9.md", "item10.md"] },
+      { name: "src/app", files: ["app.config.ts"], dirs: [
+        { name: "transfers", files: ["transfer.model.ts", "transfer.service.ts"], dirs: [
+          { name: "schedule", dirs: [], files: ["schedule.component.html", "schedule.component.ts"] },
+        ] },
+      ] },
+    ],
+  });
+  assert.equal(tree.dirs[1].path, "src/app");
+  assert.equal(tree.dirs[1].dirs[0].path, "src/app/transfers");
+  // The diff follows the tree, so the sidebar and the files read in the same order.
+  assert.deepEqual(treeOrder(tree), [
+    "docs/item9.md", "docs/item10.md",
+    "src/app/transfers/schedule/schedule.component.html", "src/app/transfers/schedule/schedule.component.ts",
+    "src/app/transfers/transfer.model.ts", "src/app/transfers/transfer.service.ts",
+    "src/app/app.config.ts",
+    "README.md",
+  ]);
+  assert.deepEqual(treeOrder(pathTree([])), []);
 });
