@@ -7,10 +7,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
----
-
-## [2.0.0] - 2026-10-08
-
 ### Added
 - **PR diff in the app** — click the `+N −N` chip on a PR row (it lights up on hover) to open its
   changed files without leaving ZuGit: file list with a filter on the left, unified diff on the
