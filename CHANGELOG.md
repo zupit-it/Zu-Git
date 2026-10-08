@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2.0.2] - 2026-10-08
+
 ### Added
 - **PR diff: a wider file list, and a folder tree** — drag the file list's right edge to widen it
   (double-click goes back to the default width); the width is remembered. Next to **By path**, the
