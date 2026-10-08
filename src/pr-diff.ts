@@ -1663,7 +1663,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   async function copyPrompt(button: HTMLButtonElement) {
     const label = button.textContent;
     try {
-      await navigator.clipboard.writeText(reviewPrompt(pr.repo, pr.id, headSha));
+      await navigator.clipboard.writeText(reviewPrompt(pr.repo, pr.id, headSha, pr.headRef, pr.baseRef));
       button.textContent = "Copied — paste it into your agent";
     } catch {
       button.textContent = "Could not copy";

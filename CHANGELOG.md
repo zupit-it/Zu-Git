@@ -23,6 +23,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **PR diff: outdated comments at full width** — comments listed above the files (outdated, or with
   no line in this diff), yours and GitHub's, take the whole width, so the code they were written on
   reads without scrolling sideways.
+- **AI review: no local clone needed** — an agent started outside a checkout of the repo used to
+  stop at "repository not found". The review prompt now names the head branch and full commit and
+  the base branch, and both it and `howToReview` tell the agent to read the code, in order, from a
+  local clone with read-only git, else through a GitHub connector or MCP it has (read-only, at that
+  commit, never commenting or pushing with it), else from the patches — saying so in its summary.
 
 ---
 
