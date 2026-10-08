@@ -21,6 +21,10 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Faster all round",
+        body: "ZuGit waits less. A <strong>PR diff</strong> opens sooner — and almost at once if your pointer rested on its <strong>+N −N</strong> chip first, since the diff starts loading right then. The <strong>Toggl planner</strong> opens faster and <strong>switching days</strong> no longer starts from scratch: a day you just looked at comes back instantly, and resting on a day in the date menu loads it before you click. Behind the scenes, requests that used to wait for each other now run side by side, and things that never change — like your Jira account — are asked once instead of every time.",
+      },
+      {
         title: "PR diff — review a pull request without leaving ZuGit",
         body: "Click the <strong>+N −N</strong> chip on a PR row to open its changed files right in ZuGit: files listed foundations first, <strong>Unified</strong> or <strong>Split</strong> view, syntax colours. Click a line number — or press and drag over several — to <strong>comment</strong>. GitHub's conversations show under their lines as they do there, outdated ones above the files with the code they were written on, and you can <strong>reply</strong> to them or <strong>resolve</strong> them. Your comments stay in ZuGit until you press <strong>Publish review</strong> in the top bar: add a summary and choose <strong>Comment</strong>, <strong>Request changes</strong> or <strong>Approve</strong> — one GitHub review. If someone pushes while you read, ZuGit offers <strong>Reload</strong> and never publishes on code you have not seen; your comments follow their code, as on GitHub.",
         imgs: ["/assets/changelog/pr-review.png"],
