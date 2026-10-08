@@ -1244,6 +1244,7 @@ pub async fn ai_review_set_status(
 
 /// Makes an AI comment the user's, reworded when `body` is given: it moves to
 /// their comments, where a new proposal from the agent no longer touches it.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn ai_review_keep_comment(
     app: tauri::AppHandle,
