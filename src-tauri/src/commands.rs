@@ -250,24 +250,43 @@ pub async fn fetch_pr_threads(
 
 /// Files and patches of a pull request at its latest commit, together with
 /// that commit: comments on them are anchored to it. The files are read
-/// between two looks at the PR's head, so a push landing meanwhile can never
-/// pair them with the wrong commit. Cached by head: until someone pushes,
-/// reopening costs one small request.
+/// alongside a first look at the PR's head and checked against a second one
+/// after, so a push landing meanwhile can never pair them with the wrong
+/// commit. Cached by head.
+///
+/// `expected_head` is the head the dashboard last saw. When its diff is cached
+/// it comes back at once, without asking GitHub: the diff view checks the head
+/// right after opening and offers a reload if someone pushed since.
 #[tauri::command]
 pub async fn fetch_pr_diff(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     repo: String,
     number: u64,
+    expected_head: Option<String>,
 ) -> Result<crate::models::PrDiff, String> {
     if !crate::pr_review::valid_repo(&repo) {
         return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    if let Some(hit) = expected_head
+        .filter(|head| !head.is_empty())
+        .and_then(|head| state.pr_diff_cache.lock().get(&diff_cache_key(&repo, number, &head)).cloned())
+    {
+        return Ok(hit);
     }
     let settings = storage::load_settings(&app).await?;
     current_diff(&state, &settings, &repo, number).await
 }
 
+fn diff_cache_key(repo: &str, number: u64, head: &str) -> String {
+    format!("{repo}#{number}@{}", head.to_lowercase())
+}
+
 /// The PR's diff at its latest commit, with that commit — see `fetch_pr_diff`.
+///
+/// GitHub answers each request in roughly half a second, so the files are read
+/// together with the first look at the head, not after it: two round trips in
+/// a row instead of three.
 async fn current_diff(
     state: &AppState,
     settings: &crate::models::AppSettings,
@@ -278,13 +297,18 @@ async fn current_diff(
     const ATTEMPTS: usize = 3;
     let client = &state.http_client;
     for _ in 0..ATTEMPTS {
-        let head = crate::github::fetch_pr_meta(repo, number, settings, client).await?.head_sha;
-        let key = format!("{repo}#{number}@{head}");
+        let (before, files) = tokio::join!(
+            crate::github::fetch_pr_meta(repo, number, settings, client),
+            crate::github::fetch_pr_files(repo, number, settings, client),
+        );
+        let head = before?.head_sha;
+        let key = diff_cache_key(repo, number, &head);
         if let Some(hit) = state.pr_diff_cache.lock().get(&key) {
             return Ok(hit.clone());
         }
-        let mut diff = crate::github::fetch_pr_files(repo, number, settings, client).await?;
-        // A push landed while the files were read: read them again.
+        let mut diff = files?;
+        // The files were read from the first look at the head on: the same
+        // head after them means no push landed in between.
         if crate::github::fetch_pr_meta(repo, number, settings, client).await?.head_sha != head {
             continue;
         }
@@ -1095,21 +1119,25 @@ pub async fn toggl_prepare_day(
     range_start: String,
     range_end: String,
     force_relearn: bool,
+    reuse: Option<bool>,
 ) -> Result<crate::toggl_day::TogglDayContext, String> {
     let settings = storage::load_settings(&app).await?;
     toggl_settings(&settings)?;
 
-    let account = toggl_account(&settings, &state, false).await?;
-    let workspace_id = toggl_workspace_id(&settings, &account)?;
     let day = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
         .map_err(|_| format!("Invalid date '{date}'."))?;
-    // Calendar events are proposals, not blockers: a failure here degrades to a
-    // warning instead of sinking the whole day plan.
-    let google_token = if settings.google_calendar_enabled {
-        Some(google_access_token(&settings, &state).await)
-    } else {
-        None
-    };
+    // Both are cached once read; the first open of a session asks for them
+    // side by side. Calendar events are proposals, not blockers: a token
+    // failure degrades to a warning instead of sinking the whole day plan.
+    let (account, google_token) = tokio::join!(toggl_account(&settings, &state, false), async {
+        if settings.google_calendar_enabled {
+            Some(google_access_token(&settings, &state).await)
+        } else {
+            None
+        }
+    });
+    let account = account?;
+    let workspace_id = toggl_workspace_id(&settings, &account)?;
     let data_dir = storage::data_dir(&app)?;
 
     crate::toggl_day::build_context(crate::toggl_day::DayRequest {
@@ -1123,6 +1151,7 @@ pub async fn toggl_prepare_day(
         range_end,
         day,
         force_relearn,
+        reuse_jira: reuse.unwrap_or(false) && !force_relearn,
     })
     .await
 }

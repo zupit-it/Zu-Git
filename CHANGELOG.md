@@ -8,6 +8,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **Faster PR diff** — GitHub takes about half a second per answer, and opening a diff asked it
+  three times in a row. The files are now read together with the PR's head (two round trips, not
+  three), and resting the pointer on the `+N −N` chip starts reading the diff and its conversations,
+  so the click usually opens on data already there. A diff served from the cache is checked against
+  GitHub right after opening: a push since then shows up as **New commits** at once.
+- **Faster Toggl planner** — Google Calendar and the sprint (for gap filling) are read alongside
+  Toggl and Jira instead of after them, and the Toggl account and the Google token side by side.
+  The local scan of commits only reads clones of the repositories configured in ZuGit, once per
+  repository rather than once per worktree, several at a time: it used to run git in every folder
+  an AI session had worked in (here 20 folders for 3 relevant repositories; about 0.6 s → 0.1 s).
+  Clones are looked for from two weeks before the planned day, not over the last 45 days.
+- **Toggl planner: switching days** — a day read in the last two minutes opens at once, and resting
+  on a day in the date menu starts reading it before the click. Moving to another day reuses the
+  active and sprint stories read moments ago (opening the planner, ↻ and re-learning still read
+  them afresh), and what a Jira site says about itself — its story-point fields, your account — is
+  asked once per session instead of on every day.
 - **AI review: no local clone needed** — an agent started outside a checkout of the repo used to
   stop at "repository not found". The review prompt now names the head branch and full commit and
   the base branch, and both it and `howToReview` tell the agent to read the code, in order, from a

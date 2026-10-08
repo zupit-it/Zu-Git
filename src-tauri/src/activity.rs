@@ -48,8 +48,10 @@ pub struct ActivityEvent {
 /// five minutes are one piece of evidence, not one hundred.
 const SESSION_BUCKET_SECS: i64 = 300;
 
-/// How far back AI sessions are scanned to discover which repositories exist.
-const REPO_DISCOVERY_DAYS: u64 = 45;
+/// How long before the planned day AI sessions are looked at to find where the
+/// user's clones are. A session file counts by its last write, so a clone is
+/// found if any session in it was active from two weeks before the day on.
+const REPO_DISCOVERY_DAYS: i64 = 14;
 
 /// Jira keys in a branch name. Branches are often lower-case (`pent-12-fix`),
 /// so the name is upper-cased first; the caller validates keys against Jira.
@@ -280,11 +282,10 @@ pub fn collect_ai_sessions(from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Activi
 
 // ── Git ──────────────────────────────────────────────────────────────────────
 
-/// Working directories of recent AI sessions — the repositories the user
-/// actually works in, without having to configure a list of folders.
-pub fn discover_repo_dirs() -> Vec<PathBuf> {
-    let since = SystemTime::now()
-        - std::time::Duration::from_secs(REPO_DISCOVERY_DAYS * 24 * 3600);
+/// Working directories of AI sessions active since `since` — where the user's
+/// clones are, without having to configure a list of folders.
+pub fn discover_repo_dirs(since: DateTime<Utc>) -> Vec<PathBuf> {
+    let since: SystemTime = since.into();
     let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
 
     // The cwd shows up within the first lines of either transcript format.
@@ -396,28 +397,89 @@ fn parse_log_line(line: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Option<
 
 /// Commits authored by the user in `[from, to)`, across every branch of the
 /// given repositories (unpushed ones included).
-pub fn collect_commits(repo_dirs: &[PathBuf], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<ActivityEvent> {
-    let mut roots: BTreeSet<PathBuf> = BTreeSet::new();
-    for dir in repo_dirs {
-        if let Some(top) = git(dir, &["rev-parse", "--show-toplevel"]) {
-            roots.insert(PathBuf::from(top.trim()));
+/// Runs `f` over `items` on a few threads at once, results in input order.
+/// Each git call is a process spawn of tens of milliseconds; with a couple of
+/// dozen repositories, one after the other they would add up to most of a second.
+fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    const WORKERS: usize = 8;
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: Vec<std::sync::Mutex<Option<R>>> = items.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    std::thread::scope(|scope| {
+        for _ in 0..WORKERS.min(items.len()) {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(item) = items.get(i) else { break };
+                let value = f(item);
+                if let Ok(mut slot) = results[i].lock() {
+                    *slot = Some(value);
+                }
+            });
         }
-    }
+    });
+    results
+        .into_iter()
+        .filter_map(|slot| slot.into_inner().ok().flatten())
+        .collect()
+}
+
+/// `owner/name` of a GitHub remote URL, lowercased: `git@github.com:Owner/Name.git`,
+/// `https://github.com/owner/name` and `ssh://git@host/owner/name.git` alike.
+fn remote_slug(url: &str) -> Option<String> {
+    let path = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let mut parts = path.rsplit(['/', ':']);
+    let name = parts.next().filter(|s| !s.is_empty())?;
+    let owner = parts.next().filter(|s| !s.is_empty())?;
+    Some(format!("{owner}/{name}").to_lowercase())
+}
+
+/// Whether one of the repository's remotes is among `repos` (`owner/name`, lowercase).
+fn has_remote_in(repo: &Path, repos: &[String]) -> bool {
+    git(repo, &["config", "--get-regexp", r"^remote\..*\.url$"])
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .filter_map(remote_slug)
+        .any(|slug| repos.contains(&slug))
+}
+
+/// Commits authored by the user in the repositories behind `repo_dirs`.
+///
+/// Session folders are often worktrees — Claude makes one per session — of a
+/// handful of repositories: each repository is read once (its worktrees share
+/// the history `--all` already walks). With `repos` given (`owner/name`, the
+/// ones configured in ZuGit), only clones of those count.
+pub fn collect_commits(
+    repo_dirs: &[PathBuf],
+    repos: &[String],
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Vec<ActivityEvent> {
+    let repos: Vec<String> = repos.iter().map(|r| r.trim().to_lowercase()).filter(|r| !r.is_empty()).collect();
+    let common_dirs: BTreeSet<PathBuf> =
+        par_map(repo_dirs, |dir| git(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"]))
+            .into_iter()
+            .flatten()
+            .map(|dir| PathBuf::from(dir.trim()))
+            .collect();
+    let common_dirs: Vec<PathBuf> = common_dirs.into_iter().collect();
+    let roots: Vec<PathBuf> = par_map(&common_dirs, |dir| repos.is_empty() || has_remote_in(dir, &repos))
+        .into_iter()
+        .zip(common_dirs.iter())
+        .filter(|(wanted, _)| *wanted)
+        .map(|(_, dir)| dir.clone())
+        .collect();
 
     let since = from.to_rfc3339();
     // A day of margin: the committer date can trail the author date.
     let until = (to + chrono::Duration::days(1)).to_rfc3339();
-    let mut seen: HashSet<(String, String)> = HashSet::new();
-    let mut events = Vec::new();
-
-    for root in roots {
-        let Some(email) = git(&root, &["config", "user.email"]) else { continue };
+    let logs = par_map(&roots, |root| {
+        let email = git(root, &["config", "user.email"])?;
         let email = email.trim();
         if email.is_empty() {
-            continue;
+            return None;
         }
-        let Some(log) = git(
-            &root,
+        git(
+            root,
             &[
                 "log",
                 "--all",
@@ -428,9 +490,12 @@ pub fn collect_commits(repo_dirs: &[PathBuf], from: DateTime<Utc>, to: DateTime<
                 &format!("--author={email}"),
                 "--format=%S%x1f%aI%x1f%s",
             ],
-        ) else {
-            continue;
-        };
+        )
+    });
+
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut events = Vec::new();
+    for log in logs.into_iter().flatten() {
         for line in log.lines() {
             if let Some(event) = parse_log_line(line, from, to) {
                 // The same commit can sit in several clones of one repository.
@@ -444,9 +509,16 @@ pub fn collect_commits(repo_dirs: &[PathBuf], from: DateTime<Utc>, to: DateTime<
 }
 
 /// All local evidence for `[from, to)`, sorted by time.
-pub fn collect(from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<ActivityEvent> {
-    let mut events = collect_ai_sessions(from, to);
-    events.extend(collect_commits(&discover_repo_dirs(), from, to));
+/// `repos` narrows commits to clones of those GitHub repositories (`owner/name`);
+/// empty, every repository a session worked in counts.
+pub fn collect(from: DateTime<Utc>, to: DateTime<Utc>, repos: &[String]) -> Vec<ActivityEvent> {
+    // Transcripts are file reads, commits are git processes: side by side.
+    let (mut events, commits) = std::thread::scope(|scope| {
+        let since = from - chrono::Duration::days(REPO_DISCOVERY_DAYS);
+        let commits = scope.spawn(move || collect_commits(&discover_repo_dirs(since), repos, from, to));
+        (collect_ai_sessions(from, to), commits.join().unwrap_or_default())
+    });
+    events.extend(commits);
     events.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.key.cmp(&b.key)));
     events
 }
@@ -457,6 +529,15 @@ mod tests {
 
     fn utc(value: &str) -> DateTime<Utc> {
         parse_utc(value).unwrap()
+    }
+
+    #[test]
+    fn remote_urls_name_their_github_repository() {
+        assert_eq!(remote_slug("git@github.com:Zupit-IT/Zu-Git.git").as_deref(), Some("zupit-it/zu-git"));
+        assert_eq!(remote_slug("https://github.com/zupit-it/pentagon").as_deref(), Some("zupit-it/pentagon"));
+        assert_eq!(remote_slug("https://github.com/zupit-it/pentagon.git/").as_deref(), Some("zupit-it/pentagon"));
+        assert_eq!(remote_slug("ssh://git@github.com/acme/api.git").as_deref(), Some("acme/api"));
+        assert_eq!(remote_slug("api.git"), None);
     }
 
     #[test]

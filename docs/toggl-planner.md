@@ -18,7 +18,7 @@ Any board works (PENT, ZUME, …). Keys seen only in local activity are kept whe
 | Source | Where | Meaning |
 |---|---|---|
 | Jira transitions made by the user | changelog, author = `/myself` | into "In Progress" (or its localised name): work starts; into anything else: work just ended |
-| Commits authored by the user | `git log --all` in every repository an AI session ran in during the last 45 days | work happened before the commit (author date, so rebases do not move it) |
+| Commits authored by the user | `git log --all`, once per repository, in the local clones of the repositories configured in ZuGit (a clone counts when one of its remotes is one of them) that an AI session ran in from two weeks before the planned day on — worktrees share their repository's history and are read once; with no repositories configured, every one a session ran in | work happened before the commit (author date, so rebases do not move it) |
 | AI coding sessions | `~/.claude/projects/**/*.jsonl` (`gitBranch` per message), `~/.codex/sessions/**/*.jsonl` (branch in `session_meta`) | work happening right then; bucketed per 5 minutes |
 
 Keys come from the commit subject or the branch name (`PENT-5755/rass`, case-insensitive). Local sources can be switched off with *Settings → Toggl → Activity*.

@@ -273,6 +273,8 @@ impl Server {
             range_end,
             day,
             force_relearn: false,
+            // An assistant reading several days in a row needs the same stories.
+            reuse_jira: true,
         })
         .await?;
         Ok((settings, context))

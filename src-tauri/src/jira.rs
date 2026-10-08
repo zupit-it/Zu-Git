@@ -1468,6 +1468,11 @@ async fn fetch_my_account_id(
         account_id: String,
     }
 
+    let key = api_base_cache_key(settings);
+    if let Some(cached) = ACCOUNT_ID_CACHE.lock().get(&key) {
+        return Ok(cached.clone());
+    }
+
     let resp = client
         .get(format!("{}/rest/api/3/myself", api_base(settings, client).await))
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
@@ -1481,10 +1486,13 @@ async fn fetch_my_account_id(
             format!("Jira /myself failed ({status})"),
         ));
     }
-    resp.json::<Myself>()
+    let id = resp
+        .json::<Myself>()
         .await
         .map(|me| me.account_id)
-        .map_err(|e| ApiError::Other(e.to_string()))
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+    ACCOUNT_ID_CACHE.lock().insert(key, id.clone());
+    Ok(id)
 }
 
 /// A status change the viewer made by hand during the planned day.
@@ -1584,6 +1592,14 @@ pub struct PointedIssue {
     pub points: Option<f64>,
 }
 
+// ── Session caches ───────────────────────────────────────────────────────────
+// What a Jira site says about itself (its fields, who the token belongs to)
+// does not change while ZuGit runs: asked once, not on every planned day.
+
+static STORY_POINT_FIELDS_CACHE: Lazy<Mutex<HashMap<String, Vec<String>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+static ACCOUNT_ID_CACHE: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
 /// Ids of the story-point fields. The name depends on the project type —
 /// "Story Points" on company-managed boards, "Story point estimate" on
 /// team-managed ones — and a tenant often has both.
@@ -1594,6 +1610,10 @@ async fn story_point_fields(settings: &AppSettings, client: &reqwest::Client) ->
         #[serde(default)]
         name: String,
     }
+    let key = api_base_cache_key(settings);
+    if let Some(cached) = STORY_POINT_FIELDS_CACHE.lock().get(&key) {
+        return cached.clone();
+    }
     let Ok(resp) = client
         .get(format!("{}/rest/api/3/field", api_base(settings, client).await))
         .basic_auth(&settings.jira_email, Some(&settings.jira_token))
@@ -1602,15 +1622,61 @@ async fn story_point_fields(settings: &AppSettings, client: &reqwest::Client) ->
     else {
         return vec![];
     };
+    if !resp.status().is_success() {
+        return vec![];
+    }
     let fields: Vec<Field> = resp.json().await.unwrap_or_default();
-    fields
+    let ids: Vec<String> = fields
         .into_iter()
         .filter(|field| {
             let name = field.name.trim().to_lowercase();
             name == "story points" || name == "story point estimate"
         })
         .map(|field| field.id)
-        .collect()
+        .collect();
+    STORY_POINT_FIELDS_CACHE.lock().insert(key, ids.clone());
+    ids
+}
+
+/// How long the planner may reuse the viewer's active and sprint stories when
+/// it moves to another day. Opening it, ↻ and re-learning always read afresh.
+const DAY_REUSE: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Reads kept for a while, by Jira account: when each was made, and what it said.
+type TimedCache<T> = Mutex<HashMap<String, (std::time::Instant, T)>>;
+
+static ACTIVE_ISSUES_CACHE: Lazy<TimedCache<ActiveIssues>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static SPRINT_ISSUES_CACHE: Lazy<TimedCache<Vec<PointedIssue>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn recent<T: Clone>(cache: &TimedCache<T>, key: &str) -> Option<T> {
+    cache
+        .lock()
+        .get(key)
+        .filter(|(at, _)| at.elapsed() < DAY_REUSE)
+        .map(|(_, value)| value.clone())
+}
+
+/// The viewer's active stories — the same whatever day is planned. With
+/// `reuse`, a read from the last few minutes is enough; every fresh read is kept.
+pub async fn my_active_issues(settings: &AppSettings, client: &reqwest::Client, reuse: bool) -> Result<ActiveIssues, ApiError> {
+    let key = api_base_cache_key(settings);
+    if let Some(hit) = recent(&ACTIVE_ISSUES_CACHE, &key).filter(|_| reuse) {
+        return Ok(hit);
+    }
+    let fresh = fetch_my_active_issues(settings, client).await?;
+    ACTIVE_ISSUES_CACHE.lock().insert(key, (std::time::Instant::now(), fresh.clone()));
+    Ok(fresh)
+}
+
+/// The open sprint's stories, as `my_active_issues` for reuse.
+pub async fn sprint_issues(settings: &AppSettings, client: &reqwest::Client, reuse: bool) -> Result<Vec<PointedIssue>, ApiError> {
+    let key = api_base_cache_key(settings);
+    if let Some(hit) = recent(&SPRINT_ISSUES_CACHE, &key).filter(|_| reuse) {
+        return Ok(hit);
+    }
+    let fresh = fetch_sprint_issues(settings, client).await?;
+    SPRINT_ISSUES_CACHE.lock().insert(key, (std::time::Instant::now(), fresh.clone()));
+    Ok(fresh)
 }
 
 /// A JQL search returning raw issues, for field sets the typed search does not cover.

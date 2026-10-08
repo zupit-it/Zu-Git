@@ -746,8 +746,51 @@ export async function openTogglPanel(date?: string) {
     window.setTimeout(render, 0);
   }
 
-  /** `automatic`: ignore a waiting AI proposal and plan from the evidence. */
-  async function load(forceRelearn = false, automatic = false) {
+  /** The working range of a day, in minutes, on the slot grid. */
+  function workingRange(): { from: number; to: number } {
+    const slot = state.togglSlotMinutes;
+    let startMin = parseClock(state.togglDayStart);
+    let endMin = parseClock(state.togglDayEnd);
+    if (endMin <= startMin) endMin += 1440; // overnight shift
+    return { from: floorTo(startMin, slot), to: ceilTo(endMin, slot) };
+  }
+
+  // Days read in the last couple of minutes: going back to one is instant, and
+  // resting on a day in the date menu starts reading it before the click.
+  const DAY_CACHE_MS = 120_000;
+  const dayCache = new Map<string, { at: number; context: Promise<TogglDayContext> }>();
+
+  /**
+   * The day's evidence. `fresh` (opening the panel, ↻, after creating entries)
+   * reads everything again; moving between days reuses a day read moments ago,
+   * and lets the backend reuse the stories it read for the previous one.
+   */
+  function readDay(date: string, fresh: boolean, forceRelearn = false): Promise<TogglDayContext> {
+    const hit = dayCache.get(date);
+    if (!fresh && !forceRelearn && hit && Date.now() - hit.at < DAY_CACHE_MS) return hit.context;
+    const { from, to } = workingRange();
+    const context = invoke<TogglDayContext>("toggl_prepare_day", {
+      date,
+      // Half a day of margin on both sides: the Toggl query filters on the
+      // entry start, so a meeting that began before the range would otherwise
+      // be invisible and its slot would look free.
+      rangeStart: toIsoWithOffset(dateAt(date, from - FETCH_MARGIN_MIN)),
+      rangeEnd: toIsoWithOffset(dateAt(date, to + FETCH_MARGIN_MIN)),
+      forceRelearn,
+      reuse: !fresh,
+    });
+    const entry = { at: Date.now(), context };
+    dayCache.set(date, entry);
+    // A failed read is not kept: the next look tries again.
+    context.catch(() => { if (dayCache.get(date) === entry) dayCache.delete(date); });
+    return context;
+  }
+
+  /**
+   * `automatic`: ignore a waiting AI proposal and plan from the evidence.
+   * `fresh`: read the day again rather than reuse a read from moments ago.
+   */
+  async function load(forceRelearn = false, automatic = false, fresh = true) {
     st.loading = true;
     st.proposalWaiting = false;
     st.edited = false;
@@ -755,24 +798,11 @@ export async function openTogglPanel(date?: string) {
     st.notice = null;
     render();
 
-    const slot = state.togglSlotMinutes;
-    let startMin = parseClock(state.togglDayStart);
-    let endMin = parseClock(state.togglDayEnd);
-    if (endMin <= startMin) endMin += 1440; // overnight shift
-    startMin = floorTo(startMin, slot);
-    endMin = ceilTo(endMin, slot);
+    const { from: startMin, to: endMin } = workingRange();
 
     try {
       const [context, proposal, others] = await Promise.all([
-        invoke<TogglDayContext>("toggl_prepare_day", {
-          date: st.date,
-          // Half a day of margin on both sides: the Toggl query filters on the
-          // entry start, so a meeting that began before the range would otherwise
-          // be invisible and its slot would look free.
-          rangeStart: toIsoWithOffset(dateAt(st.date, startMin - FETCH_MARGIN_MIN)),
-          rangeEnd: toIsoWithOffset(dateAt(st.date, endMin + FETCH_MARGIN_MIN)),
-          forceRelearn,
-        }),
+        readDay(st.date, fresh, forceRelearn),
         automatic ? Promise.resolve(null) : fetchProposal(),
         fetchOtherProposals(),
       ]);
@@ -864,6 +894,20 @@ export async function openTogglPanel(date?: string) {
 
   // ── Interactions ────────────────────────────────────────────────────────────
 
+  // Resting on a day in the date menu starts reading it.
+  let dayHoverTimer: number | undefined;
+  overlay.addEventListener("pointerover", (event) => {
+    const day = (event.target as Element).closest<HTMLElement>("[data-tg-date-pick]");
+    if (!day || day.contains(event.relatedTarget as Node | null)) return;
+    window.clearTimeout(dayHoverTimer);
+    const date = day.dataset.tgDatePick;
+    if (date && date !== st.date) dayHoverTimer = window.setTimeout(() => void readDay(date, false).catch(() => {}), 150);
+  });
+  overlay.addEventListener("pointerout", (event) => {
+    const day = (event.target as Element).closest<HTMLElement>("[data-tg-date-pick]");
+    if (day && !day.contains(event.relatedTarget as Node | null)) window.clearTimeout(dayHoverTimer);
+  });
+
   overlay.addEventListener("click", (event) => {
     const target = event.target as Element;
 
@@ -891,7 +935,7 @@ export async function openTogglPanel(date?: string) {
     if (day) {
       st.date = day.dataset.tgDatePick ?? st.date;
       st.dateOpen = false;
-      void load();
+      void load(false, false, false);
       return;
     }
     if (target.closest("[data-tg-relearn]") || target.closest("[data-tg-retry]")) {
@@ -905,7 +949,7 @@ export async function openTogglPanel(date?: string) {
     const otherDay = target.closest<HTMLElement>("[data-tg-proposal-open]");
     if (otherDay) {
       st.date = otherDay.dataset.tgProposalOpen ?? st.date;
-      void load();
+      void load(false, false, false);
       return;
     }
     if (target.closest("[data-tg-proposal-discard]")) {

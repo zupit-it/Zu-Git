@@ -13,7 +13,7 @@ import {
 } from "./api";
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
-import { openPrDiff } from "./pr-diff";
+import { openPrDiff, prefetchPrDiff } from "./pr-diff";
 import { startAiReviewPolling } from "./ai-review";
 import {
   loadStaleBranches, restoreStaleFilters,
@@ -267,6 +267,22 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
   // ── Global click delegation ─────────────────────────────────────────────────
+  // Resting on a PR's diff chip warms its diff, so the click opens on cached data.
+  let diffHoverTimer: number | undefined;
+  document.addEventListener("pointerover", (event) => {
+    const chip = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-pr-diff]") : null;
+    if (!chip || chip.contains(event.relatedTarget as Node | null)) return;
+    window.clearTimeout(diffHoverTimer);
+    diffHoverTimer = window.setTimeout(() => {
+      const pr = state.currentDashboard?.prs.find(p => `${p.repo}/${p.id}` === chip.dataset.prDiff);
+      if (pr) prefetchPrDiff(pr);
+    }, 150);
+  });
+  document.addEventListener("pointerout", (event) => {
+    const chip = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-pr-diff]") : null;
+    if (chip && !chip.contains(event.relatedTarget as Node | null)) window.clearTimeout(diffHoverTimer);
+  });
+
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;

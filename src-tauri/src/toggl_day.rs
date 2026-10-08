@@ -135,6 +135,9 @@ pub struct DayRequest<'a> {
     /// The planned day, for the evidence lookups.
     pub day: chrono::NaiveDate,
     pub force_relearn: bool,
+    /// Moving to another day: the viewer's active and sprint stories read a few
+    /// minutes ago are still good. Opening the planner reads them afresh.
+    pub reuse_jira: bool,
 }
 
 fn local_midnight(day: chrono::NaiveDate) -> DateTime<Local> {
@@ -324,7 +327,7 @@ pub async fn build_context(req: DayRequest<'_>) -> Result<TogglDayContext, Strin
     );
     let issues_fut = async {
         if jira_ready {
-            crate::jira::fetch_my_active_issues(settings, req.client).await.map(Some)
+            crate::jira::my_active_issues(settings, req.client, req.reuse_jira).await.map(Some)
         } else {
             Ok(None)
         }
@@ -341,12 +344,32 @@ pub async fn build_context(req: DayRequest<'_>) -> Result<TogglDayContext, Strin
             return vec![];
         }
         let (from, to) = (window_from.with_timezone(&Utc), window_to.with_timezone(&Utc));
-        tokio::task::spawn_blocking(move || crate::activity::collect(from, to))
+        // Commits only from clones of the repositories configured in ZuGit.
+        let repos = settings.github_repos.clone();
+        tokio::task::spawn_blocking(move || crate::activity::collect(from, to, &repos))
             .await
             .unwrap_or_default()
     };
-    let (entries, active, transitions, mut activity) =
-        tokio::join!(entries_fut, issues_fut, transitions_fut, activity_fut);
+    // Calendar and sprint depend on nothing read above: asked alongside, not
+    // after. Each of these services answers in a few hundred milliseconds.
+    let events_fut = async {
+        match &req.google_token {
+            Some(Ok(token)) => Some(
+                crate::google::fetch_events(token, calendar_id(settings), &req.range_start, &req.range_end, req.client)
+                    .await,
+            ),
+            _ => None,
+        }
+    };
+    let sprint_fut = async {
+        if settings.toggl_fill_gaps && jira_ready {
+            Some(crate::jira::sprint_issues(settings, req.client, req.reuse_jira).await)
+        } else {
+            None
+        }
+    };
+    let (entries, active, transitions, mut activity, fetched_events, sprint) =
+        tokio::join!(entries_fut, issues_fut, transitions_fut, activity_fut, events_fut, sprint_fut);
 
     let existing = entries.map_err(String::from)?;
     let mut issues = match active {
@@ -428,17 +451,11 @@ pub async fn build_context(req: DayRequest<'_>) -> Result<TogglDayContext, Strin
     }
 
     let mut events = vec![];
-    match &req.google_token {
-        Some(Ok(token)) => {
-            match crate::google::fetch_events(token, calendar_id(settings), &req.range_start, &req.range_end, req.client)
-                .await
-            {
-                Ok(fetched) => events = fetched,
-                Err(error) => warnings.push(format!("Google Calendar: {error}")),
-            }
-        }
-        Some(Err(error)) => warnings.push(format!("Google Calendar: {error}")),
-        None => {}
+    match (&req.google_token, fetched_events) {
+        (_, Some(Ok(fetched))) => events = fetched,
+        (_, Some(Err(error))) => warnings.push(format!("Google Calendar: {error}")),
+        (Some(Err(error)), None) => warnings.push(format!("Google Calendar: {error}")),
+        _ => {}
     }
 
     let rules = load_rules(&req, &in_progress_names, &mut warnings).await;
@@ -469,10 +486,9 @@ pub async fn build_context(req: DayRequest<'_>) -> Result<TogglDayContext, Strin
     activity.retain(|event| known.contains(&event.key));
     activity.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.key.cmp(&b.key)));
 
-    let fill = if settings.toggl_fill_gaps && jira_ready {
-        sprint_fill(settings, req.client, &mut issues, &rules, &mut warnings).await
-    } else {
-        vec![]
+    let fill = match sprint {
+        Some(sprint) => sprint_fill(settings, sprint, &mut issues, &rules, &mut warnings),
+        None => vec![],
     };
 
     Ok(TogglDayContext {
@@ -492,14 +508,14 @@ pub async fn build_context(req: DayRequest<'_>) -> Result<TogglDayContext, Strin
 /// story outside it, however long it sat in a status, never draws filled time.
 /// Sprint stories not yet among the candidates join them as "sprint" — they
 /// only ever receive filled time, never compete for slots with evidence.
-async fn sprint_fill(
+fn sprint_fill(
     settings: &AppSettings,
-    client: &reqwest::Client,
+    sprint: Result<Vec<crate::jira::PointedIssue>, crate::models::ApiError>,
     issues: &mut Vec<ActiveIssue>,
     rules: &LearnedRules,
     warnings: &mut Vec<String>,
 ) -> Vec<FillStory> {
-    let sprint = match crate::jira::fetch_sprint_issues(settings, client).await {
+    let sprint = match sprint {
         Ok(sprint) => sprint,
         Err(error) => {
             warnings.push(format!("Sprint unavailable for gap filling: {error}"));

@@ -343,6 +343,41 @@ function renderTokens(tokens: Token[] | undefined, fallback: string): string {
   }).join("");
 }
 
+// ── Prefetch ──────────────────────────────────────────────────────────────────
+// GitHub takes about half a second per answer. Resting the pointer on a PR's
+// diff chip starts reading its diff and conversations, so by the click they
+// are usually there: the backend serves a diff at the head the dashboard knows
+// straight from its cache.
+
+const PREFETCH_TTL_MS = 60_000;
+const prefetched = new Map<string, { at: number; diff: Promise<PrDiff>; threads: Promise<GhThread[]> }>();
+
+function loadDiff(repo: string, number: number, expectedHead?: string): Promise<PrDiff> {
+  return invoke<PrDiff>("fetch_pr_diff", { repo, number, expectedHead: expectedHead || null });
+}
+
+function prefetchKey(pr: PullRequestSummary): string {
+  return `${pr.repo}#${pr.id}@${pr.headSha}`;
+}
+
+export function prefetchPrDiff(pr: PullRequestSummary) {
+  const key = prefetchKey(pr);
+  const hit = prefetched.get(key);
+  if (hit && Date.now() - hit.at < PREFETCH_TTL_MS) return;
+  const entry = { at: Date.now(), diff: loadDiff(pr.repo, pr.id, pr.headSha), threads: getPrThreads(pr.repo, pr.id) };
+  // A failed warm-up is just forgotten: the click reads again.
+  entry.diff.catch(() => prefetched.delete(key));
+  entry.threads.catch(() => prefetched.delete(key));
+  prefetched.set(key, entry);
+}
+
+function takePrefetch(pr: PullRequestSummary) {
+  const key = prefetchKey(pr);
+  const hit = prefetched.get(key);
+  prefetched.delete(key);
+  return hit && Date.now() - hit.at < PREFETCH_TTL_MS ? hit : undefined;
+}
+
 // ── Overlay ───────────────────────────────────────────────────────────────────
 
 export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
@@ -1753,7 +1788,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     drawSummary(diff);
   }
 
-  const fetchDiff = () => invoke<PrDiff>("fetch_pr_diff", { repo: pr.repo, number: pr.id });
+  /** The diff at `expectedHead` comes from the backend's cache when it has it. */
+  const fetchDiff = (expectedHead?: string) => loadDiff(pr.repo, pr.id, expectedHead);
 
   /**
    * Moves the view to the latest commit, on the reader's click. Comments and
@@ -1765,7 +1801,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     loading.hidden = false;
     try {
       const [diff, next] = await Promise.all([
-        fetchDiff(),
+        fetchDiff(newHead ?? undefined),
         getPrThreads(pr.repo, pr.id).catch((err: unknown) => {
           threadsNotice = `GitHub conversations could not be loaded: ${errorMessage(err, "unknown error")}`;
           return null;
@@ -1917,8 +1953,10 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
 
   try {
     threadsAt = Date.now();
+    const warm = takePrefetch(pr);
     const [diff, initialReviews, initialMine, initialThreads] = await Promise.all([
-      fetchDiff(),
+      // A failed warm-up falls back to a fresh read.
+      warm ? warm.diff.catch(() => fetchDiff()) : fetchDiff(pr.headSha),
       getAiReviews(pr.repo, pr.id).catch(() => [] as AiReview[]),
       // Unreadable comments must not keep the diff from opening.
       getUserComments(pr.repo, pr.id).catch((err: unknown) => {
@@ -1926,7 +1964,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
         return null;
       }),
       // Nor may GitHub's conversations.
-      getPrThreads(pr.repo, pr.id).catch((err: unknown) => {
+      (warm?.threads.catch(() => getPrThreads(pr.repo, pr.id)) ?? getPrThreads(pr.repo, pr.id)).catch((err: unknown) => {
         threadsNotice = `GitHub conversations could not be loaded: ${errorMessage(err, "unknown error")}`;
         return [] as GhThread[];
       }),
@@ -1945,6 +1983,9 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     drawPublish();
     aiPoll = window.setInterval(() => void loadReviews(), AI_POLL_MS);
     headPoll = window.setInterval(() => { if (!newHead) void checkHead(); }, HEAD_POLL_MS);
+    // The diff may come from the cache at the head the dashboard last saw:
+    // a push since then shows up as "New commits" right away.
+    void checkHead();
     void loadPositions();
   } catch (err) {
     content.innerHTML = `<div class="pd-empty pd-empty--error">${escHtml(errorMessage(err, "Unable to load the diff."))}</div>`;
