@@ -308,6 +308,18 @@ impl Server {
                     ));
                 }
             }
+            if let Some(task_id) = entry.task_id {
+                let in_project = account
+                    .tasks
+                    .iter()
+                    .any(|task| task.id == task_id && Some(task.project_id) == entry.project_id);
+                if !in_project {
+                    return Err(format!(
+                        "taskId {task_id} for \"{}\" is not a task of its projectId — use an id from that project's tasks in toggl_get_day.projects, or omit it.",
+                        entry.description
+                    ));
+                }
+            }
         }
 
         // Rows on top of what is already booked could not be submitted anyway.
@@ -720,6 +732,11 @@ fn suggestion(hint: Option<&ProjectHint>, account: &TogglAccount) -> Value {
             .project_id
             .and_then(|id| account.projects.iter().find(|p| p.id == id))
             .map(|p| p.name.clone()),
+        "taskId": hint.task_id,
+        "task": hint
+            .task_id
+            .and_then(|id| account.tasks.iter().find(|t| t.id == id))
+            .map(|t| t.name.clone()),
         "tags": hint.tags.iter().take(1).collect::<Vec<_>>(),
         "billable": hint.billable,
         "basedOnEntries": hint.uses,
@@ -904,7 +921,19 @@ fn day_view(day: NaiveDate, settings: &AppSettings, context: &TogglDayContext, p
             .projects
             .iter()
             .filter(|p| p.active)
-            .map(|p| json!({ "id": p.id, "name": p.name, "client": p.client_name }))
+            .map(|p| {
+                let tasks: Vec<Value> = account
+                    .tasks
+                    .iter()
+                    .filter(|task| task.project_id == p.id && task.active)
+                    .map(|task| json!({ "id": task.id, "name": task.name }))
+                    .collect();
+                if tasks.is_empty() {
+                    json!({ "id": p.id, "name": p.name, "client": p.client_name })
+                } else {
+                    json!({ "id": p.id, "name": p.name, "client": p.client_name, "tasks": tasks })
+                }
+            })
             .collect::<Vec<_>>(),
         "tags": account.tags.iter().map(|t| t.name.clone()).collect::<BTreeSet<_>>(),
         "gapFilling": if settings.toggl_fill_gaps {
@@ -1081,7 +1110,7 @@ fn tool_definitions() -> Value {
         {
             "name": "toggl_propose_day",
             "title": "Propose a Toggl day to ZuGit",
-            "description": "Hands ZuGit a plan for the free time of one day. Nothing is written to Toggl: ZuGit shows the plan in its planner and the user reviews and submits it. Cover only free time (see toggl_get_day.freeTime), use local HH:MM times aligned to the rounding, never overlap entries. Put the Jira key first in story descriptions (e.g. 'PENT-12 Login page'). One story per entry: never list several keys in one description — split the time between them instead. Work for the sprint as a whole (planning, analysis, estimates, stand-up) carries no key and gets the matching tag. Never put a tag on an entry with a key, except '05. Pair Programming', '06. Supporto al Team' or '07. Code Review'. Omit projectId/tags/billable to let ZuGit fill them from history. Calling it again for the same date replaces the previous proposal.",
+            "description": "Hands ZuGit a plan for the free time of one day. Nothing is written to Toggl: ZuGit shows the plan in its planner and the user reviews and submits it. Cover only free time (see toggl_get_day.freeTime), use local HH:MM times aligned to the rounding, never overlap entries. Put the Jira key first in story descriptions (e.g. 'PENT-12 Login page'). One story per entry: never list several keys in one description — split the time between them instead. Work for the sprint as a whole (planning, analysis, estimates, stand-up) carries no key and gets the matching tag. Never put a tag on an entry with a key, except '05. Pair Programming', '06. Supporto al Team' or '07. Code Review'. Omit projectId/taskId/tags/billable to let ZuGit fill them from history. Calling it again for the same date replaces the previous proposal.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1098,6 +1127,7 @@ fn tool_definitions() -> Value {
                                 "description": { "type": "string" },
                                 "issueKey": { "type": "string", "description": "Jira key when the entry is about a story" },
                                 "projectId": { "type": "integer" },
+                                "taskId": { "type": "integer", "description": "A task of projectId, from its tasks in toggl_get_day.projects" },
                                 "tags": { "type": "array", "items": { "type": "string" } },
                                 "billable": { "type": "boolean" },
                                 "reason": { "type": "string", "description": "Short evidence for this slot, shown to the user" }

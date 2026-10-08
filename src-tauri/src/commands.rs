@@ -1187,6 +1187,7 @@ pub async fn toggl_submit_entries(
                     id,
                     workspace_id,
                     project_id: entry.project_id,
+                    task_id: entry.project_id.and(entry.task_id),
                     description: entry.description.clone(),
                     start: entry.start.clone(),
                     stop: Some(entry.stop.clone()),

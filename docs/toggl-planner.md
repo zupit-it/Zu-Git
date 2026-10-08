@@ -54,6 +54,7 @@ Booked minutes come from the learned Toggl history (`togglHistoryDays`, max 90):
 - **Fields** are always editable. Times: ↑ ↓ ±15 min (Shift ±1 h), or typed absolute (`9`, `930`, `9:30`) or relative (`+45m`, `-15`) — `parseTimeInput`; an end edit moves the boundary with the next row when they touch. Length: `45`, `1h30`, `1:15` — `parseDurationInput`.
 - **Description** suggests today's stories, recurring activities, meeting bookings and past stories (accent-insensitive); picking one, or typing a Jira key, fills project, tag and billable from the learned rules.
 - **Project / tag** open a searchable picker: most used first (usage summed over the learned rules), then A–Z.
+- **Tasks**: a project split into Toggl tasks lists them under it, indented — unfolded for the projects used often and the row's own, folded to a count ("2 task") for the others; typing finds tasks by name too. A task brings its project, the project alone clears the task, and the pill reads "Project › task". Rules learn the task the same way as tags: it sticks when at least half of the entries on that project carried it, and the newest booking wins. A task is sent to Toggl only while it still exists, is active and belongs to the row's project.
 - Re-renders keep scroll position and the focused field with its caret (`data-tg-focus` keys); a `change` fired by a field being swapped out mid-render is ignored.
 
 ## Learned Mapping
@@ -70,7 +71,7 @@ Title normalisation is Unicode-aware on both sides (`normalize_description` in R
 
 | Tool | Effect |
 |---|---|
-| `toggl_get_day` | booked entries, meetings with suggestions, candidate stories, activity spans, free time, gap-filling weights, projects, tags |
+| `toggl_get_day` | booked entries, meetings with suggestions, candidate stories, activity spans, free time, gap-filling weights, projects (with their active tasks), tags |
 | `toggl_propose_day` | validates and saves a plan to `toggl-proposals/<date>.json`; nothing is written to Toggl |
 | `toggl_get_entries` | entries booked over up to 31 days, with totals per task |
 

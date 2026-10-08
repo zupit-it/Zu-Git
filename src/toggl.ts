@@ -22,6 +22,15 @@ interface TogglProject {
   clientName?: string | null;
 }
 
+/** A task inside a project ("Incontri" → "Feedback 1v1"). */
+interface TogglTask {
+  id: number;
+  projectId: number;
+  workspaceId: number;
+  name: string;
+  active: boolean;
+}
+
 interface TogglTag {
   id: number;
   workspaceId: number;
@@ -34,6 +43,7 @@ interface TogglAccount {
   defaultWorkspaceId?: number | null;
   workspaces: { id: number; name: string }[];
   projects: TogglProject[];
+  tasks?: TogglTask[];
   tags: TogglTag[];
 }
 
@@ -41,6 +51,7 @@ interface TogglTimeEntry {
   id: number;
   workspaceId: number;
   projectId?: number | null;
+  taskId?: number | null;
   description: string;
   start: string;
   stop?: string | null;
@@ -61,6 +72,7 @@ interface ActiveIssue {
 
 interface ProjectHint {
   projectId?: number | null;
+  taskId?: number | null;
   tags: string[];
   billable: boolean;
   description?: string | null;
@@ -110,6 +122,7 @@ interface TogglProposal {
     description: string;
     issueKey?: string | null;
     projectId?: number | null;
+    taskId?: number | null;
     tags: string[];
     billable?: boolean | null;
     reason?: string | null;
@@ -138,6 +151,8 @@ interface PlanRow {
   issueKey: string | null;
   description: string;
   projectId: number | null;
+  /** A task of `projectId`, when the project is split into tasks. */
+  taskId: number | null;
   tags: string[];
   billable: boolean;
   /** Where the row came from — a Jira story, the calendar, or the user. */
@@ -350,6 +365,7 @@ function makeRow(
     issueKey: key,
     description,
     projectId: hint?.projectId ?? null,
+    taskId: hint?.taskId ?? null,
     tags: hint?.tags.slice(0, 1) ?? [],
     billable: hint?.billable ?? false,
     source: "story",
@@ -394,6 +410,7 @@ function buildCalendarRows(
       issueKey: null,
       description: hint?.description?.trim() || block.event.summary,
       projectId: hint?.projectId ?? null,
+      taskId: hint?.taskId ?? null,
       tags: hint?.tags.slice(0, 1) ?? [],
       billable: hint?.billable ?? false,
       source: "calendar",
@@ -442,6 +459,9 @@ function buildProposalRows(
       issueKey: key,
       description: entry.description,
       projectId: entry.projectId ?? hint?.projectId ?? null,
+      // The assistant's task, else history's — when history points at the same project.
+      taskId: entry.taskId
+        ?? ((entry.projectId ?? hint?.projectId) === hint?.projectId ? hint?.taskId ?? null : null),
       tags: entry.tags?.length ? entry.tags.slice(0, 1) : (hint?.tags.slice(0, 1) ?? []),
       billable: entry.billable ?? hint?.billable ?? false,
       source: block ? "calendar" : key ? "story" : "manual",
@@ -466,12 +486,13 @@ function buildLockedRows(context: TogglDayContext, dateIso: string, range: Inter
         ? minutesFromMidnight(entry.stop, dateIso)
         : minutesFromMidnight(new Date().toISOString(), dateIso);
       const project = context.account.projects.find((p) => p.id === entry.projectId);
+      const task = taskOf(context, entry.projectId, entry.taskId);
       return {
         id: `locked-${entry.id}`,
         startMin,
         endMin,
         description: entry.description || "(no description)",
-        projectName: project?.name ?? "",
+        projectName: project ? (task ? `${project.name} › ${task.name}` : project.name) : "",
         kind: "story" as const,
       };
     })
@@ -1083,7 +1104,10 @@ export async function openTogglPanel(date?: string) {
   /** Fills project, tags and billable from what history says about `key`. */
   function applyHint(row: PlanRow, hint: ProjectHint | null) {
     if (!hint) return;
-    row.projectId = hint.projectId ?? row.projectId;
+    if (hint.projectId !== null && hint.projectId !== undefined) {
+      row.projectId = hint.projectId;
+      row.taskId = hint.taskId ?? null;
+    }
     row.tags = hint.tags.slice(0, 1);
     row.billable = hint.billable;
   }
@@ -1121,9 +1145,11 @@ export async function openTogglPanel(date?: string) {
     st.edited = true;
 
     if (picker.kind === "project") {
-      const option = projectOptions(context, picker.query)[index];
+      const option = projectOptions(context, picker.query, row.projectId)[index];
       if (!option) return;
+      // A task brings its project; the project alone clears the task.
       row.projectId = option.id;
+      row.taskId = option.taskId;
     } else if (picker.kind === "tag") {
       const option = tagOptions(context, picker.query)[index];
       if (option === undefined) return;
@@ -1143,7 +1169,8 @@ export async function openTogglPanel(date?: string) {
   function optionCount(picker: Picker): number {
     const context = st.context;
     if (!context) return 0;
-    if (picker.kind === "project") return projectOptions(context, picker.query).length;
+    // Same options as on screen: the row's own project unfolds its tasks.
+    if (picker.kind === "project") return projectOptions(context, picker.query, rowById(picker.rowId)?.projectId ?? null).length;
     if (picker.kind === "tag") return tagOptions(context, picker.query).length;
     return descriptionSuggestions(context, picker.query).length;
   }
@@ -1408,6 +1435,7 @@ export async function openTogglPanel(date?: string) {
       issueKey: null,
       description: "",
       projectId: null,
+      taskId: null,
       tags: [],
       billable: false,
       source: "manual",
@@ -1479,6 +1507,7 @@ export async function openTogglPanel(date?: string) {
       issueKey: null,
       description: rule.label,
       projectId: rule.hint.projectId ?? null,
+      taskId: rule.hint.taskId ?? null,
       tags: rule.hint.tags.slice(0, 1),
       billable: rule.hint.billable,
       source: "manual",
@@ -1573,6 +1602,7 @@ export async function openTogglPanel(date?: string) {
           stop: toIsoWithOffset(dateAt(st.date, row.endMin)),
           durationSeconds: (row.endMin - row.startMin) * 60,
           projectId: row.projectId,
+          taskId: taskOf(context, row.projectId, row.taskId)?.id ?? null,
           tags: row.tags,
           billable: row.billable,
           clientRef: row.id,
@@ -1947,6 +1977,8 @@ function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
   const outside = row.startMin < st.range.from || row.endMin > st.range.to;
   const tone = status === "ok" ? `style="background:${color.bg};border-color:${color.bd}"` : "";
   const project = context.account.projects.find((p) => p.id === row.projectId);
+  const task = taskOf(context, row.projectId, row.taskId);
+  const projectLabel = project ? (task ? `${project.name} › ${task.name}` : project.name) : "";
   const picker = st.picker?.rowId === row.id ? st.picker : null;
   const focusKey = (field: string) => `data-tg-focus="${escHtml(row.id)}:${field}"`;
 
@@ -1990,9 +2022,11 @@ function renderCard(row: PlanRow, st: PanelState, clashing: boolean): string {
         </div>
 
         <div class="tg-pick-wrap">
-          <button class="tg-pill tg-pill--button ${project ? "" : "tg-pill--empty"}" data-tg-pick="project" ${focusKey("project")}
-                  type="button" title="${project ? escHtml(project.name) : "Scegli il progetto"}">
-            ${project ? escHtml(project.name) : "No project"}
+          <button class="tg-pill tg-pill--button ${project ? "" : "tg-pill--empty"} ${task ? "has-task" : ""}" data-tg-pick="project" ${focusKey("project")}
+                  type="button" title="${project ? escHtml(projectLabel) : "Scegli il progetto"}">
+            ${project
+              ? `${escHtml(project.name)}${task ? `<span class="tg-pill-task"> › ${escHtml(task.name)}</span>` : ""}`
+              : "No project"}
           </button>
           ${picker?.kind === "project" ? renderProjectPop(picker, context, row) : ""}
         </div>
@@ -2082,33 +2116,92 @@ function projectUsage(rules: LearnedRules): Map<number, number> {
   return usage;
 }
 
+/** The task `taskId` of `projectId`, if it still exists there and is active —
+ *  history can remember a task since closed or moved. */
+function taskOf(context: TogglDayContext, projectId: number | null | undefined, taskId: number | null | undefined): TogglTask | undefined {
+  if (projectId === null || projectId === undefined || taskId === null || taskId === undefined) return undefined;
+  return (context.account.tasks ?? []).find((task) => task.id === taskId && task.projectId === projectId && task.active);
+}
+
+/** How often each task shows up in what history learned. */
+function taskUsage(rules: LearnedRules): Map<number, number> {
+  const usage = new Map<number, number>();
+  const hints = [
+    ...Object.values(rules.byKey),
+    ...Object.values(rules.byPrefix),
+    ...Object.values(rules.byEvent ?? {}),
+    ...rules.recurring.map((rule) => rule.hint),
+  ];
+  for (const hint of hints) {
+    if (hint.taskId !== null && hint.taskId !== undefined) {
+      usage.set(hint.taskId, (usage.get(hint.taskId) ?? 0) + (hint.uses || 1));
+    }
+  }
+  return usage;
+}
+
 interface ProjectOption {
+  /** The project — also for a task, which books on its project. */
   id: number;
+  /** Set on a task's option; null picks the project alone. */
+  taskId: number | null;
+  /** The project's or the task's name. */
   name: string;
+  /** Under a project: its client. Under a task: its project. */
   client: string;
+  /** Tasks folded away under the project, shown as "4 task". */
+  taskCount?: number;
   /** Section header shown above this option, if it starts one. */
   section?: string;
 }
 
-/** Projects for the picker: the ones used most first, then the rest A–Z; while
- *  typing, only the matches, best first. */
-function projectOptions(context: TogglDayContext, query: string): ProjectOption[] {
+/**
+ * Projects for the picker: the ones used most first, then the rest A–Z; while
+ * typing, only the matches, best first. A project split into tasks lists them
+ * under it, indented, most used first — unfolded for the projects used often
+ * and the row's own, folded to a count for the others; typing finds tasks by
+ * name too.
+ */
+function projectOptions(context: TogglDayContext, query: string, currentProjectId: number | null = null): ProjectOption[] {
   const usage = projectUsage(context.rules);
+  const usedTasks = taskUsage(context.rules);
   const projects = context.account.projects
     .filter((project) => project.workspaceId === context.workspaceId)
     .map((project) => ({ id: project.id, name: project.name, client: project.clientName ?? "", active: project.active }));
+  const tasksOf = (projectId: number) =>
+    (context.account.tasks ?? [])
+      .filter((task) => task.projectId === projectId && task.active)
+      .sort((a, b) => (usedTasks.get(b.id) ?? 0) - (usedTasks.get(a.id) ?? 0) || a.name.localeCompare(b.name));
+
+  type Project = (typeof projects)[number];
+  /** The project's option, then the tasks to show under it. */
+  const withTasks = (project: Project, shown: TogglTask[] | "folded"): ProjectOption[] => {
+    const all = tasksOf(project.id);
+    const folded = shown === "folded";
+    return [
+      { id: project.id, taskId: null, name: project.name, client: project.client, taskCount: folded && all.length ? all.length : undefined },
+      ...(folded ? [] : shown).map((task) => ({ id: project.id, taskId: task.id, name: task.name, client: project.name })),
+    ];
+  };
 
   if (query.trim()) {
     const q = fold(query.trim());
-    return projects
-      .filter((project) => matchesQuery(`${project.name} ${project.client}`, query))
+    const ranked = projects
+      .map((project) => {
+        const named = matchesQuery(`${project.name} ${project.client}`, query);
+        // A matching project shows all its tasks; otherwise only the tasks that match.
+        const tasks = named ? tasksOf(project.id) : tasksOf(project.id).filter((task) => matchesQuery(task.name, query));
+        return { project, named, tasks };
+      })
+      .filter(({ named, tasks }) => named || tasks.length > 0)
       .sort(
         (a, b) =>
-          Number(fold(b.name).startsWith(q)) - Number(fold(a.name).startsWith(q)) ||
-          (usage.get(b.id) ?? 0) - (usage.get(a.id) ?? 0) ||
-          a.name.localeCompare(b.name),
-      )
-      .slice(0, 30);
+          Number(b.named) - Number(a.named) ||
+          Number(fold(b.project.name).startsWith(q)) - Number(fold(a.project.name).startsWith(q)) ||
+          (usage.get(b.project.id) ?? 0) - (usage.get(a.project.id) ?? 0) ||
+          a.project.name.localeCompare(b.project.name),
+      );
+    return ranked.flatMap(({ project, tasks }) => withTasks(project, tasks)).slice(0, 40);
   }
 
   const frequent = projects
@@ -2118,9 +2211,13 @@ function projectOptions(context: TogglDayContext, query: string): ProjectOption[
   const rest = projects
     .filter((project) => !frequent.includes(project) && project.active)
     .sort((a, b) => a.name.localeCompare(b.name));
+  const open = (project: Project) =>
+    frequent.includes(project) || project.id === currentProjectId ? tasksOf(project.id) : ("folded" as const);
+  const section = (options: ProjectOption[], name: string | undefined) =>
+    options.map((option, i) => (i === 0 ? { ...option, section: name } : option));
   return [
-    ...frequent.map((project, i) => ({ ...project, section: i === 0 ? "Usati spesso" : undefined })),
-    ...rest.map((project, i) => ({ ...project, section: i === 0 && frequent.length ? "Tutti" : undefined })),
+    ...frequent.flatMap((project, i) => section(withTasks(project, open(project)), i === 0 ? "Usati spesso" : undefined)),
+    ...rest.flatMap((project, i) => section(withTasks(project, open(project)), i === 0 && frequent.length ? "Tutti" : undefined)),
   ];
 }
 
@@ -2195,23 +2292,26 @@ function descriptionSuggestions(context: TogglDayContext, query: string): Sugges
     .slice(0, Math.max(8, context.issues.length));
 }
 
-function projectName(context: TogglDayContext, id: number | null | undefined): string {
-  return context.account.projects.find((project) => project.id === id)?.name ?? "";
+/** "Project", or "Project › task" when a task of it is given. */
+function projectName(context: TogglDayContext, id: number | null | undefined, taskId?: number | null): string {
+  const name = context.account.projects.find((project) => project.id === id)?.name ?? "";
+  const task = taskOf(context, id, taskId);
+  return name && task ? `${name} › ${task.name}` : name;
 }
 
 function renderOptions<T>(
   picker: Picker,
   options: T[],
   label: (option: T) => string,
-  extra: (option: T) => { meta?: string; section?: string; current?: boolean },
+  extra: (option: T) => { meta?: string; section?: string; current?: boolean; nested?: boolean },
 ): string {
   if (options.length === 0) return `<div class="tg-pop-empty">Nessun risultato</div>`;
   return options
     .map((option, index) => {
-      const { meta, section, current } = extra(option);
+      const { meta, section, current, nested } = extra(option);
       return `
         ${section ? `<div class="tg-pop-section">${escHtml(section)}</div>` : ""}
-        <button class="tg-pop-option ${index === picker.index ? "is-active" : ""} ${current ? "is-current" : ""}"
+        <button class="tg-pop-option ${nested ? "tg-pop-option--nested" : ""} ${index === picker.index ? "is-active" : ""} ${current ? "is-current" : ""}"
                 data-tg-pick-option="${index}" type="button" tabindex="-1">
           <span class="tg-pop-label">${escHtml(label(option))}</span>
           ${meta ? `<span class="tg-pop-meta">${escHtml(meta)}</span>` : ""}
@@ -2230,14 +2330,18 @@ function renderPop(picker: Picker, placeholder: string, list: string): string {
 }
 
 function renderProjectPop(picker: Picker, context: TogglDayContext, row: PlanRow): string {
-  const options = projectOptions(context, picker.query);
+  const options = projectOptions(context, picker.query, row.projectId);
+  const rowTask = taskOf(context, row.projectId, row.taskId)?.id ?? null;
   return renderPop(
     picker,
-    "Cerca progetto o cliente…",
+    "Cerca progetto, task o cliente…",
     renderOptions(picker, options, (option) => option.name, (option) => ({
-      meta: option.client,
+      meta: option.taskId !== null
+        ? undefined
+        : [option.client, option.taskCount ? `${option.taskCount} task` : ""].filter(Boolean).join(" · "),
       section: option.section,
-      current: option.id === row.projectId,
+      nested: option.taskId !== null,
+      current: option.id === row.projectId && option.taskId === rowTask,
     })),
   );
 }
@@ -2260,7 +2364,7 @@ function renderDescriptionPop(picker: Picker, context: TogglDayContext): string 
   return `
     <div class="tg-pop tg-pop--suggest" data-tg-pop>
       <div class="tg-pop-list">${renderOptions(picker, options, (option) => option.description, (option) => ({
-        meta: [projectName(context, option.hint?.projectId), option.meta].filter(Boolean).join(" · "),
+        meta: [projectName(context, option.hint?.projectId, option.hint?.taskId), option.meta].filter(Boolean).join(" · "),
       }))}</div>
     </div>`;
 }

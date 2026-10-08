@@ -5339,6 +5339,9 @@ ul.field-hint {
 }
 .tg-pill--button:hover,
 .tg-pill--button:focus-visible { border-color: var(--border-strong); color: var(--ink); outline: none; }
+/* "Project › task": the task reads lighter, and the pill may grow a little for it. */
+.tg-pill--button.has-task { max-width: 230px; }
+.tg-pill-task { font-weight: 500; color: var(--ink-soft); }
 .tg-pill-tag--button {
   max-width: 120px;
   padding: 2px 4px;
@@ -5413,6 +5416,11 @@ ul.field-hint {
 .tg-pop-option:hover,
 .tg-pop-option.is-active { background: var(--accent-soft); }
 .tg-pop-option.is-current .tg-pop-label { font-weight: 700; }
+/* A project's tasks sit under it, indented, as in Toggl. */
+.tg-pop-option--nested { padding-left: 22px; }
+.tg-pop-option--nested .tg-pop-label { color: var(--ink-soft); }
+.tg-pop-option--nested .tg-pop-label::before { content: "•"; margin-right: 7px; color: var(--ink-faint); }
+.tg-pop-option--nested.is-current .tg-pop-label { color: var(--ink); }
 .tg-pop-label {
   flex: 1;
   min-width: 0;

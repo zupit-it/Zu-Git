@@ -579,6 +579,9 @@ pub struct ProposedEntry {
     pub issue_key: Option<String>,
     #[serde(default)]
     pub project_id: Option<i64>,
+    /// A task of `project_id`.
+    #[serde(default)]
+    pub task_id: Option<i64>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -664,6 +667,7 @@ mod tests {
             description: description.into(),
             issue_key: Some(" pent-1 ".into()),
             project_id: None,
+            task_id: None,
             tags: vec![],
             billable: None,
             reason: None,

@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Toggl planner: tasks** — projects split into Toggl tasks ("Incontri" → "Feedback 1v1") list them
+  in the project picker, indented under the project: unfolded for the projects you use often and
+  the row's own, folded to a count for the others, and found by name when typing. Picking a task
+  sets its project too, the row reads "Incontri › Feedback 1v1", and the entry is created on that
+  task. Entries already on Toggl show their task, history learns the task used for each story,
+  meeting and recurring activity (the mapping is re-learned once to pick tasks up), and an AI
+  assistant sees each project's tasks and can propose one.
+
 ### Changed
 - **Faster PR diff** — GitHub takes about half a second per answer, and opening a diff asked it
   three times in a row. The files are now read together with the PR's head (two round trips, not

@@ -50,6 +50,18 @@ pub struct TogglProject {
     pub client_name: Option<String>,
 }
 
+/// A task inside a project ("Incontri" → "Feedback 1v1"): Toggl's finer
+/// grain under the project, booked with `task_id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TogglTask {
+    pub id: i64,
+    pub project_id: i64,
+    pub workspace_id: i64,
+    pub name: String,
+    pub active: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TogglTag {
@@ -64,6 +76,8 @@ pub struct TogglTimeEntry {
     pub id: i64,
     pub workspace_id: i64,
     pub project_id: Option<i64>,
+    #[serde(default)]
+    pub task_id: Option<i64>,
     pub description: String,
     /// RFC3339, as returned by Toggl (UTC).
     pub start: String,
@@ -82,6 +96,9 @@ pub struct TogglAccount {
     pub default_workspace_id: Option<i64>,
     pub workspaces: Vec<TogglWorkspace>,
     pub projects: Vec<TogglProject>,
+    /// Tasks of those projects, active first then by name.
+    #[serde(default)]
+    pub tasks: Vec<TogglTask>,
     /// Tags defined in the workspaces — the options offered by the tag picker.
     pub tags: Vec<TogglTag>,
 }
@@ -100,8 +117,22 @@ struct RawMe {
     workspaces: Vec<RawWorkspace>,
     #[serde(default)]
     projects: Vec<RawProject>,
+    /// Null, not empty, when the user has no tasks.
+    #[serde(default)]
+    tasks: Option<Vec<RawTask>>,
     #[serde(default)]
     tags: Vec<RawTag>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawTask {
+    id: i64,
+    project_id: i64,
+    workspace_id: i64,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    active: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +173,8 @@ struct RawTimeEntry {
     workspace_id: i64,
     #[serde(default)]
     project_id: Option<i64>,
+    #[serde(default)]
+    task_id: Option<i64>,
     #[serde(default)]
     description: Option<String>,
     start: String,
@@ -197,6 +230,20 @@ pub async fn fetch_account(
     // Active first, then alphabetical — the order the picker renders them in.
     projects.sort_by(|a, b| b.active.cmp(&a.active).then_with(|| a.name.cmp(&b.name)));
 
+    let mut tasks: Vec<TogglTask> = me
+        .tasks
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| TogglTask {
+            name: t.name.unwrap_or_else(|| format!("Task {}", t.id)),
+            id: t.id,
+            project_id: t.project_id,
+            workspace_id: t.workspace_id,
+            active: t.active.unwrap_or(true),
+        })
+        .collect();
+    tasks.sort_by(|a, b| b.active.cmp(&a.active).then_with(|| a.name.cmp(&b.name)));
+
     Ok(TogglAccount {
         fullname: me.fullname.unwrap_or_default(),
         email: me.email.unwrap_or_default(),
@@ -210,6 +257,7 @@ pub async fn fetch_account(
             })
             .collect(),
         projects,
+        tasks,
         tags: me
             .tags
             .into_iter()
@@ -257,6 +305,7 @@ pub async fn fetch_time_entries(
             id: e.id,
             workspace_id: e.workspace_id,
             project_id: e.project_id,
+            task_id: e.task_id,
             description: e.description.unwrap_or_default(),
             start: e.start,
             stop: e.stop,
@@ -278,6 +327,9 @@ pub struct NewTimeEntry {
     pub stop: String,
     pub duration_seconds: i64,
     pub project_id: Option<i64>,
+    /// A task of `project_id`; ignored without a project.
+    #[serde(default)]
+    pub task_id: Option<i64>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -323,6 +375,7 @@ pub async fn create_time_entry(
         "stop": entry.stop,
         "duration": entry.duration_seconds,
         "project_id": entry.project_id,
+        "task_id": entry.project_id.and(entry.task_id),
         "tags": entry.tags,
         "billable": entry.billable,
     });
@@ -365,6 +418,9 @@ pub async fn create_time_entry(
 #[serde(rename_all = "camelCase")]
 pub struct ProjectHint {
     pub project_id: Option<i64>,
+    /// The task of `project_id` it was booked on, when the project has tasks.
+    #[serde(default)]
+    pub task_id: Option<i64>,
     #[serde(default)]
     pub tags: Vec<String>,
     /// Majority of the past entries for this key were billable.
@@ -392,7 +448,8 @@ pub struct RecurringHint {
 ///
 /// 2: `by_event` (calendar ↔ entry matching) and Unicode-aware normalisation.
 /// 3: minutes booked per story, minutes per story point.
-pub const RULES_VERSION: u32 = 3;
+/// 4: the task inside the project.
+pub const RULES_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -435,6 +492,8 @@ pub struct LearnedRules {
 #[derive(Default)]
 struct Votes {
     projects: HashMap<i64, u32>,
+    /// (project, task) — a task only means something inside its project.
+    tasks: HashMap<(i64, i64), u32>,
     tags: HashMap<String, u32>,
     descriptions: HashMap<String, u32>,
     billable: u32,
@@ -449,6 +508,9 @@ impl Votes {
         }
         if let Some(pid) = entry.project_id {
             *self.projects.entry(pid).or_default() += 1;
+            if let Some(task) = entry.task_id {
+                *self.tasks.entry((pid, task)).or_default() += 1;
+            }
         }
         for tag in &entry.tags {
             *self.tags.entry(tag.clone()).or_default() += 1;
@@ -465,6 +527,18 @@ impl Votes {
             .iter()
             .max_by_key(|(pid, count)| (**count, **pid))
             .map(|(pid, _)| *pid);
+
+        // The task sticks, like a tag, when at least half of the entries on
+        // that project carried it.
+        let task_id = project_id.and_then(|pid| {
+            let on_project = self.projects.get(&pid).copied().unwrap_or(0);
+            self.tasks
+                .iter()
+                .filter(|((project, _), _)| *project == pid)
+                .max_by_key(|((_, task), count)| (**count, *task))
+                .filter(|(_, count)| **count >= on_project.div_ceil(2).max(1))
+                .map(|((_, task), _)| *task)
+        });
 
         // A tag only sticks if it was used on at least half of the entries —
         // otherwise a one-off tag would be replayed onto every new entry.
@@ -484,6 +558,7 @@ impl Votes {
 
         ProjectHint {
             project_id,
+            task_id,
             tags: tags.into_iter().map(|(tag, _)| tag).collect(),
             // Billable when most past entries were — same majority rule as tags.
             billable: self.billable >= threshold,
@@ -739,6 +814,7 @@ pub fn reinforce_rules(rules: &mut LearnedRules, entries: &[TogglTimeEntry], lea
                     normalized,
                     hint: ProjectHint {
                         project_id: entry.project_id,
+                        task_id: entry.project_id.and(entry.task_id),
                         tags: entry.tags.clone(),
                         billable: entry.billable,
                         description: Some(entry.description.trim().to_string()),
@@ -763,6 +839,7 @@ pub fn reinforce_rules(rules: &mut LearnedRules, entries: &[TogglTimeEntry], lea
 fn reinforce_hint(hint: &mut ProjectHint, entry: &TogglTimeEntry) {
     if entry.project_id.is_some() {
         hint.project_id = entry.project_id;
+        hint.task_id = entry.task_id;
     }
     hint.tags = entry.tags.clone();
     hint.billable = entry.billable;
@@ -782,6 +859,7 @@ mod tests {
             id: 1,
             workspace_id: 1,
             project_id,
+            task_id: None,
             description: description.to_string(),
             start: "2026-07-01T08:00:00Z".to_string(),
             stop: Some("2026-07-01T09:00:00Z".to_string()),
@@ -789,6 +867,32 @@ mod tests {
             tags: tags.iter().map(|t| t.to_string()).collect(),
             billable: false,
         }
+    }
+
+    #[test]
+    fn learns_the_task_used_on_most_entries_of_the_project() {
+        let with_task = |description: &str, project: i64, task: Option<i64>| TogglTimeEntry {
+            task_id: task,
+            ..entry(description, Some(project), &[])
+        };
+        let entries = vec![
+            with_task("Retro", 40, Some(7)),
+            with_task("Retro", 40, Some(7)),
+            with_task("Retro", 40, None),
+            // One-off task: below half of the project's entries, it does not stick.
+            with_task("PENT-1 login", 10, Some(3)),
+            with_task("PENT-1 login", 10, None),
+            with_task("PENT-1 login", 10, None),
+        ];
+        let rules = learn_from_entries(&entries, "2026-07-02T00:00:00Z".to_string());
+        let retro = rules.recurring.iter().find(|rule| rule.normalized == "retro").unwrap();
+        assert_eq!((retro.hint.project_id, retro.hint.task_id), (Some(40), Some(7)));
+        assert_eq!(rules.by_key["PENT-1"].task_id, None);
+
+        // Booking it by hand: the newest choice wins, task included.
+        let mut rules = rules;
+        reinforce_rules(&mut rules, &[with_task("PENT-1 login", 10, Some(3))], "now".to_string());
+        assert_eq!(rules.by_key["PENT-1"].task_id, Some(3));
     }
 
     #[test]
