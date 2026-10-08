@@ -51,6 +51,15 @@ When a release branch is picked:
 - the commits after the tag are scanned too, so a cherry-pick pushed without a PR still marks its story as merged; the row links to the original PR when the message carries `(#123)` or `Merge pull request #123`, otherwise to the commit
 - a story with a terminal Jira status (Verified, Done…) is **not** assumed to be on the branch: without a matching PR or commit it stays *Missing*, flagged "Jira ahead of git" — that is the cherry-pick still to do
 
+- a story can land on main more than once — its first release, then a rework after a reject, with
+  the same Jira key in the title whatever the prefix (`feat(PENT-1)`, `fix(PENT-1)`). It is on the
+  branch only when **all** its PRs on main are: a PR naming the main PR (`(#123)`, kept by a
+  cherry-pick) settles it; otherwise a main PR merged before the story's latest pick counts as picked
+  (a pick always follows the merge it brings) and one merged after it cannot be there yet. Picked once
+  but with a later rework missing, the story is *Missing*, flagged "Rework not picked", and its row
+  links the rework to pick. With no pick at all since the branch's tag, only the story's last PR is
+  known to be missing — the earlier ones may have shipped with that tag.
+
 The branch picked is remembered per release name on this machine, so reopening the diff of a minor release lands on its branch again.
 
 ## Release Map
@@ -80,6 +89,11 @@ main; a story's stop on main is its last PR there.
 - main PRs of other releases collapse into `+N` stops, and beta tags show as flags above main;
 - what reached the branch without a stop on main (a hotfix, or a story older than main's window)
   and stories not merged on main yet are queued after HEAD.
+
+A story merged more than once stops at each of its PRs: the later ones carry a `↻` (rework), hovering
+any of them lights all of them, and the tooltip lists the story's PRs in order — on a release branch
+with where each one is (on the branch, not picked, or before the tag). The list links the latest PR
+and counts the earlier ones (`+1`).
 
 A PR carrying several stories — `feat(PENT-1234,PENT-1235): …` — is a single stop labelled
 `PENT-1234 +1`, on main, on the branch and among the ghosts (an open PR counts for every key in its

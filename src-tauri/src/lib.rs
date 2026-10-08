@@ -8,6 +8,7 @@ mod mcp;
 mod mcp_setup;
 mod models;
 mod pr_review;
+mod release_picks;
 mod secret_store;
 mod storage;
 mod toggl;

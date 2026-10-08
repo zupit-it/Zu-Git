@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { escHtml } from "./utils";
 import { state } from "./state";
-import { buildReleaseMapLayout, type Mainline, type MapLayout, type OpenPr } from "./release-map-layout";
+import { buildReleaseMapLayout, type ItemPr, type Mainline, type MapLayout, type OpenPr } from "./release-map-layout";
 import { applyMapZoom, clampMapZoom, fitMapZoom, renderReleaseMap, renderTooltip } from "./release-map";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -25,6 +25,8 @@ interface ReleaseDiffItem {
   epicName?: string;
   /** When it landed on the compared branch. */
   mergedAt?: string;
+  /** Every PR of the story, oldest first: its release, then reworks after a reject. */
+  prs?: ItemPr[];
 }
 
 type ItemKind = "done" | "missing" | "extra";
@@ -300,10 +302,16 @@ function renderStatusChip(status: string): string {
   return `<span class="rd-status-chip" style="background:${s.bg};color:${s.fg};border:1px solid ${s.bd}">${escHtml(s.label)}</span>`;
 }
 
-function renderFlagChip(flag: string, branch: string): string {
+function renderFlagChip(item: ReleaseDiffItem, branch: string): string {
+  const flag = item.flag ?? "";
+  const unpicked = (item.prs ?? []).filter(pr => pr.picked === false).map(pr => `#${pr.number}`).join(", ");
   const cfg: Record<string, { label: string; hint: string }> = {
     "no-pr":   { label: "Jira ahead of git", hint: `Status is set in Jira but no merged PR or commit was found on ${branch}.` },
     "no-jira": { label: "Git ahead of Jira", hint: `Merged on ${branch} but Jira status hasn't caught up.` },
+    "rework-not-picked": {
+      label: "Rework not picked",
+      hint: `The story is on ${branch}, but its rework${unpicked ? ` (PR ${unpicked})` : ""} was merged on main after the last pick and is not there yet.`,
+    },
   };
   const c = cfg[flag];
   if (!c) return "";
@@ -386,7 +394,7 @@ function renderItem(st: ModalState, item: ReleaseDiffItem, kind: ItemKind): stri
 
   // Divergence column — flag chip and/or jira-version chip and/or preview
   let divergence = "";
-  if (item.flag) divergence += renderFlagChip(item.flag, branchLabel(st));
+  if (item.flag) divergence += renderFlagChip(item, branchLabel(st));
   const divergent = divergentVersions(item, currentVersion);
   if (divergent.length > 0 && kind === "extra") {
     const label = divergent.join(", ");
@@ -401,8 +409,15 @@ function renderItem(st: ModalState, item: ReleaseDiffItem, kind: ItemKind): stri
 
   // A cherry-pick pushed without a PR of its own links to the commit instead.
   const prLabel = item.prNumber ? `PR #${item.prNumber}` : item.prUrl?.includes("/commit/") ? "Commit" : "PR";
+  // A story merged more than once (release, then rework after a reject) links
+  // its latest PR and says how many came before.
+  const prs = item.prs ?? [];
+  const prTitle = prs.length > 1
+    ? prs.map((pr, n) => `${n === 0 ? "Release" : "Rework"}: ${pr.number ? `PR #${pr.number}` : "commit"}`).join(" · ")
+    : item.prUrl ?? "";
+  const morePrs = prs.length > 1 ? `<span class="rd-pr-more">+${prs.length - 1}</span>` : "";
   const prCol = item.prUrl
-    ? `<div class="rd-pr-col"><a class="rd-pr-link" data-pr-link="${escHtml(item.prUrl)}" href="#" title="${escHtml(item.prUrl)}">${escHtml(prLabel)} ${I.ext}</a></div>`
+    ? `<div class="rd-pr-col"><a class="rd-pr-link" data-pr-link="${escHtml(item.prUrl)}" href="#" title="${escHtml(prTitle)}">${escHtml(prLabel)} ${I.ext}</a>${morePrs}</div>`
     : `<div class="rd-pr-col"></div>`;
 
   return `<div class="rd-item" data-rd-item="${escHtml(item.key)}">
@@ -771,6 +786,9 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     panel.innerHTML = renderReleaseMap(mapLayout, { visibleKeys: visibleKeys(st), collapsed: st.mapCollapsed, zoom: st.mapZoom });
     panel.classList.toggle("rm-panel--collapsed", st.mapCollapsed);
     applyMapZoom(panel, st.mapZoom);
+    // The old stops are gone: a focused stop starts over, a hovered row keeps its highlight.
+    focusedId = null;
+    if (focusedRowKey) setHighlight([focusedRowKey]);
     const scroller = panel.querySelector<HTMLElement>("[data-rm-scroll]");
     if (!scroller) return;
     scroller.addEventListener("scroll", () => updateMapFades(scroller), { passive: true });
@@ -803,7 +821,7 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     const ratio = next / st.mapZoom;
     const target = (scroller.scrollLeft + anchor) * ratio - anchor;
     st.mapZoom = next;
-    hideTooltip();
+    clearFocus();
     applyMapZoom(panel, next);
     scroller.scrollLeft = target;
     updateMapFades(scroller);
@@ -817,35 +835,88 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
     scroller.classList.toggle("rm-scroll--more-right", scroller.scrollLeft < max - 2);
   }
 
-  function highlightKeys(keys: string[], on: boolean) {
-    const panel = overlay.querySelector<HTMLElement>("[data-rd-map]");
+  // ── Map hover ──────────────────────────────────────────────────────────────
+  // One focused stop at a time. Entering waits a beat and leaving waits a
+  // little longer, so sweeping the cursor across the map neither blinks every
+  // stop it crosses nor drops the tooltip on the way to it; moving straight
+  // from one stop to the next swaps the focus without fading back in between.
+
+  const HOVER_IN_MS = 70;
+  const HOVER_OUT_MS = 160;
+  let focusedId: string | null = null;
+  let focusedRowKey: string | null = null;
+  let enterTimer: number | undefined;
+  let leaveTimer: number | undefined;
+
+  function mapPanel(): HTMLElement | null {
+    return overlay.querySelector<HTMLElement>("[data-rd-map]");
+  }
+
+  function setHighlight(keys: string[]) {
+    const panel = mapPanel();
     if (!panel) return;
+    panel.querySelectorAll(".rm-hl").forEach(el => el.classList.remove("rm-hl"));
     for (const key of keys) {
-      panel.querySelectorAll(`[data-rm-keys~="${CSS.escape(key)}"]`).forEach(el => el.classList.toggle("rm-hl", on));
+      panel.querySelectorAll(`[data-rm-keys~="${CSS.escape(key)}"]`).forEach(el => el.classList.add("rm-hl"));
     }
-    panel.classList.toggle("rm-panel--focus", on && keys.length > 0);
+    panel.classList.toggle("rm-panel--focus", keys.length > 0);
+  }
+
+  function stationKeys(el: HTMLElement): string[] {
+    return (el.dataset.rmKeys ?? "").split(" ").filter(Boolean);
+  }
+
+  function focusStation(el: HTMLElement) {
+    const id = el.dataset.rmId ?? null;
+    if (id === focusedId) return;
+    focusedId = id;
+    focusedRowKey = null;
+    setHighlight(stationKeys(el));
+    showTooltip(el);
+  }
+
+  function focusRow(key: string) {
+    if (focusedRowKey === key && focusedId === null) return;
+    focusedId = null;
+    focusedRowKey = key;
+    hideTooltip();
+    setHighlight([key]);
+  }
+
+  function clearFocus() {
+    focusedId = null;
+    focusedRowKey = null;
+    setHighlight([]);
+    hideTooltip();
+  }
+
+  function cancelTimers() {
+    window.clearTimeout(enterTimer);
+    window.clearTimeout(leaveTimer);
   }
 
   function showTooltip(stationEl: Element) {
-    const panel = overlay.querySelector<HTMLElement>("[data-rd-map]");
+    const panel = mapPanel();
     const tip = panel?.querySelector<HTMLElement>("[data-rm-tip]");
     const canvas = panel?.querySelector<HTMLElement>(".rm-canvas");
     const id = (stationEl as HTMLElement).dataset.rmId;
     const station = mapLayout?.stations.find(s => s.id === id);
     if (!tip || !canvas || !station || !mapLayout) return;
+    // Swapping from one stop to the next moves the tooltip without replaying its entrance.
+    tip.classList.toggle("rm-tip--swap", !tip.hidden);
     tip.innerHTML = renderTooltip(mapLayout, station, renderStatusChip, mapOpenPrs);
     tip.hidden = false;
 
     const box = canvas.getBoundingClientRect();
-    const target = stationEl.querySelector(".rm-shape, .rm-pill") ?? stationEl;
+    const target = stationEl.querySelector(".rm-hit, .rm-pill") ?? stationEl;
     const at = target.getBoundingClientRect();
     const cx = at.left + at.width / 2 - box.left;
     const left = Math.min(Math.max(cx - tip.offsetWidth / 2, 8), box.width - tip.offsetWidth - 8);
     // Above the stop when there is room inside the modal, otherwise below.
     const shellTop = overlay.querySelector(".rd-shell")?.getBoundingClientRect().top ?? 0;
-    const above = at.top - tip.offsetHeight - 10 > shellTop;
+    const above = at.top - tip.offsetHeight - 4 > shellTop;
     tip.style.left = `${left}px`;
-    tip.style.top = above ? `${at.top - box.top - tip.offsetHeight - 10}px` : `${at.bottom - box.top + 10}px`;
+    tip.style.top = above ? `${at.top - box.top - tip.offsetHeight - 4}px` : `${at.bottom - box.top + 4}px`;
     tip.classList.toggle("rm-tip--below", !above);
   }
 
@@ -878,26 +949,39 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
 
   overlay.addEventListener("mouseover", (e) => {
     const target = e.target as Element;
-    const station = target.closest<HTMLElement>("[data-rm-id]");
-    if (station) {
-      highlightKeys((station.dataset.rmKeys ?? "").split(" ").filter(Boolean), true);
-      showTooltip(station);
+    const inTip = target.closest("[data-rm-tip]");
+    if (inTip) {
+      // Reaching the tooltip keeps it — and the focus — open.
+      window.clearTimeout(leaveTimer);
       return;
     }
-    const row = target.closest<HTMLElement>("[data-rd-item]");
-    if (row?.dataset.rdItem) highlightKeys([row.dataset.rdItem], true);
+    const station = target.closest<HTMLElement>("[data-rm-id]");
+    const row = station ? null : target.closest<HTMLElement>("[data-rd-item]");
+    if (!station && !row?.dataset.rdItem) return;
+    cancelTimers();
+    const apply = () => {
+      if (station) focusStation(station);
+      else if (row?.dataset.rdItem) focusRow(row.dataset.rdItem);
+    };
+    // Something is already focused: swap right away. Otherwise wait a beat.
+    if (focusedId !== null || focusedRowKey !== null) apply();
+    else enterTimer = window.setTimeout(apply, HOVER_IN_MS);
   });
 
   overlay.addEventListener("mouseout", (e) => {
     const target = e.target as Element;
-    const from = target.closest<HTMLElement>("[data-rm-id], [data-rd-item]");
-    if (!from || from.contains(e.relatedTarget as Node | null)) return;
-    overlay.querySelectorAll(".rm-hl").forEach(el => el.classList.remove("rm-hl"));
-    overlay.querySelector("[data-rd-map]")?.classList.remove("rm-panel--focus");
-    hideTooltip();
+    const from = target.closest<HTMLElement>("[data-rm-id], [data-rd-item], [data-rm-tip]");
+    const to = e.relatedTarget as Element | null;
+    if (!from || (to && from.contains(to))) return;
+    window.clearTimeout(enterTimer);
+    window.clearTimeout(leaveTimer);
+    leaveTimer = window.setTimeout(clearFocus, HOVER_OUT_MS);
   });
 
-  overlay.querySelector("[data-rd-map]")?.addEventListener("scroll", hideTooltip, true);
+  overlay.querySelector("[data-rd-map]")?.addEventListener("scroll", () => {
+    cancelTimers();
+    clearFocus();
+  }, true);
 
   // Pinch on a trackpad arrives as ctrl + wheel; ⌘/Ctrl + wheel does the same with a mouse.
   overlay.querySelector("[data-rd-map]")?.addEventListener("wheel", (e) => {
@@ -991,6 +1075,13 @@ function buildModal(releaseName: string, result: ReleaseDiffResult, repos: strin
         const scroller = panel.querySelector<HTMLElement>("[data-rm-scroll]");
         if (scroller) { scroller.scrollLeft = 0; updateMapFades(scroller); }
       }
+      return;
+    }
+
+    // Release map — a story in the tooltip leads to its row
+    const tipRow = target.closest<HTMLElement>("[data-rm-reveal]");
+    if (tipRow?.dataset.rmReveal) {
+      revealRows([tipRow.dataset.rmReveal]);
       return;
     }
 

@@ -29,6 +29,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   local clone with read-only git, else through a GitHub connector or MCP it has (read-only, at that
   commit, never commenting or pushing with it), else from the patches — saying so in its summary.
 
+### Fixed
+- **Release diff: stories merged twice** — a story released, rejected and fixed lands on main twice,
+  with the same key in both titles (`feat(PENT-1)` then `fix(PENT-1)` or `feat(PENT-1)` again). On a
+  release branch it used to look done as soon as one of the two was picked, so a fix never picked
+  went unnoticed. Now every PR of the story must be on the branch: with the first release picked and
+  the rework not, the story is *Missing* with **Rework not picked**, linking the PR to pick. Rows link
+  the latest PR and count the earlier ones; on the map the story stops at each PR, reworks marked
+  `↻`, and the tooltip lists them all with where each one is.
+- **Release map: calm hover** — sweeping the cursor across the map no longer blinks every stop it
+  crosses: a stop takes focus only when the cursor rests on it, and moving from one stop to the next
+  swaps the focus without fading the map back in between. The rest of the map steps back less (it
+  stays readable). The tooltip stays open while the cursor is on it, and a multi-story stop shows
+  every story's full title; click one to jump to its row. HEAD no longer overlaps a stop's caption.
+
 ---
 
 ## [2.0.1] - 2026-10-08

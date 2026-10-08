@@ -23,6 +23,16 @@ export interface MapItem {
   avatarUrl?: string;
   flag?: string;
   mergedAt?: string;
+  /** Every PR of the story, oldest first; more than one is a rework after a reject. */
+  prs?: ItemPr[];
+}
+
+export interface ItemPr {
+  number: number;
+  url: string;
+  mergedAt: string;
+  /** Release branch only: on the branch, not there, or unknown (null). */
+  picked?: boolean | null;
 }
 
 export interface MainlineCommit {
@@ -89,6 +99,8 @@ export interface Station {
   titles?: string[];
   /** The PR that put the stop on main, when it is known from main's history. */
   mainPr?: { number: number; mergedAt: string };
+  /** The stop is a story's second (or later) PR: a rework after a reject. */
+  rework?: boolean;
 }
 
 export interface Link {
@@ -235,17 +247,35 @@ function layoutBeta(input: MapInput): MapLayout {
 
   if (sinceTag) tags.push({ lane: "main", col: col++, name: sinceTag, style: "start" });
 
+  // One stop per PR. A story merged twice since the tag — released, then
+  // reworked after a reject — stops at both; the later one is the rework.
+  interface Merge { item: MapItem; kind: StationKind; id: string; number: number; mergedAt: string; rework: boolean }
+  const merges: Merge[] = [];
   const landed: Array<[MapItem, StationKind]> = [
     ...input.done.filter(it => it.mergedAt).map(it => [it, "landed"] as [MapItem, StationKind]),
     ...input.extra.map(it => [it, "extra"] as [MapItem, StationKind]),
   ];
-  landed.sort(([a], [b]) => byMergedAt(a, b));
-  for (const group of groupTogether(landed, ([item]) => item.prUrl)) {
-    const keys = group.map(([item]) => item.key);
-    group.forEach(([item, kind]) => { items.set(item.key, { item, kind }); counts[kind]++; });
+  for (const [item, kind] of landed) {
+    items.set(item.key, { item, kind });
+    counts[kind]++;
+    const prs = item.prs?.length
+      ? item.prs
+      : [{ number: item.prNumber ?? 0, url: item.prUrl ?? "", mergedAt: item.mergedAt ?? "" }];
+    prs.forEach((pr, n) => merges.push({
+      item, kind, number: pr.number, mergedAt: pr.mergedAt, rework: n > 0,
+      // No URL: a stop of its own, never grouped with another story's.
+      id: pr.url || `${item.key}#${n}`,
+    }));
+  }
+  merges.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt) || a.item.key.localeCompare(b.item.key));
+  for (const group of groupTogether(merges, m => m.id)) {
+    const keys = [...new Set(group.map(m => m.item.key))];
+    const first = group[0];
     stations.push({
-      id: `m:${keys[0]}`, lane: "main", col: col++, kind: stopKind(group.map(([, kind]) => kind)),
+      id: `m:${col}`, lane: "main", col: col++, kind: stopKind(group.map(m => m.kind)),
       ghost: false, keys, label: stopLabel(keys),
+      rework: group.some(m => m.rework) || undefined,
+      mainPr: first.number ? { number: first.number, mergedAt: first.mergedAt } : undefined,
     });
   }
 
@@ -305,8 +335,34 @@ function layoutBranch(input: MapInput, mainline: Mainline): MapLayout {
     items.set(it.key, { item: it, kind });
   }
 
-  const ownedKeys = (i: number) =>
-    commits[i].jiraKeys.filter(k => items.has(k) && ownerIdx.get(k) === i && items.get(k)?.kind !== "incoming");
+  const prAt = (key: string, i: number) => items.get(key)?.item.prs?.find(p => p.number === commits[i].number);
+
+  /**
+   * The stories stopping at main's PR `i`: each story's last PR (the one that
+   * completed it), plus any other PR of it known to be on the branch or not —
+   * a first release that was picked, before a rework that was not.
+   */
+  const ownedKeys = (i: number) => commits[i].jiraKeys.filter(k => {
+    const kind = items.get(k)?.kind;
+    if (!kind || kind === "incoming") return false;
+    if (ownerIdx.get(k) === i) return true;
+    const picked = prAt(k, i)?.picked;
+    return picked === true || picked === false;
+  });
+
+  /** What PR `i` means for one of its stories: picked, still to pick, or the story's own state. */
+  const kindAt = (key: string, i: number): StationKind => {
+    const entry = items.get(key);
+    if (!entry) return "landed";
+    const picked = prAt(key, i)?.picked;
+    if (picked === true) return entry.kind === "extra" ? "extra" : "landed";
+    if (picked === false) return isReadyToPick(entry.item) ? "to-pick" : "testing";
+    return entry.kind;
+  };
+
+  const isRework = (key: string, i: number) =>
+    (items.get(key)?.item.prs?.findIndex(p => p.number === commits[i].number) ?? -1) > 0;
+
   const relevant = commits.map((_, i) => ownedKeys(i).length > 0);
   const start = relevant.indexOf(true);
 
@@ -335,8 +391,9 @@ function layoutBranch(input: MapInput, mainline: Mainline): MapLayout {
     }
     flushCluster();
     const keys = ownedKeys(i);
-    const kinds = keys.map(k => items.get(k)?.kind ?? "landed");
+    const kinds = keys.map(k => kindAt(k, i));
     const kind = stopKind(kinds);
+    const rework = keys.some(k => isRework(k, i)) || undefined;
     const label = stopLabel(keys);
     keys.forEach(k => placedOnMain.add(k));
     const mainPr = { number: commits[i].number, mergedAt: commits[i].mergedAt };
@@ -344,9 +401,9 @@ function layoutBranch(input: MapInput, mainline: Mainline): MapLayout {
     const ready = kinds.filter(k => k === "to-pick").length;
     const sub = kind === "testing" && keys.length > 1 ? `${ready}/${keys.length} verified` : undefined;
     if (kind === "testing") blocked += ready;
-    stations.push({ id: `m:${i}`, lane: "main", col, kind, ghost: false, keys, label, mainPr, sub });
+    stations.push({ id: `m:${i}`, lane: "main", col, kind, ghost: false, keys, label, mainPr, sub, rework });
     if (kind === "landed" || kind === "extra" || kind === "to-pick") {
-      stations.push({ id: `b:${i}`, lane: "branch", col, kind, ghost: kind === "to-pick", keys, label });
+      stations.push({ id: `b:${i}`, lane: "branch", col, kind, ghost: kind === "to-pick", keys, label, rework });
       links.push({ col, kind, keys });
     }
     colOfCommit.set(i, col);

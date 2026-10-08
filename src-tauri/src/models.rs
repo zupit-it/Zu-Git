@@ -743,6 +743,21 @@ pub struct ReleaseDiffItem {
     /// When the story landed on the compared branch (PR merge or cherry-pick
     /// commit); None when it is not there, or only Jira says it is.
     pub merged_at: Option<String>,
+    /// Every PR the story has, oldest first: the first release, then any rework
+    /// after a reject (same key in the title, whatever the prefix). On a release
+    /// branch these are main's PRs, each with whether it reached the branch.
+    pub prs: Vec<ItemPr>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemPr {
+    pub number: u64,
+    pub url: String,
+    pub merged_at: String,
+    /// Release branch only: Some(true) on the branch, Some(false) not there,
+    /// None unknown (older than the branch's last tag, outside what is read).
+    pub picked: Option<bool>,
 }
 
 /// A PR merged into the default branch, as drawn on the release map.

@@ -672,12 +672,65 @@ pub async fn fetch_release_diff(
             .collect()
     };
 
-    // Build a map: jira_key → MergedPrRecord. Each key in a PR maps to that PR;
-    // if the same key appears in two PRs the later one wins (acceptable edge case).
-    let merged_map: std::collections::HashMap<String, &crate::github::MergedPrRecord> = merged_prs
+    // Every merge of each story on the compared branch, oldest first. A story
+    // can land more than once: its first release, then a rework after a reject
+    // — same key in the title, whatever the prefix.
+    let mut records_by_key: std::collections::HashMap<String, Vec<&crate::github::MergedPrRecord>> =
+        std::collections::HashMap::new();
+    for pr in &merged_prs {
+        for key in &pr.jira_keys {
+            let list = records_by_key.entry(key.clone()).or_default();
+            if !list.iter().any(|r| std::ptr::eq(*r, pr)) {
+                list.push(pr);
+            }
+        }
+    }
+    // RFC 3339 timestamps from the same API sort correctly as strings.
+    records_by_key.values_mut().for_each(|list| list.sort_by(|a, b| a.merged_at.cmp(&b.merged_at)));
+    // A row links the latest merge: the rework, when there is one.
+    let merged_map: std::collections::HashMap<String, &crate::github::MergedPrRecord> = records_by_key
         .iter()
-        .flat_map(|pr| pr.jira_keys.iter().map(move |k| (k.clone(), pr)))
+        .filter_map(|(key, list)| list.last().map(|r| (key.clone(), *r)))
         .collect();
+
+    // On a release branch: each story's PRs on main, oldest first, to tell
+    // whether all of them were picked.
+    let mut main_prs_by_key: std::collections::HashMap<&str, Vec<&crate::models::MainlineCommit>> =
+        std::collections::HashMap::new();
+    for commit in mainline.iter().flat_map(|m| m.commits.iter()) {
+        for key in &commit.jira_keys {
+            main_prs_by_key.entry(key.as_str()).or_default().push(commit);
+        }
+    }
+
+    let prs_for = |key: &str| -> Vec<crate::models::ItemPr> {
+        let records = records_by_key.get(key).map(|v| v.as_slice()).unwrap_or(&[]);
+        match (target_branch.is_some(), main_prs_by_key.get(key)) {
+            (true, Some(main)) => {
+                use crate::release_picks::{pick_status, Merge};
+                let merges: Vec<Merge> = main.iter().map(|c| Merge { number: c.number, merged_at: &c.merged_at }).collect();
+                let picks: Vec<Merge> = records.iter().map(|r| Merge { number: r.number, merged_at: &r.merged_at }).collect();
+                main.iter()
+                    .zip(pick_status(&merges, &picks))
+                    .map(|(c, picked)| crate::models::ItemPr {
+                        number: c.number,
+                        url: c.url.clone(),
+                        merged_at: c.merged_at.clone(),
+                        picked,
+                    })
+                    .collect()
+            }
+            (on_branch, _) => records
+                .iter()
+                .map(|r| crate::models::ItemPr {
+                    number: r.number,
+                    url: r.url.clone(),
+                    merged_at: r.merged_at.clone(),
+                    picked: on_branch.then_some(true),
+                })
+                .collect(),
+        }
+    };
 
     // RT2 — Jira: planned issues for this release + all merged keys in one JQL call.
     let jira_issues = crate::jira::fetch_release_issues(
@@ -739,7 +792,7 @@ pub async fn fetch_release_diff(
     let jira_map: std::collections::HashMap<String, &crate::jira::JiraIssueSummary> =
         jira_issues.iter().map(|i| (i.key.clone(), i)).collect();
 
-    let make_item = |issue: &crate::jira::JiraIssueSummary, merged: Option<&crate::github::MergedPrRecord>, flag: Option<String>| {
+    let make_item = |issue: &crate::jira::JiraIssueSummary, merged: Option<&crate::github::MergedPrRecord>, flag: Option<String>, prs: Vec<crate::models::ItemPr>| {
         let author = merged.map(|m| m.author.as_str()).unwrap_or("").to_string();
         let initials = author_initials(&author);
         let avatar_color = avatar_color_for(&author).to_string();
@@ -766,6 +819,7 @@ pub async fn fetch_release_diff(
             epic_key: issue.epic.as_ref().and_then(|e| e.key.clone()),
             epic_name: issue.epic.as_ref().map(|e| e.name.clone()),
             merged_at: merged.map(|m| m.merged_at.clone()).filter(|d| !d.is_empty()),
+            prs,
         }
     };
 
@@ -782,14 +836,24 @@ pub async fn fetch_release_diff(
     for key in &planned_keys {
         if let Some(issue) = jira_map.get(key) {
             let merged = merged_map.get(key).copied();
-            if merged.is_some() || (trust_terminal_status && is_terminal(&issue.status)) {
+            let prs = prs_for(key);
+            // Picked once, but a rework merged on main after that pick is not on
+            // the branch: the story is only partly there.
+            let rework = prs.iter().find(|p| p.picked == Some(false)).filter(|_| merged.is_some()).cloned();
+            if let Some(rework) = rework {
+                let mut item = make_item(issue, merged, Some("rework-not-picked".to_string()), prs);
+                item.pr_url = Some(rework.url);
+                item.pr_number = Some(rework.number);
+                item.merged_at = None;
+                missing.push(item);
+            } else if merged.is_some() || (trust_terminal_status && is_terminal(&issue.status)) {
                 // Flag when we relied on terminal status alone (no PR link found) — Jira ahead of git.
                 let flag = if merged.is_none() {
                     Some("no-pr".to_string())
                 } else {
                     None
                 };
-                done.push(make_item(issue, merged, flag));
+                done.push(make_item(issue, merged, flag, prs));
             } else {
                 // Flag when Developed (or done, on a release branch) — Jira says
                 // code is ready but no merged PR found.
@@ -798,7 +862,7 @@ pub async fn fetch_release_diff(
                 } else {
                     None
                 };
-                missing.push(make_item(issue, None, flag));
+                missing.push(make_item(issue, None, flag, prs));
             }
         }
     }
@@ -830,7 +894,7 @@ pub async fn fetch_release_diff(
             } else {
                 None
             };
-            extra.push(make_item(issue, merged, flag));
+            extra.push(make_item(issue, merged, flag, prs_for(key)));
         } else {
             // Merged on main but no Jira issue found for the extracted key.
             let merged = merged_map.get(key).copied();
@@ -856,6 +920,7 @@ pub async fn fetch_release_diff(
                 epic_key: None,
                 epic_name: None,
                 merged_at: merged.map(|m| m.merged_at.clone()).filter(|d| !d.is_empty()),
+                prs: prs_for(key),
             });
         }
     }

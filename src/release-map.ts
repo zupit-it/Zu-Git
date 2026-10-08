@@ -49,7 +49,7 @@ function assignFlagRows(tags: TagMark[], x: (col: number) => number): Map<TagMar
 }
 
 function geometry(layout: MapLayout): Geometry & { flagRow: Map<TagMark, number> } {
-  const longest = Math.max(6, ...layout.stations.map(s => s.label.length));
+  const longest = Math.max(6, ...layout.stations.map(s => s.label.length + (s.rework ? 2 : 0)));
   const col = Math.min(104, Math.max(70, Math.ceil(longest * LABEL_CHAR_W + 16)));
   // Branch mode keeps a column of room on the left for the fork to curve in.
   const left = layout.mode === "branch" ? PAD_X + col : PAD_X;
@@ -111,15 +111,24 @@ function renderLinks(layout: MapLayout, g: Geometry, visible: Set<string> | null
   }).join("");
 }
 
+/**
+ * The hover target of a stop: a fixed, invisible disc on top. The visible shape
+ * grows on hover, and if it were the target its edge would slip in and out
+ * from under a still cursor — the map would flicker.
+ */
+function hitArea(x: number, y: number): string {
+  return `<circle class="rm-hit" cx="${x}" cy="${y}" r="${STATION_R + 8}"/>`;
+}
+
 function stationShape(kind: StationKind, ghost: boolean, x: number, y: number): string {
   const r = STATION_R;
   if (kind === "extra") {
     const d = r + 1.5;
     return `<path class="rm-halo" d="M${x} ${y - d - 3}L${x + d + 3} ${y}L${x} ${y + d + 3}L${x - d - 3} ${y}Z"/>
-      <path class="rm-shape" d="M${x} ${y - d}L${x + d} ${y}L${x} ${y + d}L${x - d} ${y}Z"/>`;
+      <path class="rm-shape" d="M${x} ${y - d}L${x + d} ${y}L${x} ${y + d}L${x - d} ${y}Z"/>${hitArea(x, y)}`;
   }
   return `<circle class="rm-halo" cx="${x}" cy="${y}" r="${r + 3}"/>
-    <circle class="rm-shape${ghost ? " rm-shape--ghost" : ""}" cx="${x}" cy="${y}" r="${ghost ? r - 0.5 : r}"/>`;
+    <circle class="rm-shape${ghost ? " rm-shape--ghost" : ""}" cx="${x}" cy="${y}" r="${ghost ? r - 0.5 : r}"/>${hitArea(x, y)}`;
 }
 
 /** A rounded label on the line; `base` names the classes, `variant` adds a modifier to both. */
@@ -144,7 +153,8 @@ function renderStation(st: Station, layout: MapLayout, g: Geometry): string {
   const mirrored = st.lane === "branch" && layout.stations.some(o => o.lane === "main" && o.col === st.col);
   const labelY = st.lane === "main" ? y - 16 : y + 24;
   const label = st.label
-    ? `<text class="rm-label${mirrored ? " rm-label--soft" : ""}" x="${x}" y="${labelY}" text-anchor="middle">${escHtml(st.label)}</text>`
+    ? `<text class="rm-label${mirrored ? " rm-label--soft" : ""}" x="${x}" y="${labelY}" text-anchor="middle">${escHtml(st.label)}${
+      st.rework ? `<tspan class="rm-rework" dx="3">↻</tspan>` : ""}</text>`
     : "";
   const subY = st.lane === "main" ? y + 24 : y + 38;
   const sub = st.sub
@@ -185,7 +195,11 @@ function renderHead(layout: MapLayout, g: Geometry): string {
   const marks: Array<[Lane, number]> = [["main", layout.main.head]];
   return marks
     .filter(([, col]) => layout.stations.some(s => s.lane === "main" && s.col === col && !s.ghost) || layout.main.to > col)
-    .map(([lane, col]) => `<text class="rm-head" x="${g.x(col) + 11}" y="${g.y(lane) + 20}">HEAD</text>`)
+    .map(([lane, col]) => {
+      // A captioned stop ("1/2 verified", a status) keeps its caption: HEAD drops a line below it.
+      const captioned = layout.stations.some(s => s.lane === lane && s.col === col && (s.sub || s.kind === "testing"));
+      return `<text class="rm-head" x="${g.x(col) + 11}" y="${g.y(lane) + (captioned ? 38 : 20)}">HEAD</text>`;
+    })
     .join("");
 }
 
@@ -354,9 +368,17 @@ function otherVersions(item: MapItem): string {
   return item.fixVersions.filter(v => v && v !== "Unscheduled").join(", ") || "no release";
 }
 
-function describe(layout: MapLayout, kind: StationKind, item: MapItem, openPr?: { number: number }): string {
+function describe(layout: MapLayout, kind: StationKind, item: MapItem, openPr?: { number: number }, rework = false): string {
   const branch = layout.branch?.name ?? "";
   const next = layout.nextTag ? shortTag(layout.nextTag) : "the next tag";
+  if (rework) {
+    switch (kind) {
+      case "landed":
+        return layout.mode === "beta" ? `Rework after a reject — ships with ${next}` : `Rework cherry-picked to ${branch} too`;
+      case "to-pick": return `Rework merged on main after the last pick — not on ${branch} yet: cherry-pick it too`;
+      case "testing": return `Rework still ${item.status} — not ready to pick; the first release is on ${branch}`;
+    }
+  }
   if (layout.mode === "beta") {
     switch (kind) {
       case "landed": return `Merged on main — ships with ${next}`;
@@ -393,7 +415,7 @@ export function renderTooltip(
   if (station.kind === "earlier") {
     const rows = station.keys.slice(0, 8).map(k => {
       const item = layout.items.get(k)?.item;
-      return `<li><span class="rm-tip-key">${escHtml(k)}</span> ${escHtml(item?.summary ?? "")}</li>`;
+      return `<li class="rm-tip-row" data-rm-reveal="${escHtml(k)}"><span class="rm-tip-key">${escHtml(k)}</span> ${escHtml(item?.summary ?? "")}</li>`;
     }).join("");
     const more = station.keys.length > 8 ? `<li class="rm-tip-more">+${station.keys.length - 8} more</li>` : "";
     return `<div class="rm-tip-kind">Shipped before ${escHtml(shortTag(layout.sinceTag))} — done in Jira, no merge since</div>
@@ -425,7 +447,7 @@ export function renderTooltip(
     const pr = prNumber ?? openPr?.number;
     const rows = station.keys.map(k => {
       const story = layout.items.get(k)?.item;
-      return `<li class="rm-tip-story">
+      return `<li class="rm-tip-story rm-tip-row" data-rm-reveal="${escHtml(k)}" title="Show in the list">
           <span class="rm-tip-key">${escHtml(k)}</span>
           <span class="rm-tip-story-title">${escHtml(story?.summary ?? "")}</span>
           ${statusChip(story?.status ?? "")}
@@ -440,7 +462,31 @@ export function renderTooltip(
   return `<div class="rm-tip-hd"><span class="rm-tip-key">${escHtml(item.key)}</span>${statusChip(item.status)}</div>
     <div class="rm-tip-title">${escHtml(item.summary)}</div>
     ${meta ? `<div class="rm-tip-meta">${meta}</div>` : ""}
-    <div class="rm-tip-kind rm-tip-kind--${kind}">${escHtml(describe(layout, kind, item, openPr))}</div>`;
+    ${renderPrHistory(layout, item, station)}
+    <div class="rm-tip-kind rm-tip-kind--${kind}">${escHtml(describe(layout, kind, item, openPr, station.rework))}</div>`;
+}
+
+/**
+ * A story with more than one PR — its release, then reworks after a reject —
+ * lists them all, the one under the cursor first in weight, each with where it is.
+ */
+function renderPrHistory(layout: MapLayout, item: MapItem, station: Station): string {
+  const prs = item.prs ?? [];
+  if (prs.length < 2) return "";
+  const here = station.mainPr?.number ?? item.prNumber;
+  const rows = prs.map((pr, n) => {
+    const role = n === 0 ? "release" : prs.length > 2 ? `rework ${n}` : "rework";
+    const state = layout.mode !== "branch" ? ""
+      : pr.picked === true ? `<span class="rm-tip-pr-state rm-tip-pr-state--picked">on ${escHtml(layout.branch?.name ?? "branch")}</span>`
+      : pr.picked === false ? `<span class="rm-tip-pr-state rm-tip-pr-state--missing">not picked</span>`
+      : `<span class="rm-tip-pr-state">before ${escHtml(shortTag(layout.sinceTag) || "the tag")}</span>`;
+    return `<li class="rm-tip-pr${pr.number === here ? " rm-tip-pr--here" : ""}">
+        <span class="rm-tip-key">${pr.number ? `PR #${pr.number}` : "commit"}</span>
+        <span class="rm-tip-pr-role">${role} · ${escHtml(fmtDate(pr.mergedAt))}</span>
+        ${state}
+      </li>`;
+  }).join("");
+  return `<ul class="rm-tip-prs">${rows}</ul>`;
 }
 
 function keysOfKind(layout: MapLayout, station: Station, kind: StationKind): string[] {

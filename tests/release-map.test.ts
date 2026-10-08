@@ -162,3 +162,57 @@ test("multi-story PRs are one stop: grouped on main, and held back by a story st
   assert.equal(branch.counts["to-pick"], 2);
   assert.equal(branch.blocked, 1);
 });
+
+test("a story merged twice — release, then rework after a reject — stops at both PRs", () => {
+  const beta = buildReleaseMapLayout({
+    done: [
+      item("ZU-1", {
+        mergedAt: at(5), prUrl: "pr/14", prNumber: 14,
+        prs: [{ number: 10, url: "pr/10", mergedAt: at(2) }, { number: 14, url: "pr/14", mergedAt: at(5) }],
+      }),
+      item("ZU-2", { mergedAt: at(3), prUrl: "pr/11", prNumber: 11, prs: [{ number: 11, url: "pr/11", mergedAt: at(3) }] }),
+    ],
+    extra: [],
+    missing: [],
+    sinceTag: "v1.4.0-beta.1",
+    branch: "",
+  });
+  assert.deepEqual(beta.stations.map(s => [s.label, s.rework ?? false, s.mainPr?.number]), [
+    ["ZU-1", false, 10],
+    ["ZU-2", false, 11],
+    ["ZU-1", true, 14],
+  ]);
+  assert.equal(beta.counts.landed, 2);
+
+  // Release branch: the first release was picked, the rework was not.
+  const branch = buildReleaseMapLayout({
+    done: [],
+    extra: [],
+    missing: [item("ZU-1", {
+      flag: "rework-not-picked",
+      prs: [
+        { number: 10, url: "pr/10", mergedAt: at(2), picked: true },
+        { number: 14, url: "pr/14", mergedAt: at(5), picked: false },
+      ],
+    })],
+    sinceTag: "v1.4.0",
+    branch: "release/1.4",
+    mainline: {
+      branch: "main",
+      commits: [
+        { number: 10, url: "pr/10", title: "feat(ZU-1): first", mergedAt: at(2), jiraKeys: ["ZU-1"] },
+        { number: 12, url: "pr/12", title: "other", mergedAt: at(3), jiraKeys: ["ZU-50"] },
+        { number: 14, url: "pr/14", title: "feat(ZU-1): rework", mergedAt: at(5), jiraKeys: ["ZU-1"] },
+      ],
+      tags: [],
+    },
+  });
+  assert.deepEqual(branch.stations.map(s => `${s.lane}:${s.col}:${s.kind}${s.ghost ? "~" : ""}${s.rework ? "↻" : ""}`), [
+    "main:1:landed",
+    "branch:1:landed",
+    "main:2:cluster",
+    "main:3:to-pick↻",
+    "branch:3:to-pick~↻",
+  ]);
+  assert.equal(branch.counts["to-pick"], 1);
+});
