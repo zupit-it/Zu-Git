@@ -59,6 +59,8 @@ export function stopSyncLabelTicker() {
 
 export function setView(view: AppView) {
   state.currentView = view;
+  // Lets the CSS show what belongs to one view only (the review load strip).
+  document.body.dataset.view = view;
 
   document.querySelectorAll<HTMLElement>("[data-view-panel]").forEach((panel) => {
     panel.toggleAttribute("hidden", panel.dataset.viewPanel !== view);
@@ -214,6 +216,11 @@ export function renderSettings(values: SettingsFormValues) {
   if (staleHint) staleHint.hidden = !state.staleBranchesEnabled;
   // Turning the tab off while looking at it would leave the app on a hidden view.
   if (!state.staleBranchesEnabled && state.currentView === "stale") setView("list");
+  // The sprint board only needs Jira.
+  const jiraReady = values.jiraBaseUrl.trim() !== "" && values.jiraEmail.trim() !== "" && values.jiraToken.trim() !== "";
+  const sprintTab = document.querySelector<HTMLElement>('[data-view-tab="sprint"]');
+  if (sprintTab) sprintTab.hidden = !jiraReady;
+  if (!jiraReady && state.currentView === "sprint") setView("list");
   void refreshGoogleStatus();
   syncSettingsSections();
   openUnconfiguredSections();

@@ -8,6 +8,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Sprint board** — a new **Sprint** tab (it appears once Jira is configured) shows the whole active
+  sprint at a glance: one pill per story with the assignee's face, the key, the points and a dot for
+  its PR (green approved, amber changes requested or waiting, red CI failing). The columns are the
+  Jira board's own; **Persone** turns them into one row per person with their open points, and the
+  faces in the head focus on one person. The bar in the head compares the points closed with where a
+  steady pace would be today. Stories drag between columns — the ones the workflow cannot reach
+  are hatched — and, in Persone, between people; every move can be undone for a few seconds. A
+  right click offers the same actions, ⌘-click (Ctrl-click) selects several at once. Jira's flag is
+  shown as information, never as a block, under the name your team gives it ("In test").
+- **Sprint: the story at hand** — a click opens the story in a side panel, without going to Jira:
+  status, assignee, points, its PRs (a click opens the diff), checklist, the description and the
+  comments with their pictures at full quality, attachments (pictures open full size, other files
+  in the browser), sub-tasks, and a box to comment. ↑ / ↓ walk through the board; the panel's edge
+  drags to make it wider, never past 90% of the window.
+- **Sprint: categories** — stories that do not belong on the board, like recurring activities, go
+  into categories of your own (**Categorie** in the head, the selection bar, a right click, or a drag
+  onto the category's chip). They leave the board, its totals and the standup; the chip lists them.
+  A story leaving the sprint is remembered, not dropped: when it comes back it is filed already.
+  Categories are kept on your computer.
+- **Sprint: standup** — a strip above the board sums up what changed since the previous working
+  day's standup (8:00, changeable): stories closed, moved, sent back, added, reassigned, re-estimated,
+  flagged — apart from what is stuck right now (CI failing, changes requested, reviews waiting).
+  **Evidenzia sulla board** marks every story that changed, says how, and dims the others; with
+  **Persone** it is the standup's agenda, person by person.
 - **Toggl planner: tasks** — projects split into Toggl tasks ("Incontri" → "Feedback 1v1") list them
   in the project picker, indented under the project: unfolded for the projects you use often and
   the row's own, folded to a count for the others, and found by name when typing. Picking a task
@@ -17,6 +41,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   assistant sees each project's tasks and can propose one.
 
 ### Changed
+- **Review load in the list only** — My score and the review load strip are about the PR list: the
+  other views (Sprint, Status, Settings, Stale branches) no longer show them.
 - **Faster PR diff** — GitHub takes about half a second per answer, and opening a diff asked it
   three times in a row. The files are now read together with the PR's head (two round trips, not
   three), and resting the pointer on the `+N −N` chip starts reading the diff and its conversations,

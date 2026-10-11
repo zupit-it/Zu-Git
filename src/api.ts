@@ -89,6 +89,8 @@ export async function refreshDashboard(mode: "manual" | "auto" = "manual") {
     renderDashboard(payload);
     setListLoading(false);
     if (state.mergeQueueEnabled) void processMergeQueue(payload);
+    // The Sprint tab shows PR state on its cards: tell it there is a new snapshot.
+    window.dispatchEvent(new CustomEvent("zugit:dashboard"));
   } catch (error) {
     if (myId !== state.refreshRequestId) return;
     stopSyncLabelTicker();

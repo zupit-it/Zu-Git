@@ -25,6 +25,9 @@
           <button class="view-tab is-active" data-view-tab="list" type="button">
             List
           </button>
+          <button class="view-tab" data-view-tab="sprint" type="button" hidden>
+            Sprint
+          </button>
           <button class="view-tab" data-view-tab="status" type="button">
             Status
           </button>
@@ -116,6 +119,11 @@
             <ul class="warnings-list" data-warnings></ul>
           </section>
 
+        </section>
+
+        <!-- Sprint view -->
+        <section class="view-panel view-panel-sprint" data-view-panel="sprint" hidden>
+          <div class="sp" data-sprint-root></div>
         </section>
 
         <!-- List view (default) -->

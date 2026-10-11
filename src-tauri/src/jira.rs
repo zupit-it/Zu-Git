@@ -177,7 +177,7 @@ struct JiraFixVersion {
 /// Reads an epic reference out of a raw Jira field value. Tolerant by design —
 /// depending on the site the "Principale" field is an issue link (`{key, fields:
 /// {summary}}`), a select option (`{value}`), or plain text.
-fn epic_from_value(value: &serde_json::Value) -> Option<EpicRef> {
+pub(crate) fn epic_from_value(value: &serde_json::Value) -> Option<EpicRef> {
     match value {
         serde_json::Value::Null => None,
         serde_json::Value::String(s) => {
@@ -326,7 +326,7 @@ async fn probe_myself(base: &str, settings: &AppSettings, client: &reqwest::Clie
 /// 401 from the site that the gateway does not repeat means a scoped token.
 /// Transient failures fall back to the site URL without caching, so the next
 /// call retries the detection.
-async fn api_base(settings: &AppSettings, client: &reqwest::Client) -> String {
+pub(crate) async fn api_base(settings: &AppSettings, client: &reqwest::Client) -> String {
     let site = settings.jira_base_url.as_str();
     // Scoped tokens exist only on Jira Cloud; self-hosted sites (and a gateway
     // URL entered by hand) are used as they are.

@@ -24,6 +24,7 @@ import {
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
 import { initSettingsSections } from "./settings-sections";
+import { openSprintView, refreshSprint, focusSprintSearch } from "./sprint";
 import { escHtml, avatarColor, loginInitials, errorMessage } from "./utils";
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -44,7 +45,10 @@ window.addEventListener("DOMContentLoaded", () => {
   // ── Toolbar actions ─────────────────────────────────────────────────────────
   document
     .querySelector<HTMLButtonElement>("[data-refresh-button]")
-    ?.addEventListener("click", () => void refreshDashboard());
+    ?.addEventListener("click", () => {
+      void refreshDashboard();
+      if (state.currentView === "sprint") refreshSprint();
+    });
   document
     .querySelector<HTMLButtonElement>("[data-changelog-button]")
     ?.addEventListener("click", () => void showChangelog());
@@ -226,6 +230,10 @@ window.addEventListener("DOMContentLoaded", () => {
     tab.addEventListener("click", () => {
       const view = tab.dataset.viewTab;
       if (view === "status" || view === "list" || view === "settings") setView(view);
+      if (view === "sprint") {
+        setView("sprint");
+        void openSprintView();
+      }
       if (view === "stale") {
         setView("stale");
         // Scanning every branch is expensive, so the first visit pays for it and
@@ -412,6 +420,10 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (mod && e.key === "f") {
       e.preventDefault();
+      if (state.currentView === "sprint") {
+        focusSprintSearch();
+        return;
+      }
       setView("list");
       document.querySelector<HTMLInputElement>("[data-list-search]")?.focus();
       return;

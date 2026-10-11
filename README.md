@@ -20,6 +20,7 @@ A desktop app for monitoring GitHub pull requests enriched with Jira data, built
 - Re-request reviews directly from the list
 - Native notifications for new review requests and changes requested
 - Auto-refresh on a configurable interval
+- Sprint board — the active sprint as one compact board (face, key, points, PR state), per person or per column, with drag and drop, a story side panel, personal categories and a standup summary
 - Toggl timesheet autofill — fills the free slots of your working day from the Jira stories you have in progress
 - Stale branches — remote branches with no open PR that nobody has pushed to in weeks, for cleanup
 - Tokens stored in the system vault (macOS Keychain, Windows Credential Manager)
@@ -129,8 +130,8 @@ are being phased out. Create it from
 
 | Scope | Used for |
 |---|---|
-| `read:jira-work` | issue search, fields, changelog, fix versions, transitions list |
-| `write:jira-work` | checklist write-back, workflow transitions, fix version moves |
+| `read:jira-work` | issue search, fields, changelog, fix versions, transitions list; boards, sprints and attachments of the Sprint tab |
+| `write:jira-work` | checklist write-back, workflow transitions, fix version moves; the Sprint tab's moves, assignees, estimates and comments |
 | `read:jira-user` | `/myself` (credential check, your transitions in the Toggl planner) |
 
 ### Ticket enrichment
@@ -140,6 +141,9 @@ On each refresh ZuGit issues a single bulk JQL query (`POST /rest/api/3/search/j
 If the tenant does not support the `/jql` endpoint (older Jira Server versions), ZuGit falls back to individual `GET /rest/api/3/issue/{key}` calls automatically.
 
 Release diff scope and tag-window rules are documented in [docs/release-diff.md](docs/release-diff.md).
+
+The Sprint tab — board, story panel, drag and drop, categories, standup summary — is documented in
+[docs/sprint-board.md](docs/sprint-board.md).
 
 ### Checklist (Herocoders Smart Checklist for Jira)
 
