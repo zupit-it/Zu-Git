@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.0.0] - 2026-10-12
+
 ### Added
 - **Sprint board** — a new **Sprint** tab (it appears once Jira is configured) shows the whole active
   sprint at a glance: one pill per story with the assignee's face, the key, the points and a dot for
