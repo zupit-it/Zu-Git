@@ -37,6 +37,10 @@ const VERSIONS: VersionBlock[] = [
         title: "Sprint — categories for what is not sprint work",
         body: "Recurring activities and the other stories you book time on but do not need to see every day go into <strong>categories</strong> of your own, like <em>Attività ricorrenti</em>: from <strong>Categorie</strong> in the head, the selection bar, a right click, or by dragging a story onto the category's chip. They leave the board, its totals and the standup; the chip lists them. A story that leaves the sprint stays filed, so when it comes back in a later sprint it is already in its category. Categories are kept on your computer: no Jira permission needed.",
       },
+      {
+        title: "PR diff — the code around the changes",
+        body: "Above, between and below the changes, the diff now has GitHub's expanders: <strong>↓</strong> shows 20 more lines under the change above, <strong>↑</strong> 20 more over the change below, a short gap opens in one click and a long one with <strong>Show all</strong>. The file's header has <strong>Expand all lines</strong> to read the whole file in place, and <strong>Collapse expanded lines</strong> to fold it back. The lines come from the file at the PR's head and are coloured like the rest; as on GitHub, comments still go on the lines of the diff.",
+      },
     ],
   },
   {

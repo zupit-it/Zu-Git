@@ -675,6 +675,9 @@ pub struct PrFileDiff {
     /// diffs too large to inline — the view links to GitHub then.
     pub patch: Option<String>,
     pub blob_url: String,
+    /// The file's blob at the head commit: read when the reader expands the
+    /// lines around the hunks. GitHub can leave it out.
+    pub sha: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

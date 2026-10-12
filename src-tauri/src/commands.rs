@@ -323,6 +323,37 @@ async fn current_diff(
     Err("The pull request is being pushed to right now — try again in a moment.".into())
 }
 
+/// The text of a file the PR changes, at the diff's head, by its blob id: the
+/// diff view reads it when the reader expands the lines around the hunks.
+/// Blobs never change, so they are cached by id.
+#[tauri::command]
+pub async fn fetch_pr_file_text(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    sha: String,
+) -> Result<String, String> {
+    const CACHE_BUDGET: usize = 32 * 1024 * 1024;
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    if !crate::github::is_object_id(&sha) {
+        return Err(format!("Invalid file id '{sha}'."));
+    }
+    let key = sha.to_lowercase();
+    if let Some(hit) = state.pr_file_cache.lock().get(&key) {
+        return Ok(hit.clone());
+    }
+    let settings = storage::load_settings(&app).await?;
+    let text = crate::github::fetch_blob_text(&repo, &key, &settings, &state.http_client).await?;
+    let mut cache = state.pr_file_cache.lock();
+    if cache.values().map(String::len).sum::<usize>() + text.len() > CACHE_BUDGET {
+        cache.clear();
+    }
+    cache.insert(key, text.clone());
+    Ok(text)
+}
+
 /// Where each of the user's comments written on an older commit sits on the
 /// diff's: one compare per older commit, cached, since commits never change.
 /// When GitHub cannot be asked, a comment's own code decides.

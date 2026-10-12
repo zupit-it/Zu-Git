@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  alignSides, hunkFor, hunkSides, hunkTail, isGeneratedFile, languageFor, layerOrder, parsePatch, pathTree, sameCode,
-  splitRows, treeOrder, withAgentOrder,
+  EXPAND_STEP, alignSides, diffGaps, expandGap, fileLines, gapLines, gapSize, hunkFor, hunkSides, hunkTail,
+  isGeneratedFile, languageFor, layerOrder, matchesHead, parsePatch, pathTree, sameCode, splitRows, treeOrder,
+  withAgentOrder,
 } from "../src/pr-diff-parse.ts";
 
 test("the tail of a GitHub diff hunk is the code a comment was written on", () => {
@@ -211,4 +212,73 @@ test("the files group into folders as on GitHub: folders first, lone folders as 
     "README.md",
   ]);
   assert.deepEqual(treeOrder(pathTree([])), []);
+});
+
+// The head file: 60 lines. The base had "old 10" for line 10, and one more
+// line, "gone", between lines 39 and 40.
+const HEAD = Array.from({ length: 60 }, (_, k) => `line ${k + 1}`);
+const TWO_HUNKS = parsePatch([
+  "@@ -7,7 +7,7 @@",
+  " line 7", " line 8", " line 9", "-old 10", "+line 10", " line 11", " line 12", " line 13",
+  "@@ -37,7 +37,6 @@ function f() {",
+  " line 37", " line 38", " line 39", "-gone", " line 40", " line 41", " line 42",
+].join("\n"));
+
+test("gaps sit before, between and after the hunks, shifted by what changed above them", () => {
+  const gaps = diffGaps(TWO_HUNKS, null);
+  assert.deepEqual(gaps, [
+    { from: 1, to: 6, shift: 0 },
+    { from: 14, to: 36, shift: 0 },
+    // Three context lines at the end: the file may go on, nobody knows how far yet.
+    { from: 43, to: null, shift: 1 },
+  ]);
+  assert.equal(gapSize(gaps[1]), 23);
+  assert.equal(gapSize(gaps[2]), null);
+  assert.deepEqual(diffGaps(TWO_HUNKS, 60)[2], { from: 43, to: 60, shift: 1 });
+});
+
+test("a hunk ending on fewer than three context lines ends the file", () => {
+  const atEnd = parsePatch("@@ -8,4 +8,4 @@\n line 8\n line 9\n-old\n+new\n line 11");
+  assert.equal(gapSize(diffGaps(atEnd, null)[1]), 0);
+  // Added and deleted files: the hunk is the whole file.
+  const added = parsePatch("@@ -0,0 +1,2 @@\n+a\n+b");
+  assert.deepEqual(diffGaps(added, null).map(gapSize), [0, 0]);
+  const deleted = parsePatch("@@ -1,2 +0,0 @@\n-a\n-b");
+  assert.deepEqual(diffGaps(deleted, null).map(gapSize), [0, 0]);
+});
+
+test("expanders open a gap a step at a time from either side, or all at once", () => {
+  const closed = { down: 0, up: 0 };
+  assert.deepEqual(expandGap(closed, 23, "down"), { down: EXPAND_STEP, up: 0 });
+  // The other side only gets what is left: the two never overlap.
+  assert.deepEqual(expandGap({ down: 20, up: 0 }, 23, "up"), { down: 20, up: 3 });
+  assert.deepEqual(expandGap({ down: 5, up: 0 }, 23, "all"), { down: 5, up: 18 });
+  assert.deepEqual(expandGap(closed, 6, "up"), { down: 0, up: 6 });
+});
+
+test("expanded lines carry both numbers and leave the rest hidden", () => {
+  const [, middle, tail] = diffGaps(TWO_HUNKS, HEAD.length);
+  const view = gapLines(middle, { down: 2, up: 1 }, HEAD);
+  assert.deepEqual(view.down.map(l => [l.kind, l.oldNo, l.newNo, l.text]), [["ctx", 14, 14, "line 14"], ["ctx", 15, 15, "line 15"]]);
+  assert.deepEqual(view.up.map(l => [l.oldNo, l.newNo]), [[36, 36]]);
+  assert.equal(view.hidden, 20);
+  // Under the second hunk the base runs one line ahead: it still had "gone".
+  const end = gapLines(tail, { down: 50, up: 0 }, HEAD);
+  assert.equal(end.hidden, 0);
+  assert.deepEqual([end.down[0].oldNo, end.down[0].newNo, end.down.length], [44, 43, 18]);
+});
+
+test("a file's lines are numbered as the patch numbers them", () => {
+  assert.deepEqual(fileLines("a\nb\n"), ["a", "b"]);
+  assert.deepEqual(fileLines("a\nb"), ["a", "b"]);
+  assert.deepEqual(fileLines("a\n\n"), ["a", ""]);
+  assert.deepEqual(fileLines(""), []);
+});
+
+test("lines are put around the hunks only from the head they were cut from", () => {
+  assert.equal(matchesHead(TWO_HUNKS, HEAD), true);
+  // Windows line endings on one side only still match.
+  assert.equal(matchesHead(TWO_HUNKS, HEAD.map(l => `${l}\r`)), true);
+  assert.equal(matchesHead(TWO_HUNKS, HEAD.map(l => (l === "line 40" ? "line 40 changed" : l))), false);
+  assert.equal(matchesHead(TWO_HUNKS, HEAD.slice(0, 41)), false);
 });

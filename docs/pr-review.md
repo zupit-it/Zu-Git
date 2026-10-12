@@ -26,6 +26,23 @@ reviewer's — or discard. Comments stay on this machine until the reviewer publ
   Highlighting lands by each line's index in the file (`data-li`), so both views share it.
 - Bodies are drawn as they approach the viewport. Generated files (lockfiles, bundles, EF snapshots
   and Designer files) and diffs over 1500 lines start collapsed.
+- **The code around the hunks**: a row stands for the lines the patch leaves out — above the first
+  hunk, between two, below the last — with GitHub's expanders: ↓ continues the hunk above by 20
+  lines, ↑ leads into the hunk below by 20, one ↕ opens a gap of 20 lines or fewer, and *Show all N
+  lines* a longer one (`expandGap`). A gap fully open leaves no row: the code reads as one. The file
+  header adds **Expand all lines** and **Collapse expanded lines** (which brings the reader back to
+  the file's top when they were below it).
+  - The lines come from the file at the diff's head, by the blob id GitHub lists with each file
+    (`fetch_pr_file_text`: `GET /repos/{repo}/git/blobs/{sha}`, raw, at most 5 MB, cached by id —
+    blobs never change). It is read the first time a gap opens, or as soon as the pointer rests on
+    an expander, and checked against the hunks first (`matchesHead`): lines from another version
+    are never put around them.
+  - How far the file goes below the last hunk is known once it is read — before that only when the
+    hunk ends on fewer than three context lines, which means the file ends there (`diffGaps`).
+  - Opened lines take no comments: GitHub accepts them on the lines of the diff only. They are
+    coloured from the head file, with 40 lines before each run read too so a run starting inside a
+    comment or a string reads right, 800 lines at a time so a whole long file never freezes the
+    window. Tokens stay with the file, as the hunks' do, so a redraw is coloured at once.
 
 ### Reading order
 

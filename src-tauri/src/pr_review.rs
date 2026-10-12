@@ -1158,6 +1158,7 @@ mod tests {
             deletions: 0,
             patch: Some(patch.into()),
             blob_url: String::new(),
+            sha: None,
         }
     }
 

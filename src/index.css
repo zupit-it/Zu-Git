@@ -6407,13 +6407,54 @@ ul.field-hint {
   gap: 10px;
   height: 28px;
   align-items: center;
-  padding-left: 116px;
   background: var(--accent-soft);
   color: var(--ink-muted);
   font-size: 11.5px;
 }
 .pd-hunk__range { color: var(--accent-ink); opacity: .75; }
 .pd-hunk__section { color: var(--ink-soft); }
+.pd-hunk__error { color: var(--fail); }
+
+/* Expanders sit in the line numbers' gutter; the header text lines up with the code. */
+.pd-hunk__gutter {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  width: 106px;
+}
+.pd-xbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+.pd-xbtn:hover { background: var(--accent); color: #fff; }
+.pd-xbtn:focus-visible, .pd-xall:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pd-xall {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pd-xall:hover { text-decoration: underline; }
+.pd-section--reading .pd-xbtn,
+.pd-section--reading .pd-xall,
+.pd-section--reading [data-pd-expand-file] { cursor: progress; opacity: .5; }
+.pd-expand-btns { display: inline-flex; gap: 2px; }
+
+/* Lines opened around the hunks: the diff left them out, and no comment starts there. */
+.pd-line--exp .pd-ln, .pd-half--exp .pd-ln { background: var(--surface-alt); }
 
 .pd-empty {
   padding: 18px 16px;
@@ -6728,7 +6769,7 @@ ul.field-hint {
 }
 
 .pd-lines--split .pd-code { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 12px; }
-.pd-lines--split .pd-hunk { padding-left: 76px; }
+.pd-lines--split .pd-hunk__gutter { width: 66px; }
 
 .pd-ai-srow {
   display: grid;

@@ -1538,7 +1538,54 @@ fn parse_pr_file(f: &serde_json::Value) -> crate::models::PrFileDiff {
         deletions: f["deletions"].as_u64().unwrap_or(0) as u32,
         patch: text("patch"),
         blob_url: text("blob_url").unwrap_or_default(),
+        sha: text("sha").filter(|sha| is_object_id(sha)),
     }
+}
+
+/// A git object id: 40 hex digits, 64 in SHA-256 repositories.
+pub(crate) fn is_object_id(id: &str) -> bool {
+    matches!(id.len(), 40 | 64) && id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Past this, a file is not worth expanding in the diff view: GitHub shows it.
+const BLOB_MAX_BYTES: usize = 5 * 1024 * 1024;
+
+/// A file's text by its blob id, for the lines the diff view expands around
+/// the hunks. Raw rather than JSON, which would wrap it in base64. Bytes that
+/// are not UTF-8 read as U+FFFD — as they do in GitHub's patches.
+pub async fn fetch_blob_text(
+    repo: &str,
+    sha: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<String, String> {
+    let api_base = settings.github_api_base_url.trim_end_matches('/');
+    let mut headers = github_headers(settings);
+    headers.insert("Accept", "application/vnd.github.raw+json".parse().unwrap());
+    let response = client
+        .get(format!("{api_base}/repos/{repo}/git/blobs/{sha}"))
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("GitHub refused the file ({status}): {}", github_error(&body)));
+    }
+    let too_large = |bytes: u64| format!("The file is too large to expand here ({:.1} MB): view it on GitHub.", bytes as f64 / 1_048_576.0);
+    if let Some(length) = response.content_length().filter(|&n| n > BLOB_MAX_BYTES as u64) {
+        return Err(too_large(length));
+    }
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > BLOB_MAX_BYTES {
+        return Err(too_large(bytes.len() as u64));
+    }
+    // Git's own test: a NUL early on means binary.
+    if bytes.iter().take(8000).any(|&b| b == 0) {
+        return Err("Binary file: nothing to expand.".into());
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Creates a pull request via the GitHub REST API and optionally assigns reviewers.
@@ -2565,6 +2612,18 @@ pub async fn fetch_stale_branches(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pr_file_keeps_its_blob_only_when_it_is_an_object_id() {
+        let file = |sha: serde_json::Value| parse_pr_file(&serde_json::json!({ "filename": "a.ts", "status": "modified", "sha": sha }));
+        let blob = "12d199e69587b6f6f2d9db73a565999a9473987e";
+        assert_eq!(file(serde_json::json!(blob)).sha.as_deref(), Some(blob));
+        assert_eq!(file(serde_json::json!("a".repeat(64))).sha.as_deref(), Some("a".repeat(64).as_str()));
+        // Never pasted into a URL unchecked.
+        assert_eq!(file(serde_json::json!("../../contents/secret")).sha, None);
+        assert_eq!(file(serde_json::json!(&blob[..39])).sha, None);
+        assert_eq!(file(serde_json::Value::Null).sha, None);
+    }
 
     #[test]
     fn pr_number_in_message_follows_squash_and_merge_commits() {

@@ -12,8 +12,9 @@ import type { PullRequestSummary } from "./shared/pr-model";
 import { openExternal } from "./api";
 import { SVG, errorMessage, escHtml, formatDiffNum } from "./utils";
 import {
-  alignSides, hunkFor, hunkSides, isGeneratedFile, languageFor, layerOrder, parsePatch, pathTree, sameCode, splitRows,
-  treeOrder, withAgentOrder, type DiffHunk, type DiffLang, type DiffLine, type FileGroup, type PathTree,
+  EXPAND_STEP, alignSides, diffGaps, expandGap, fileLines, gapLines, gapSize, hunkFor, hunkSides, isGeneratedFile,
+  languageFor, layerOrder, matchesHead, parsePatch, pathTree, sameCode, splitRows, treeOrder, withAgentOrder,
+  type DiffGap, type DiffHunk, type DiffLang, type DiffLine, type FileGroup, type GapShown, type PathTree,
 } from "./pr-diff-parse";
 import type { Token } from "./pr-diff-highlight";
 import {
@@ -38,6 +39,8 @@ interface PrFileDiff {
   deletions: number;
   patch: string | null;
   blobUrl: string;
+  /** The file's blob at the head: read to show the lines around the hunks. */
+  sha: string | null;
 }
 
 interface PrDiff {
@@ -59,7 +62,21 @@ interface FileView {
   /** Bumped on every body render, so a late highlight never lands on a stale body. */
   renderGen: number;
   rendered: boolean;
+  /** The head file's lines, read the first time the reader expands around the hunks. */
+  head: string[] | null;
+  /** That read while it is on its way: every click waits on the same one. */
+  headRead: Promise<string[]> | null;
+  /** Why the read failed, shown on the gap clicked (-1: the file's header button). */
+  headError: { gap: number; text: string } | null;
+  /** What the reader opened of each gap around the hunks (see `diffGaps`). */
+  shown: GapShown[];
+  /** Tokens of the hunks' lines by `data-li`, kept so a redraw is coloured at once. */
+  hunkTokens: (Token[] | undefined)[] | null;
+  /** Tokens of the opened lines, by head line. */
+  headTokens: Map<number, Token[]>;
 }
+
+type Tokenize = (code: string, lang: DiffLang) => Promise<Token[][]>;
 
 type OrderMode = "suggested" | "path";
 type ViewMode = "unified" | "split";
@@ -69,6 +86,10 @@ type ItemHtml = (item: ThreadItem) => string;
 
 /** Past this many diff lines a file waits for a click, like GitHub's "Load diff". */
 const LARGE_FILE_LINES = 1500;
+/** Lines of the head file the grammar reads before a run of opened lines. */
+const RUN_UP_LINES = 40;
+/** Opened lines coloured per pass, so a whole long file never freezes the window. */
+const HIGHLIGHT_CHUNK = 800;
 /** Row heights from the CSS, for the placeholders of files not drawn yet. */
 const LINE_PX = 20;
 const HUNK_PX = 28;
@@ -111,6 +132,12 @@ function toFileView(file: PrFileDiff): FileView {
     collapsed: collapsedReason !== "",
     renderGen: 0,
     rendered: false,
+    head: null,
+    headRead: null,
+    headError: null,
+    shown: Array.from({ length: hunks.length + 1 }, () => ({ down: 0, up: 0 })),
+    hunkTokens: null,
+    headTokens: new Map(),
   };
 }
 
@@ -192,6 +219,12 @@ function renderFileButton(v: FileView, i: number, notes: { open: number; pending
 
 const TREE_ICON = `<svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 2h3.5M3 2v7.5h2.5M3 5.5h2.5"/><rect x="6.5" y="4.2" width="4" height="2.6" rx=".6"/><rect x="6.5" y="8.2" width="4" height="2.6" rx=".6"/></svg>`;
 const FOLDER_ICON = `<svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M1.5 3.3c0-.5.4-.9.9-.9h2.3l1.1 1.2h3.8c.5 0 .9.4.9.9v4.7c0 .5-.4.9-.9.9H2.4c-.5 0-.9-.4-.9-.9z"/></svg>`;
+// Expanders, drawn as GitHub's fold icons: arrows off a line.
+const foldIcon = (d: string) => `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const EXPAND_UP_ICON = foldIcon("M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13.5h10");
+const EXPAND_DOWN_ICON = foldIcon("M8 5v8M4.5 9.5 8 13l3.5-3.5M3 2.5h10");
+const UNFOLD_ICON = foldIcon("M8 6V1.5M5.5 4 8 1.5 10.5 4M8 10v4.5M5.5 12 8 14.5l2.5-2.5M3 8h10");
+const FOLD_ICON = foldIcon("M8 1.5V6M5.5 3.5 8 6l2.5-2.5M8 14.5V10M5.5 12.5 8 10l2.5 2.5M3 8h10");
 
 /** The folder tree of By path: folders fold, and a filter shows its matches whatever is folded. */
 function renderTree(node: PathTree, depth: number, file: (path: string, depth: number) => string, folded: Set<string>): string {
@@ -208,7 +241,32 @@ function renderTree(node: PathTree, depth: number, file: (path: string, depth: n
 }
 
 function placeholderHeight(v: FileView): number {
-  return v.lines.length * LINE_PX + v.hunks.length * HUNK_PX;
+  const opened = v.shown.reduce((n, s) => n + s.down + s.up, 0);
+  return (v.lines.length + opened) * LINE_PX + v.hunks.length * HUNK_PX;
+}
+
+/** Lines opened around the hunks, anywhere in the file. */
+function isExpanded(v: FileView): boolean {
+  return v.shown.some(s => s.down + s.up > 0);
+}
+
+/** Lines still hidden around the hunks — or maybe, under the last one, until the file is read. */
+function hiddenLeft(v: FileView): boolean {
+  return diffGaps(v.hunks, v.head?.length ?? null).some((gap, k) => {
+    const size = gapSize(gap);
+    return size === null || size > v.shown[k].down + v.shown[k].up;
+  });
+}
+
+/** The file header's buttons: open every hidden line, or fold back to the diff's own. */
+function renderExpandButtons(v: FileView, i: number): string {
+  if (!v.file.sha || v.hunks.length === 0) return "";
+  const button = (action: "expand" | "collapse", icon: string, label: string) =>
+    `<button class="pd-blob-btn" type="button" data-pd-expand-file="${action}" data-pd-of="${i}" title="${label}" aria-label="${label}">${icon}</button>`;
+  return `<span class="pd-expand-btns" data-pd-expand-btns>` +
+    (hiddenLeft(v) ? button("expand", UNFOLD_ICON, "Expand all lines") : "") +
+    (isExpanded(v) ? button("collapse", FOLD_ICON, "Collapse expanded lines") : "") +
+    `</span>`;
 }
 
 function renderSection(v: FileView, i: number): string {
@@ -223,6 +281,7 @@ function renderSection(v: FileView, i: number): string {
       `<span class="pd-path">${path}</span>` +
       (v.collapsedReason ? `<span class="pd-reason">${escHtml(v.collapsedReason)}</span>` : "") +
       renderStat(file.additions, file.deletions) +
+      renderExpandButtons(v, i) +
       (file.blobUrl ? `<button class="pd-blob-btn" type="button" data-pd-blob="${i}" title="View the file on GitHub">${SVG.ext}</button>` : "") +
     `</div>` +
     `<div class="pd-section__body" data-pd-body="${i}" style="min-height:${v.collapsed ? 0 : placeholderHeight(v)}px"></div>` +
@@ -250,28 +309,85 @@ function rowAttrs(h: number, left: DiffLine | null, right: DiffLine | null): str
  * `data-li` is the line's index in the file's hunks: highlighting lands by
  * index, so it does not care how a view lays the lines out.
  */
-function renderCode(line: DiffLine, li: number): string {
-  return `<span class="pd-code" data-li="${li}">${escHtml(line.text)}</span>`;
+function renderCode(line: DiffLine, li: number, tokens: Token[] | undefined): string {
+  return `<span class="pd-code" data-li="${li}">${renderTokens(tokens, line.text)}</span>`;
 }
 
-function renderLine(line: DiffLine, li: number, h: number): string {
+function renderLine(line: DiffLine, li: number, h: number, tokens: Token[] | undefined): string {
   return `<div class="pd-line pd-line--${line.kind}"${rowAttrs(h, line, line)}>` +
     renderLn(line.oldNo, "old") +
     renderLn(line.newNo, "new") +
     renderSign(line) +
-    renderCode(line, li) +
+    renderCode(line, li, tokens) +
     `</div>`;
 }
 
 /** One side of a split row; an empty half when the other side has no counterpart. */
-function renderHalf(line: DiffLine | null, side: Side, li: Map<DiffLine, number>): string {
+function renderHalf(line: DiffLine | null, side: Side, li: Map<DiffLine, number>, tokens: FileView["hunkTokens"]): string {
   if (!line) return `<span class="pd-half pd-half--empty"></span>`;
+  const k = li.get(line) ?? -1;
   // A context line is the same line on both sides, shown without a tint.
   return `<span class="pd-half pd-half--${line.kind}">` +
     renderLn(side === "old" ? line.oldNo : line.newNo, side) +
     renderSign(line) +
-    renderCode(line, li.get(line) ?? -1) +
+    renderCode(line, k, tokens?.[k]) +
     `</span>`;
+}
+
+/**
+ * A line opened around the hunks: context like the diff's own, but no comment
+ * starts on it — GitHub takes comments on the lines of the diff only.
+ * `data-plain` marks it for highlighting.
+ */
+function renderExpanded(line: DiffLine, split: boolean, tokens: Token[] | undefined): string {
+  const code = `<span class="pd-code" data-xn="${line.newNo}"${tokens ? "" : " data-plain"}>${renderTokens(tokens, line.text)}</span>`;
+  const ln = (no: number | null) => `<span class="pd-ln">${no ?? ""}</span>`;
+  if (!split) return `<div class="pd-line pd-line--exp">${ln(line.oldNo)}${ln(line.newNo)}${renderSign(line)}${code}</div>`;
+  const half = (no: number | null) => `<span class="pd-half pd-half--exp">${ln(no)}${renderSign(line)}${code}</span>`;
+  return `<div class="pd-srow">${half(line.oldNo)}${half(line.newNo)}</div>`;
+}
+
+/**
+ * The row standing for a gap's hidden lines: the expanders, and the header of
+ * the hunk below it. Up to `EXPAND_STEP` lines one button opens them all.
+ */
+function renderGapRow(i: number, k: number, hidden: number | null, hunk: DiffHunk | null, expandable: boolean, error: string): string {
+  const button = (how: "up" | "down" | "all", icon: string, label: string) =>
+    `<button class="pd-xbtn" type="button" data-pd-expand="${how}" data-pd-of="${i}" data-pd-gap="${k}" title="${label}" aria-label="${label}">${icon}</button>`;
+  const buttons: string[] = [];
+  let all = "";
+  if (expandable && hidden !== 0) {
+    if (hidden !== null && hidden <= EXPAND_STEP) {
+      buttons.push(button("all", UNFOLD_ICON, `Expand all (${hidden} line${hidden === 1 ? "" : "s"})`));
+    } else {
+      // Down continues the hunk above; up leads into the hunk below.
+      if (k > 0) buttons.push(button("down", EXPAND_DOWN_ICON, `Expand down (${EXPAND_STEP} lines)`));
+      if (hunk) buttons.push(button("up", EXPAND_UP_ICON, `Expand up (${EXPAND_STEP} lines)`));
+      if (hidden !== null) {
+        all = `<button class="pd-xall" type="button" data-pd-expand="all" data-pd-of="${i}" data-pd-gap="${k}">Show all ${hidden.toLocaleString()} lines</button>`;
+      }
+    }
+  }
+  const header = hunk
+    ? `<span class="pd-hunk__range">@@ −${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@</span>` +
+      (hunk.section ? `<span class="pd-hunk__section">${escHtml(hunk.section)}</span>` : "")
+    : "";
+  return `<div class="pd-hunk"><span class="pd-hunk__gutter">${buttons.join("")}</span>${header}${all}` +
+    (error ? `<span class="pd-hunk__error">${escHtml(error)}</span>` : "") + `</div>`;
+}
+
+/**
+ * A gap around the hunks: the lines opened under the hunk above, the row for
+ * those still hidden, the lines opened over the hunk below. Once fully open
+ * it reads as one with its hunks, without a row — as on GitHub.
+ */
+function renderGap(v: FileView, i: number, gap: DiffGap, k: number, hunk: DiffHunk | null, split: boolean, error: string): string {
+  const size = gapSize(gap);
+  const { down, hidden, up } = v.head ? gapLines(gap, v.shown[k], v.head) : { down: [], hidden: size, up: [] };
+  const lines = (list: DiffLine[]) => list.map(l => renderExpanded(l, split, v.headTokens.get(l.newNo ?? 0))).join("");
+  // A hunk at the very top of its file keeps its header: nothing was ever hidden there.
+  const row = hidden !== 0 || (hunk && size === 0) ? renderGapRow(i, k, hidden, hunk, !!v.file.sha, error) : "";
+  return lines(down) + row + lines(up);
 }
 
 /** What hangs under a line: on its head number, base number, or both for context lines. */
@@ -311,21 +427,30 @@ function renderBody(v: FileView, i: number, anchors: Map<string, ThreadItem[]>, 
   }
   const li = new Map<DiffLine, number>();
   v.lines.forEach((line, k) => li.set(line, k));
-  const hunkHead = (h: DiffHunk) =>
-    `<div class="pd-hunk"><span class="pd-hunk__range">@@ −${h.oldStart},${h.oldCount} +${h.newStart},${h.newCount} @@</span>` +
-    (h.section ? `<span class="pd-hunk__section">${escHtml(h.section)}</span>` : "") + `</div>`;
+  const split = view === "split";
+  const tokens = v.hunkTokens;
+  const hunkRows = (hunk: DiffHunk, h: number) => split
+    ? splitRows(hunk).map(row =>
+      `<div class="pd-srow"${rowAttrs(h, row.left, row.right)}>${renderHalf(row.left, "old", li, tokens)}${renderHalf(row.right, "new", li, tokens)}</div>` +
+      splitThreadFor(path, row.left, row.right, anchors, item),
+    ).join("")
+    : hunk.lines.map(l => {
+      const k = li.get(l) ?? -1;
+      return renderLine(l, k, h, tokens?.[k]) + threadFor(path, l, anchors, item);
+    }).join("");
 
-  if (view === "split") {
-    return top + `<div class="pd-lines pd-lines--split">` + v.hunks.map((hunk, h) =>
-      hunkHead(hunk) + splitRows(hunk).map(row =>
-        `<div class="pd-srow"${rowAttrs(h, row.left, row.right)}>${renderHalf(row.left, "old", li)}${renderHalf(row.right, "new", li)}</div>` +
-        splitThreadFor(path, row.left, row.right, anchors, item),
-      ).join(""),
-    ).join("") + `</div>`;
-  }
-  return top + `<div class="pd-lines">` + v.hunks.map((hunk, h) =>
-    hunkHead(hunk) + hunk.lines.map(l => renderLine(l, li.get(l) ?? -1, h) + threadFor(path, l, anchors, item)).join(""),
-  ).join("") + `</div>`;
+  const gaps = diffGaps(v.hunks, v.head?.length ?? null);
+  // A failed read shows on the gap clicked; from the header button, on the first one still closed.
+  const closed = gaps.findIndex((gap, k) => {
+    const size = gapSize(gap);
+    return size === null || size > v.shown[k].down + v.shown[k].up;
+  });
+  const errorAt = v.headError ? (v.headError.gap >= 0 ? v.headError.gap : closed) : -1;
+  const gap = (k: number, hunk: DiffHunk | null) =>
+    renderGap(v, i, gaps[k], k, hunk, split, k === errorAt ? v.headError?.text ?? "" : "");
+  const rows = v.hunks.map((hunk, h) => gap(h, hunk) + hunkRows(hunk, h)).join("") +
+    (v.file.sha ? gap(v.hunks.length, null) : "");
+  return top + `<div class="pd-lines${split ? " pd-lines--split" : ""}">${rows}</div>`;
 }
 
 const COLOR_RE = /^#[0-9a-f]{3,8}$/i;
@@ -607,6 +732,21 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     const mode = target.closest<HTMLElement>("[data-pd-order-mode]");
     if (mode) { setOrderMode(mode.dataset.pdOrderMode === "path" ? "path" : "suggested"); return; }
 
+    const expander = target.closest<HTMLElement>("[data-pd-expand]");
+    if (expander) {
+      const how = expander.dataset.pdExpand;
+      if (how === "up" || how === "down" || how === "all") {
+        void expandAt(Number(expander.dataset.pdOf), Number(expander.dataset.pdGap), how);
+      }
+      return;
+    }
+    const wholeFile = target.closest<HTMLElement>("[data-pd-expand-file]");
+    if (wholeFile) {
+      const i = Number(wholeFile.dataset.pdOf);
+      if (wholeFile.dataset.pdExpandFile === "collapse") collapseFile(i); else void expandFile(i);
+      return;
+    }
+
     const blob = target.closest<HTMLElement>("[data-pd-blob]");
     if (blob) {
       e.stopPropagation();
@@ -623,7 +763,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
 
   overlay.addEventListener("keydown", (e) => {
     const toggle = (e.target as Element).closest<HTMLElement>("[data-pd-toggle]");
-    if (toggle && (e.key === "Enter" || e.key === " ")) {
+    // The header itself: its buttons answer Enter and Space on their own.
+    if (toggle && toggle === e.target && (e.key === "Enter" || e.key === " ")) {
       e.preventDefault();
       toggleFile(Number(toggle.dataset.pdToggle));
     }
@@ -1922,31 +2063,170 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     paintSelections(i);
     if (pendingJump !== null) alignTo(pendingJump);
     const gen = ++v.renderGen;
-    if (v.lang && v.hunks.length > 0) void highlightBody(v, v.lang, body, gen);
+    if (v.lang && v.hunks.length > 0) void highlightBody(v, v.lang, body, gen, !v.hunkTokens);
   }
 
-  async function highlightBody(v: FileView, lang: DiffLang, body: HTMLElement, gen: number) {
+  /** `plain`: the hunks were drawn before their tokens were known. */
+  async function highlightBody(v: FileView, lang: DiffLang, body: HTMLElement, gen: number, plain: boolean) {
+    const live = () => gen === v.renderGen && body.isConnected;
     try {
       const { tokenize } = await import("./pr-diff-highlight");
-      const perLine: (Token[] | undefined)[] = [];
-      for (const hunk of v.hunks) {
-        const sides = hunkSides(hunk);
-        const hasDel = hunk.lines.some(l => l.kind === "del");
-        const hasNew = hunk.lines.some(l => l.kind !== "del");
-        const [oldSide, newSide] = await Promise.all([
-          hasDel ? tokenize(sides.old, lang) : Promise.resolve([]),
-          hasNew ? tokenize(sides.new, lang) : Promise.resolve([]),
-        ]);
-        perLine.push(...alignSides(hunk, oldSide, newSide));
+      v.hunkTokens ??= await tokenizeHunks(v, lang, tokenize);
+      const perLine = v.hunkTokens;
+      if (!live()) return;
+      if (plain) {
+        body.querySelectorAll<HTMLElement>(".pd-code[data-li]").forEach(el => {
+          const k = Number(el.dataset.li);
+          el.innerHTML = renderTokens(perLine[k], v.lines[k]?.text ?? "");
+        });
       }
-      if (gen !== v.renderGen || !body.isConnected) return;
-      body.querySelectorAll<HTMLElement>(".pd-code[data-li]").forEach(el => {
-        const k = Number(el.dataset.li);
-        el.innerHTML = renderTokens(perLine[k], v.lines[k]?.text ?? "");
-      });
+      await highlightOpened(v, lang, body, live, tokenize);
     } catch {
       // Plain text is still a readable diff; the colours are a bonus.
     }
+  }
+
+  async function tokenizeHunks(v: FileView, lang: DiffLang, tokenize: Tokenize): Promise<(Token[] | undefined)[]> {
+    const perLine: (Token[] | undefined)[] = [];
+    for (const hunk of v.hunks) {
+      const sides = hunkSides(hunk);
+      const hasDel = hunk.lines.some(l => l.kind === "del");
+      const hasNew = hunk.lines.some(l => l.kind !== "del");
+      const [oldSide, newSide] = await Promise.all([
+        hasDel ? tokenize(sides.old, lang) : Promise.resolve([]),
+        hasNew ? tokenize(sides.new, lang) : Promise.resolve([]),
+      ]);
+      perLine.push(...alignSides(hunk, oldSide, newSide));
+    }
+    return perLine;
+  }
+
+  /**
+   * Colours the opened lines drawn plain, from the head file: a few lines
+   * before each run go to the grammar too, so a run that starts inside a
+   * comment or a string still reads right. Long runs go in chunks, so opening
+   * a whole file never freezes the window.
+   */
+  async function highlightOpened(v: FileView, lang: DiffLang, body: HTMLElement, live: () => boolean, tokenize: Tokenize) {
+    const file = v.head;
+    if (!file) return;
+    const spans = new Map<number, HTMLElement[]>();
+    body.querySelectorAll<HTMLElement>(".pd-code[data-xn][data-plain]").forEach(el => {
+      const n = Number(el.dataset.xn);
+      spans.set(n, [...(spans.get(n) ?? []), el]);
+    });
+    const numbers = [...spans.keys()].sort((a, b) => a - b);
+    for (let k = 0; k < numbers.length;) {
+      let end = k;
+      while (end + 1 < numbers.length && numbers[end + 1] === numbers[end] + 1 && end + 1 - k < HIGHLIGHT_CHUNK) end++;
+      const from = numbers[k];
+      const to = numbers[end];
+      if (numbers.slice(k, end + 1).some(n => !v.headTokens.has(n))) {
+        const start = Math.max(1, from - RUN_UP_LINES);
+        const tokens = await tokenize(file.slice(start - 1, to).join("\n"), lang);
+        for (let n = from; n <= to; n++) {
+          const line = tokens[n - start];
+          if (line) v.headTokens.set(n, line);
+        }
+      }
+      if (!live()) return;
+      for (let n = from; n <= to; n++) {
+        for (const el of spans.get(n) ?? []) {
+          el.innerHTML = renderTokens(v.headTokens.get(n), file[n - 1] ?? "");
+          el.removeAttribute("data-plain");
+        }
+      }
+      k = end + 1;
+      if (k < numbers.length) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+
+  // ── Expanding around the hunks ──────────────────────────────────────────────
+
+  /** The head file of a view, read once: clicks while it is on its way wait on the same read. */
+  function readHead(v: FileView): Promise<string[]> {
+    if (v.head) return Promise.resolve(v.head);
+    const sha = v.file.sha;
+    if (!sha) return Promise.reject(new Error("GitHub did not say which version of the file this is."));
+    v.headRead ??= invoke<string>("fetch_pr_file_text", { repo: pr.repo, sha })
+      .then((text) => {
+        const lines = fileLines(text);
+        if (!matchesHead(v.hunks, lines)) throw new Error("The file GitHub sent does not match this diff: reload the diff.");
+        v.head = lines;
+        return lines;
+      })
+      .finally(() => { v.headRead = null; });
+    return v.headRead;
+  }
+
+  // Resting the pointer on an expander starts the read: by the click it is usually there.
+  content.addEventListener("pointerover", (e) => {
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-pd-expand], [data-pd-expand-file]") : null;
+    const v = el ? views[Number(el.dataset.pdOf)] : undefined;
+    if (v && !v.head && !v.headError) readHead(v).catch(() => {});
+  });
+
+  /** The head file for a click on gap `gap` (-1: the header button); a failure shows on that gap. */
+  async function headFor(i: number, gap: number): Promise<string[] | null> {
+    const v = views[i];
+    if (!v) return null;
+    if (v.head) return v.head;
+    const section = sectionEl(i);
+    section?.classList.add("pd-section--reading");
+    try {
+      const lines = await readHead(v);
+      v.headError = null;
+      return views[i] === v && overlay.isConnected ? lines : null;
+    } catch (err) {
+      // A reload replaced the files meanwhile: nothing left to tell.
+      if (views[i] !== v || !overlay.isConnected) return null;
+      v.headError = { gap, text: errorMessage(err, "The file could not be read.") };
+      redrawFile(i);
+      return null;
+    } finally {
+      section?.classList.remove("pd-section--reading");
+    }
+  }
+
+  /** Redraws a file after it opened or folded, with its header's buttons. */
+  function redrawFile(i: number) {
+    const v = views[i];
+    if (!v) return;
+    if (v.rendered) keepingFocus(() => drawBody(i));
+    const buttons = sectionEl(i)?.querySelector<HTMLElement>("[data-pd-expand-btns]");
+    if (buttons) buttons.outerHTML = renderExpandButtons(v, i);
+  }
+
+  async function expandAt(i: number, k: number, how: "up" | "down" | "all") {
+    const v = views[i];
+    const focused = document.activeElement instanceof HTMLElement && document.activeElement.matches("[data-pd-expand]");
+    const lines = await headFor(i, k);
+    if (!v || !lines || !v.shown[k]) return;
+    v.shown[k] = expandGap(v.shown[k], gapSize(diffGaps(v.hunks, lines.length)[k]) ?? 0, how);
+    redrawFile(i);
+    // From the keyboard, the focus stays on the gap while it has buttons left.
+    const body = focused ? bodyEl(i) : null;
+    (body?.querySelector<HTMLElement>(`[data-pd-gap="${k}"][data-pd-expand="${how}"]`) ?? body?.querySelector<HTMLElement>(`[data-pd-gap="${k}"]`))?.focus();
+  }
+
+  async function expandFile(i: number) {
+    const v = views[i];
+    if (!v) return;
+    if (v.collapsed) toggleFile(i);
+    const lines = await headFor(i, -1);
+    if (!lines) return;
+    v.shown = diffGaps(v.hunks, lines.length).map((gap, k) => expandGap(v.shown[k], gapSize(gap) ?? 0, "all"));
+    redrawFile(i);
+  }
+
+  function collapseFile(i: number) {
+    const v = views[i];
+    if (!v) return;
+    v.shown = v.shown.map(() => ({ down: 0, up: 0 }));
+    redrawFile(i);
+    // A long file folding back can leave the reader below it: back to its top.
+    const section = sectionEl(i);
+    if (section && section.offsetTop - content.offsetTop < content.scrollTop) alignTo(i);
   }
 
   // ── Load ────────────────────────────────────────────────────────────────────

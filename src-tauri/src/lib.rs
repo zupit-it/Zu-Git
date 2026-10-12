@@ -37,6 +37,8 @@ pub struct AppState {
     pub pr_diff_cache: Mutex<HashMap<String, models::PrDiff>>,
     /// Changes between two commits of a PR, keyed by `repo@from...to`: commits never change.
     pub pr_compare_cache: Mutex<HashMap<String, pr_review::CommitCompare>>,
+    /// Text of the files a diff expands, keyed by blob id: blobs never change.
+    pub pr_file_cache: Mutex<HashMap<String, String>>,
     /// PRs whose review is being published (`repo#number`): one publish at a time.
     pub publishing: Mutex<std::collections::HashSet<String>>,
 }
@@ -100,6 +102,7 @@ pub fn run() {
             google_access: Mutex::new(None),
             pr_diff_cache: Mutex::new(HashMap::new()),
             pr_compare_cache: Mutex::new(HashMap::new()),
+            pr_file_cache: Mutex::new(HashMap::new()),
             publishing: Mutex::new(std::collections::HashSet::new()),
         })
         .invoke_handler(tauri::generate_handler![
@@ -116,6 +119,7 @@ pub fn run() {
             commands::get_draft_pr_info,
             commands::fetch_branch_stats,
             commands::fetch_pr_diff,
+            commands::fetch_pr_file_text,
             commands::fetch_pr_head,
             commands::fetch_pr_threads,
             commands::ai_review_list,

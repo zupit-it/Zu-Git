@@ -194,6 +194,116 @@ export function splitRows(hunk: DiffHunk): SplitRow[] {
   return rows;
 }
 
+// ── Expanding around the hunks ────────────────────────────────────────────────
+
+/** Lines one click on an expander adds, as on GitHub. */
+export const EXPAND_STEP = 20;
+
+/** Context git puts after a change: fewer after the last one means the file ends there. */
+const CONTEXT_LINES = 3;
+
+/**
+ * Unchanged lines a patch leaves out — before the first hunk, between two,
+ * after the last. They read the same in both files, only shifted.
+ */
+export interface DiffGap {
+  /** First head line hidden. */
+  from: number;
+  /** Last head line hidden; null after the last hunk while the file's length is unknown. */
+  to: number | null;
+  /** Head line `n` is base line `n + shift`. */
+  shift: number;
+}
+
+/** What the reader opened of a gap: lines right under the hunk above, and right over the hunk below. */
+export interface GapShown {
+  down: number;
+  up: number;
+}
+
+/** The lines a hunk covers on one side; an empty side sits right after its start line. */
+function span(start: number, count: number): { first: number; last: number } {
+  return count > 0 ? { first: start, last: start + count - 1 } : { first: start + 1, last: start };
+}
+
+/**
+ * The gaps around `hunks`: `gaps[k]` comes before `hunks[k]`, the extra one
+ * after the last hunk. Without the file's length that one is open-ended —
+ * unless the last hunk ends on fewer context lines than git gives, which
+ * means the file ends there.
+ */
+export function diffGaps(hunks: readonly DiffHunk[], fileLength: number | null): DiffGap[] {
+  const gaps: DiffGap[] = [];
+  let newNext = 1;
+  let oldNext = 1;
+  for (const hunk of hunks) {
+    const head = span(hunk.newStart, hunk.newCount);
+    gaps.push({ from: newNext, to: head.first - 1, shift: oldNext - newNext });
+    newNext = head.last + 1;
+    oldNext = span(hunk.oldStart, hunk.oldCount).last + 1;
+  }
+  const lines = hunks[hunks.length - 1]?.lines ?? [];
+  let trailing = 0;
+  while (trailing < lines.length && lines[lines.length - 1 - trailing].kind === "ctx") trailing++;
+  const to = fileLength ?? (trailing < CONTEXT_LINES ? newNext - 1 : null);
+  gaps.push({ from: newNext, to, shift: oldNext - newNext });
+  return gaps;
+}
+
+/** How many lines a gap hides in all; null when nobody knows yet. */
+export function gapSize(gap: DiffGap): number | null {
+  return gap.to === null ? null : Math.max(0, gap.to - gap.from + 1);
+}
+
+function clampShown(shown: GapShown, size: number): GapShown {
+  const down = Math.min(shown.down, size);
+  return { down, up: Math.min(shown.up, size - down) };
+}
+
+/** A click on an expander: `down` and `up` add a step from their side, `all` opens the whole gap. */
+export function expandGap(shown: GapShown, size: number, how: "down" | "up" | "all"): GapShown {
+  const { down, up } = clampShown(shown, size);
+  if (how === "all") return { down, up: size - down };
+  if (how === "down") return { down: Math.min(size - up, down + EXPAND_STEP), up };
+  return { down, up: Math.min(size - down, up + EXPAND_STEP) };
+}
+
+/**
+ * A gap as it reads with the head file at hand: the lines shown under the hunk
+ * above, how many stay hidden, the lines shown over the hunk below.
+ */
+export function gapLines(
+  gap: DiffGap, shown: GapShown, file: readonly string[],
+): { down: DiffLine[]; hidden: number; up: DiffLine[] } {
+  const to = Math.min(gap.to ?? file.length, file.length);
+  const size = Math.max(0, to - gap.from + 1);
+  const { down, up } = clampShown(shown, size);
+  const line = (n: number): DiffLine => ({ kind: "ctx", text: file[n - 1], oldNo: n + gap.shift, newNo: n });
+  return {
+    down: Array.from({ length: down }, (_, k) => line(gap.from + k)),
+    hidden: size - down - up,
+    up: Array.from({ length: up }, (_, k) => line(to - up + 1 + k)),
+  };
+}
+
+/** A file's text numbered as patches number it: no extra line after the final newline. */
+export function fileLines(text: string): string[] {
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+/**
+ * Whether `file` is the head the hunks were cut from: every line they show on
+ * the head side reads the same at its number. Lines from another version must
+ * never be put around them.
+ */
+export function matchesHead(hunks: readonly DiffHunk[], file: readonly string[]): boolean {
+  const bare = (text: string) => (text.endsWith("\r") ? text.slice(0, -1) : text);
+  return hunks.every(hunk => hunk.lines.every(l =>
+    l.newNo === null || (l.newNo <= file.length && bare(file[l.newNo - 1]) === bare(l.text))));
+}
+
 // ── Languages ─────────────────────────────────────────────────────────────────
 
 /** Shiki grammar ids the view knows how to load. */

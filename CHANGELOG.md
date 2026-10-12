@@ -32,6 +32,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   flagged — apart from what is stuck right now (CI failing, changes requested, reviews waiting).
   **Evidenzia** marks every story that changed, says how, and dims the others; with
   **Persone** it is the standup's agenda, person by person.
+- **PR diff: the code around the changes** — the rows between the hunks have GitHub's expanders:
+  20 more lines under the change above, 20 more over the change below, a short gap in one click or
+  a long one with *Show all*. The file's header opens the whole file and folds it back (**Expand
+  all lines**, **Collapse expanded lines**). The lines come from the file at the PR's head, read
+  once and coloured like the rest; as on GitHub, comments stay on the lines of the diff.
 
 ### Changed
 - **Review load in the list only** — My score and the review load strip are about the PR list: the
