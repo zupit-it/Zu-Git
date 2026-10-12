@@ -21,6 +21,28 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Sprint — the whole sprint at a glance",
+        body: "A new <strong>Sprint</strong> tab, there as soon as Jira is configured, shows the active sprint of your board on one screen: a pill per story with the <strong>face</strong> of whoever has it, the <strong>key</strong>, the <strong>points</strong> and a dot for its PR — green approved, amber changes requested or waiting, red CI failing. The columns are your Jira board's own; <strong>Persone</strong> turns them into one row per person with their open points, a click on a face in the head dims everyone else, and the button next to the views adds each story's title. The bar by the sprint's name compares the points closed with where a steady pace would be today, and the <strong>?</strong> explains every mark. <strong>Drag</strong> a story to another column to move it — the ones your workflow cannot reach are hatched — or, in <strong>Persone</strong>, onto someone else to reassign it; every move can be undone for a few seconds. ⌘-click (Ctrl-click) selects several stories at once, a right click offers the same actions. Jira's flag is shown as information, never as a block, under the name your team gives it — <em>In test</em>, say.",
+        imgs: ["/assets/changelog/sprint-board.png"],
+      },
+      {
+        title: "Sprint — a story without opening Jira",
+        body: "A click on a story opens it in a side panel, with the board still in view. Change its <strong>status</strong> (the transitions your workflow allows), <strong>assignee</strong> and <strong>points</strong>, tick its <strong>checklist</strong>, read the <strong>description</strong> and the <strong>comments</strong> with their pictures at full quality — a click opens them full size — and the <strong>attachments</strong>, see its open PRs (a click opens the diff) and its sub-tasks, and leave a comment. ↑ / ↓ walk through the board, Esc closes, <strong>Jira</strong> opens the rest. Drag the panel's left edge to make it wider: ZuGit remembers the width, and the panel never goes past 90% of the window — move to a laptop screen and it shrinks, back on the big one it is as you left it.",
+      },
+      {
+        title: "Sprint — what changed since the standup",
+        body: "A strip above the board sums up what happened since the previous working day's standup — <strong>8:00</strong> by default, Friday's on a Monday, and a click changes it: stories closed, moved forward or sent back, added to the sprint, reassigned, re-estimated, flagged. Only net changes count: a story moved and moved back is no news. Next to it, <strong>Da sbloccare</strong> lists what is stuck right now — CI failing, changes requested, reviews waiting for more than two days. <strong>Evidenzia</strong> marks every story that changed, says how, and dims the others; in <strong>Persone</strong> it becomes the standup's agenda, person by person.",
+      },
+      {
+        title: "Sprint — categories for what is not sprint work",
+        body: "Recurring activities and the other stories you book time on but do not need to see every day go into <strong>categories</strong> of your own, like <em>Attività ricorrenti</em>: from <strong>Categorie</strong> in the head, the selection bar, a right click, or by dragging a story onto the category's chip. They leave the board, its totals and the standup; the chip lists them. A story that leaves the sprint stays filed, so when it comes back in a later sprint it is already in its category. Categories are kept on your computer: no Jira permission needed.",
+      },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
+      {
         title: "Faster all round",
         body: "ZuGit waits less. A <strong>PR diff</strong> opens sooner — and almost at once if your pointer rested on its <strong>+N −N</strong> chip first, since the diff starts loading right then. The <strong>Toggl planner</strong> opens faster and <strong>switching days</strong> no longer starts from scratch: a day you just looked at comes back instantly, and resting on a day in the date menu loads it before you click. Behind the scenes, requests that used to wait for each other now run side by side, and things that never change — like your Jira account — are asked once instead of every time.",
       },
@@ -33,11 +55,6 @@ const VERSIONS: VersionBlock[] = [
         title: "AI review — Claude or Codex reads the PR first",
         body: "Press <strong>Copy review prompt</strong> in the diff and paste it into Claude Code, Codex or Claude Desktop — or run <code>/mcp__zugit__review_pr</code> in Claude Code. Through the ZuGit connector your agent reads the PR, its Jira story and checklist and the open conversations, reads the code with <strong>read-only git</strong> — your working tree is never touched — and hands back a summary, a reading order and line comments. They appear in the diff under their lines, with a chip on the PR row: <strong>Keep</strong>, <strong>Edit</strong> or <strong>Discard</strong> each one. Kept ones become your comments; <strong>nothing reaches GitHub</strong> until you publish your review.",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "Release status — see the release as a map",
         body: "The release diff now opens with a <strong>metro map</strong> of the release above the list. On <strong>main</strong> it is one line from the last tag to HEAD, a stop per story merged since, then a dotted stretch to the <strong>next tag</strong> through a dashed ghost for every planned story not merged yet — with its open PR when there is one. On a <strong>release branch</strong> main runs on top and the branch below: every <strong>cherry-pick</strong> drops from its stop on main, and a story <em>Verified</em> on main but missing from the branch drops to a <strong>ghost</strong> — the pick still to do, at a glance. A PR with several stories (<code>feat(PENT-1,PENT-2): …</code>) is one stop, and since it is picked whole, a verified story sharing it with one still in testing shows as <strong>held back</strong>, not as ready. Unplanned stories are diamonds, other PRs on main fold into <code>+N</code> stops, beta tags flag main. Hover a stop for its stories, click it to jump to their rows; the map follows the tab you are on, zooms with <strong>− / + / fit</strong> or a pinch, and <strong>Hide map</strong> folds it down to its legend. The window is bigger too, growing with your screen.",

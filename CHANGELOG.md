@@ -7,10 +7,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
----
-
-## [2.0.3] - 2026-10-08
-
 ### Added
 - **Sprint board** — a new **Sprint** tab (it appears once Jira is configured) shows the whole active
   sprint at a glance: one pill per story with the assignee's face, the key, the points and a dot for
@@ -36,6 +32,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   flagged — apart from what is stuck right now (CI failing, changes requested, reviews waiting).
   **Evidenzia** marks every story that changed, says how, and dims the others; with
   **Persone** it is the standup's agenda, person by person.
+
+### Changed
+- **Review load in the list only** — My score and the review load strip are about the PR list: the
+  other views (Sprint, Status, Settings, Stale branches) no longer show them.
+
+---
+
+## [2.0.3] - 2026-10-08
+
+### Added
 - **Toggl planner: tasks** — projects split into Toggl tasks ("Incontri" → "Feedback 1v1") list them
   in the project picker, indented under the project: unfolded for the projects you use often and
   the row's own, folded to a count for the others, and found by name when typing. Picking a task
@@ -45,8 +51,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   assistant sees each project's tasks and can propose one.
 
 ### Changed
-- **Review load in the list only** — My score and the review load strip are about the PR list: the
-  other views (Sprint, Status, Settings, Stale branches) no longer show them.
 - **Faster PR diff** — GitHub takes about half a second per answer, and opening a diff asked it
   three times in a row. The files are now read together with the PR's head (two round trips, not
   three), and resting the pointer on the `+N −N` chip starts reading the diff and its conversations,
