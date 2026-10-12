@@ -26,6 +26,8 @@ export function setStatus(message: string, tone: "neutral" | "danger" = "neutral
   const target = document.querySelector<HTMLElement>("[data-status]");
   if (target) {
     target.innerHTML = message;
+    // A narrow window cuts the status short: the whole message stays on hover.
+    target.title = target.textContent ?? "";
   }
   const syncStatus = document.querySelector<HTMLElement>("[data-sync-status]");
   if (syncStatus) {

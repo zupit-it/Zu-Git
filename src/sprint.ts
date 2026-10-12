@@ -82,6 +82,7 @@ function init() {
           <button type="button" data-sp-view="person" title="Una riga per persona">${ICON.rows}Persone</button>
         </div>
         <button type="button" class="sp-toggle" data-sp-titles title="Mostra i titoli delle storie" aria-label="Titoli" aria-pressed="false">${ICON.titles}</button>
+        <button type="button" class="sp-toggle sp-toggle--help" data-sp-legend title="Cosa vogliono dire i simboli" aria-label="Legenda">?</button>
       </div>
       <!-- The PR list's loading hairline, on the head's bottom border. -->
       <div class="list-progress" data-sp-loading hidden role="progressbar" aria-label="Carico lo sprint">
@@ -153,17 +154,27 @@ function renderHead() {
       const pct = pace.total ? (pace.done / pace.total) * 100 : 0;
       const expected = clock ? clock.elapsed * 100 : null;
       const behind = expected !== null && pct + 10 < expected;
+      // The tick in words: the points a steady pace would have closed by today.
+      const expectedPoints = clock && !clock.ended ? Math.round(pace.total * clock.elapsed) : null;
+      const paceText =
+        pace.needed === null
+          ? ""
+          : ` Ritmo: ${M.formatPoints(pace.perDay)} pt al giorno finora; per chiudere ne servono ${M.formatPoints(pace.needed)} al giorno.`;
       progress.innerHTML = `
         <div class="sp-bar${behind ? " is-behind" : ""}" title="${escHtml(
           `Verde: ${M.formatPoints(pace.done)} punti chiusi su ${M.formatPoints(pace.total)} (${Math.round(pct)}%).` +
             (expected !== null
               ? ` Tacca: dove saremmo oggi a ritmo costante — è passato il ${Math.round(expected)}% dei giorni lavorativi dello sprint.`
-              : ""),
+              : "") +
+            paceText,
         )}">
           <span class="sp-bar-fill" style="width:${pct.toFixed(1)}%"></span>
           ${expected !== null ? `<span class="sp-bar-tick" style="left:${expected.toFixed(1)}%"></span>` : ""}
         </div>
-        <span class="sp-progress-label"><b>${escHtml(M.formatPoints(pace.done))}</b> / ${escHtml(M.formatPoints(pace.total))} pt</span>`;
+        <span class="sp-progress-label"><b>${escHtml(M.formatPoints(pace.done))}</b> / ${escHtml(M.formatPoints(pace.total))} pt</span>
+        ${expectedPoints !== null
+          ? `<span class="sp-progress-exp${behind ? " is-behind" : ""}" title="Punti che un ritmo costante avrebbe chiuso entro oggi: la tacca sulla barra">oggi ~${escHtml(M.formatPoints(expectedPoints))}</span>`
+          : ""}`;
     }
   }
 
@@ -302,11 +313,13 @@ function renderStandup() {
   const attention = M.standupSectionCount(standup, "attention");
   const groupsOf = (section: M.StandupSection) =>
     M.STANDUP_GROUPS.filter((group) => group.section === section && standup[group.id].length);
+  // What changed reads as quiet text with a coloured dot; only what is stuck
+  // keeps a tinted chip, so the strip does not outshout the board.
   const chips = (section: M.StandupSection) =>
     groupsOf(section)
       .map(
         (group) =>
-          `<button type="button" class="sp-su-chip sp-su-chip--${group.tone}" data-sp-su-toggle>${standup[group.id].length} ${escHtml(M.groupLabel(group, standup[group.id].length, flag))}</button>`,
+          `<button type="button" class="sp-su-chip sp-su-chip--${group.tone}${section === "changed" ? " is-quiet" : ""}" data-sp-su-toggle>${standup[group.id].length} ${escHtml(M.groupLabel(group, standup[group.id].length, flag))}</button>`,
       )
       .join("");
   const groupList = (section: M.StandupSection) =>
@@ -325,11 +338,6 @@ function renderStandup() {
         </div>`,
       )
       .join("");
-  const pace = M.sprintPace(boardIssues(), columns(), M.sprintClock(data.sprint, now));
-  const paceText =
-    pace.needed === null
-      ? `${M.formatPoints(pace.done)} pt chiusi`
-      : `${M.formatPoints(pace.perDay)} pt/giorno finora · ne servono ${M.formatPoints(pace.needed)}`;
   const open = sp.standupOpen && changed + attention > 0;
   el.classList.toggle("is-open", open);
   el.innerHTML = `
@@ -338,11 +346,10 @@ function renderStandup() {
       ${changed ? chips("changed") : `<span class="sp-su-muted">nessun cambiamento${sp.standupError ? ` (${escHtml(sp.standupError)})` : ""}</span>`}
       ${attention ? `<span class="sp-su-sep"></span><span class="sp-su-sub">Da sbloccare</span>${chips("attention")}` : ""}
       <span class="sp-su-end">
-      <span class="sp-su-pace" title="Punti chiusi per giorno lavorativo, e quanti ne servono al giorno per chiudere lo sprint">${escHtml(paceText)}</span>
       ${changed
         ? `<button type="button" class="sp-su-diff${sp.diffMode ? " is-on" : ""}" data-sp-diff aria-pressed="${sp.diffMode}"
-            title="${sp.diffMode ? "Torna alla board normale (Esc)" : "Mostra sulla board le storie cambiate da allora; le altre si attenuano"}">
-            ${DIFF_ICON}${sp.diffMode ? "Cambiamenti evidenziati" : "Evidenzia sulla board"}</button>`
+            title="${sp.diffMode ? "Cambiamenti evidenziati sulla board: clic o Esc per tornare alla board normale" : "Evidenzia sulla board le storie cambiate da allora; le altre si attenuano"}">
+            ${DIFF_ICON}${sp.diffMode ? "Evidenziati" : "Evidenzia"}</button>`
         : ""}
       ${changed + attention
         ? `<button type="button" class="sp-su-more" data-sp-su-toggle aria-expanded="${open}">${open ? "Chiudi" : "Dettagli"} <span class="sp-chev${open ? " is-up" : ""}">${ICON.chevron}</span></button>`
@@ -455,7 +462,7 @@ function renderPersonBoard(list: M.SprintIssue[], ctx: CardContext): string {
       const items = list.filter((i) => (i.assignee?.accountId ?? "") === row.id);
       const open = openOf(row.id);
       // Unassigned work is nobody's load: its bar stays neutral.
-      const level = row.id === "" ? "none" : average === 0 ? "ok" : open > average * 1.4 ? "high" : open > average * 1.15 ? "mid" : "ok";
+      const level = row.id === "" ? "none" : average > 0 && open > average * 1.4 ? "high" : "ok";
       const dim = sp.focusPerson !== null && sp.focusPerson !== row.id;
       const mine = !!row.person && row.person.accountId === sp.data?.me?.accountId;
       const changedCount = ctx.diff ? items.filter((i) => ctx.changes?.has(i.key)).length : 0;
@@ -880,6 +887,26 @@ function openPickMenu(anchor: HTMLElement) {
   openMenu(anchor, entries, { width: 300 });
 }
 
+function openLegendMenu(anchor: HTMLElement) {
+  const dot = (signal: M.PrSignal) => `<span class="sp-sig sp-sig--${signal}"></span>`;
+  const entries: MenuEntry[] = [
+    { kind: "title", label: "Card" },
+    { kind: "legend", lead: avatar(null, 18), label: "Chi la sta facendo; tratteggiata se non è assegnata" },
+    { kind: "legend", lead: `<span class="sp-pts">3</span>`, label: "Punti stimati; «–» se manca la stima" },
+    { kind: "legend", lead: `<span class="sp-legend-key">PENT</span>`, label: "Chiave viola: la storia è tua" },
+    { kind: "legend", lead: `<span class="sp-flag">${ICON.flag}</span>`, label: `Flag di Jira («${flagMeaning().label}»)` },
+    { kind: "title", label: "Pallino della pull request" },
+    { kind: "legend", lead: dot("approved"), label: "Approvata" },
+    { kind: "legend", lead: dot("changes"), label: "Modifiche richieste, o review in attesa da più di 2 giorni" },
+    { kind: "legend", lead: dot("ci"), label: "CI fallita" },
+    { kind: "legend", lead: dot("review"), label: "In review o in bozza" },
+    { kind: "title", label: "Board" },
+    { kind: "legend", lead: `<span class="sp-legend-bar"><i></i><b></b></span>`, label: "Verde: punti chiusi. Tacca: dove saremmo oggi a ritmo costante" },
+    { kind: "legend", lead: `<span class="sp-legend-hatch"></span>`, label: "Trascinando: colonna che il workflow non raggiunge" },
+  ];
+  openMenu(anchor, entries, { width: 340 });
+}
+
 function openCategoriesMenu(anchor: HTMLElement) {
   const keys = [...sp.selection];
   const entries: MenuEntry[] = [{ kind: "title", label: "Categorie" }];
@@ -1007,6 +1034,8 @@ function bindEvents(el: HTMLElement) {
       writePref("view", sp.view);
       return rerender();
     }
+    const legend = target.closest<HTMLElement>("[data-sp-legend]");
+    if (legend) return openLegendMenu(legend);
     if (target.closest("[data-sp-titles]")) {
       sp.titles = !sp.titles;
       writePref("titles", sp.titles ? "1" : "0");

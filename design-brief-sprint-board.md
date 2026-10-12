@@ -94,7 +94,7 @@ Una striscia sopra la board: *Da ieri 8:00 · 3 chiuse · 2 avanzate · 1 riasse
   e tornata non è una novità.
 - **Da sbloccare** (stato attuale delle PR): CI fallita, modifiche richieste, review in attesa.
 - "Da" = standup del giorno lavorativo precedente (il lunedì vale venerdì).
-- **Evidenzia sulla board**: le storie cambiate restano in evidenza e dicono cosa è successo, le altre
+- **Evidenzia**: le storie cambiate restano in evidenza e dicono cosa è successo, le altre
   si attenuano; nella vista Persone diventa la scaletta dello standup, persona per persona.
 
 ---

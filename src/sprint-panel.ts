@@ -245,10 +245,12 @@ function attachmentsSection(detail: M.IssueDetail): string {
       ? `<div class="sp-att-grid">${images
           .map((att) => {
             const src = pictureUrl(att.id);
-            return `<button type="button" class="sp-att-tile${src ? "" : " is-loading"}" data-att-img="${escHtml(att.id)}" title="${escHtml(`${att.filename} · ${M.formatBytes(att.size)}`)}">
-              ${src ? `<img src="${escHtml(src)}" alt="" draggable="false">` : ""}
-              <span class="sp-att-cap">${escHtml(att.filename)}</span>
-            </button>`;
+            return `<div class="sp-att-tile">
+              <button type="button" class="sp-att-thumb${src ? "" : " is-loading"}" data-att-img="${escHtml(att.id)}" title="${escHtml(`${att.filename} · ${M.formatBytes(att.size)}`)}">
+                ${src ? `<img src="${escHtml(src)}" alt="" draggable="false">` : ""}
+              </button>
+              <span class="sp-att-cap" title="${escHtml(att.filename)}">${escHtml(att.filename)}</span>
+            </div>`;
           })
           .join("")}</div>`
       : ""}
@@ -356,6 +358,15 @@ function prRow(pr: PullRequestSummary): string {
   </button>`;
 }
 
+/** The PR list's priority arrows, for Jira's names in English or Italian. */
+function priorityIcon(name: string): string {
+  const n = name.trim().toLowerCase();
+  if (/highest|massima|critic|blocker|urgent/.test(n)) return SVG.priorityHighest;
+  if (/high|alta|major/.test(n)) return SVG.priorityHigh;
+  if (/low|bass|minim|minor|trivial/.test(n)) return SVG.priorityLow;
+  return SVG.priorityMedium;
+}
+
 function field(label: string, value: string): string {
   return `<dt>${escHtml(label)}</dt><dd>${value}</dd>`;
 }
@@ -448,7 +459,9 @@ function renderIssue(key: string, fromCategory: string | null): string {
     if (issue.fixVersions.length) {
       props.push(field("Release", issue.fixVersions.map((v) => `<span class="sp-tag">${escHtml(v)}</span>`).join("")));
     }
-    if (issue.priority) props.push(field("Priorità", `<span class="sp-plain">${escHtml(issue.priority)}</span>`));
+    if (issue.priority) {
+      props.push(field("Priorità", `<span class="sp-plain sp-priority">${priorityIcon(issue.priority)}${escHtml(issue.priority)}</span>`));
+    }
     if (issue.labels.length) {
       props.push(field("Etichette", issue.labels.map((l) => `<span class="sp-tag sp-tag--soft">${escHtml(l)}</span>`).join("")));
     }

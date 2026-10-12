@@ -13,7 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its PR (green approved, amber changes requested or waiting, red CI failing). The columns are the
   Jira board's own; **Persone** turns them into one row per person with their open points, and the
   faces in the head focus on one person. The bar in the head compares the points closed with where a
-  steady pace would be today. Stories drag between columns — the ones the workflow cannot reach
+  steady pace would be today ("oggi ~54"), and the **?** next to it explains every mark. Stories drag between columns — the ones the workflow cannot reach
   are hatched — and, in Persone, between people; every move can be undone for a few seconds. A
   right click offers the same actions, ⌘-click (Ctrl-click) selects several at once. Jira's flag is
   shown as information, never as a block, under the name your team gives it ("In test").
@@ -30,7 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Sprint: standup** — a strip above the board sums up what changed since the previous working
   day's standup (8:00, changeable): stories closed, moved, sent back, added, reassigned, re-estimated,
   flagged — apart from what is stuck right now (CI failing, changes requested, reviews waiting).
-  **Evidenzia sulla board** marks every story that changed, says how, and dims the others; with
+  **Evidenzia** marks every story that changed, says how, and dims the others; with
   **Persone** it is the standup's agenda, person by person.
 - **Toggl planner: tasks** — projects split into Toggl tasks ("Incontri" → "Feedback 1v1") list them
   in the project picker, indented under the project: unfolded for the projects you use often and

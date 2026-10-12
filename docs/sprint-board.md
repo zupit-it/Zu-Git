@@ -19,14 +19,17 @@ is configured (URL, email, token).
   requested or a review waiting for more than 48 h, green every PR approved, hollow in review or draft.
   Your own stories have a violet border. **Titoli** shows each card as a row with its title.
 - **Persone**: one row per person — you first, then by name, unassigned last — with the open points
-  and a bar relative to the team's average (amber over 115%, red over 140%).
+  and a neutral bar relative to the team's average — amber over 140%, never red: load is
+  information, not a verdict.
 - **Head**: day of the sprint (working days; "Sprint finito" past its end), the faces as a person
   filter (others are dimmed, not hidden), search on key, title, person, epic and labels (`/` or ⌘F).
 - **Progress bar**: green is the points of the stories in done-category columns over the sprint's
   total (filed stories left out). The dark tick is where the team would be today at a steady pace:
   the share of the sprint's working days behind us — a working day in progress counts half, a
-  weekend adds nothing, past the end it is all of it (`sprintClock`). Green more than 10 points
-  behind the tick turns amber.
+  weekend adds nothing, past the end it is all of it (`sprintClock`). Next to it, "oggi ~N" says
+  the tick in points; green more than 10 points behind the tick turns both amber. The tooltip adds
+  the pace: points closed per working day so far, and per remaining day needed to close.
+- **Legend**: the "?" in the head explains the card's marks, the PR dot's colours and the bar.
 - **Jira's flag** is shown as information — a sky-blue flag — and never marks a story as blocked:
   Jira calls it an impediment, but teams use it their own way (e.g. "deployed on test"). Its name
   can be set per board, in this browser — "Flag" by default, "In test", or any other — from the
@@ -122,9 +125,10 @@ default (Friday on a Monday). A click on "Da ieri 8:00" sets another time, kept 
   estimate changed.
 - **Da sbloccare** — the state of the PRs right now, from the dashboard already loaded: CI failing,
   changes requested, reviews waiting for more than 48 h. Not a change: a separate group.
-- **Pace**: points closed per working day so far and per remaining day needed to close the sprint.
 
-**Evidenzia sulla board** turns the board into the standup's agenda: stories changed since then show
+What changed reads as quiet text with a coloured dot; only what is stuck keeps a tinted chip.
+
+**Evidenzia** turns the board into the standup's agenda: stories changed since then show
 what happened on a line of their own ("da To Do · prima: Federico Rossi", "chiusa", "stima 5 → 8"),
 with a border in the colour of the change; the others are dimmed. In the **Persone** view each person
 reads "N cambiamenti". The tooltip of a changed story lists the history behind it (who, what, when).

@@ -28,6 +28,8 @@ export type MenuEntry =
   | { kind: "sep" }
   | { kind: "title"; label: string }
   | { kind: "note"; label: string }
+  /** A non-interactive row: a sample (HTML) and what it means. */
+  | { kind: "legend"; lead: string; label: string }
   | { kind: "input"; placeholder: string; value?: string; submitLabel: string; onSubmit: (value: string) => void }
   | { kind: "swatches"; colors: string[]; selected?: string; onSelect: (color: string) => void };
 
@@ -68,6 +70,9 @@ const CHECK = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" strok
 function renderMenu(menu: OpenMenu) {
   const q = menu.query.trim();
   const items = visibleItems(menu);
+  // The check column only where something can be checked: no empty gutter.
+  const hasChecks = menu.entries.some((entry) => isItem(entry) && entry.checked !== undefined);
+  menu.el.classList.toggle("sp-menu--plain", !hasChecks);
   let itemIndex = 0;
   const parts: string[] = [];
   if (menu.options.searchable) {
@@ -81,7 +86,7 @@ function renderMenu(menu: OpenMenu) {
       const index = itemIndex++;
       parts.push(
         `<button type="button" class="sp-mi${index === menu.active ? " is-active" : ""}${entry.danger ? " sp-mi--danger" : ""}" data-sp-mi="${index}"${entry.disabled ? " disabled" : ""}>
-          <span class="sp-mi-check">${entry.checked ? CHECK : ""}</span>
+          ${hasChecks ? `<span class="sp-mi-check">${entry.checked ? CHECK : ""}</span>` : ""}
           ${entry.lead ?? ""}
           <span class="sp-mi-label">${escHtml(entry.label)}</span>
           ${entry.hint ? `<span class="sp-mi-hint">${escHtml(entry.hint)}</span>` : ""}
@@ -100,6 +105,9 @@ function renderMenu(menu: OpenMenu) {
         break;
       case "note":
         parts.push(`<div class="sp-menu-note">${escHtml(entry.label)}</div>`);
+        break;
+      case "legend":
+        parts.push(`<div class="sp-menu-legend"><span class="sp-menu-legend-lead">${entry.lead}</span><span>${escHtml(entry.label)}</span></div>`);
         break;
       case "input":
         parts.push(
