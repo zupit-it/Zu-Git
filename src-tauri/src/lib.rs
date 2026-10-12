@@ -10,6 +10,7 @@ mod models;
 mod pr_review;
 mod release_picks;
 mod secret_store;
+mod sprint;
 mod storage;
 mod toggl;
 mod toggl_day;
@@ -159,6 +160,19 @@ pub fn run() {
             commands::google_connect,
             commands::google_disconnect,
             commands::google_status,
+            commands::sprint_board,
+            commands::sprint_transitions,
+            commands::sprint_transition,
+            commands::sprint_assign,
+            commands::sprint_set_points,
+            commands::sprint_assignable_users,
+            commands::sprint_issue_detail,
+            commands::sprint_add_comment,
+            commands::sprint_issues_by_keys,
+            commands::sprint_changes,
+            commands::sprint_categories_load,
+            commands::sprint_categories_save,
+            commands::sprint_attachment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

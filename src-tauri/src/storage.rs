@@ -780,6 +780,40 @@ fn save_user_review(dir: &Path, review: &crate::pr_review::UserReview) -> Result
     std::fs::rename(&draft, &path).map_err(|e| e.to_string())
 }
 
+// ── Sprint categories ─────────────────────────────────────────────────────────
+
+/// A personal group of stories kept off the sprint board ("Attività ricorrenti").
+/// Keyed by Jira key, so it holds across sprints for as long as the story lives.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SprintCategory {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    #[serde(default)]
+    pub keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SprintCategories {
+    #[serde(default)]
+    pub categories: Vec<SprintCategory>,
+}
+
+pub fn load_sprint_categories(dir: &Path) -> SprintCategories {
+    read_json(dir.join("sprint-categories.json"))
+}
+
+/// Written through a temporary file: a crash mid-write must not lose years of
+/// hand-made grouping.
+pub fn save_sprint_categories(dir: &Path, categories: &SprintCategories) -> Result<(), String> {
+    let path = dir.join("sprint-categories.json");
+    let draft = path.with_extension("json.tmp");
+    write_json(draft.clone(), categories)?;
+    std::fs::rename(&draft, &path).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

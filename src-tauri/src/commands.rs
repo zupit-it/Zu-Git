@@ -1742,3 +1742,179 @@ pub async fn drop_jira_fix_versions(
         Err(errors.join("; "))
     }
 }
+
+// ── Sprint board ──────────────────────────────────────────────────────────────
+
+async fn jira_settings(app: &tauri::AppHandle) -> Result<AppSettings, String> {
+    let settings = storage::load_settings(app).await?;
+    if !crate::models::settings_ready_for_jira(&settings) {
+        return Err("Jira non è configurato: aggiungi URL, email e token in Settings.".into());
+    }
+    Ok(settings)
+}
+
+/// The board, its active sprint and its issues. `board_id` / `sprint_id` pick
+/// among several; `hint_keys` are project prefixes seen on PRs, used when the
+/// repo → board mapping of the settings is empty.
+#[tauri::command]
+pub async fn sprint_board(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    board_id: Option<u64>,
+    sprint_id: Option<u64>,
+    hint_keys: Vec<String>,
+) -> Result<crate::sprint::SprintBoard, String> {
+    let settings = jira_settings(&app).await?;
+    crate::sprint::fetch_board(board_id, sprint_id, &hint_keys, &settings, &state.http_client)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_transitions(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<Vec<crate::sprint::TransitionOption>, String> {
+    let settings = jira_settings(&app).await?;
+    crate::sprint::transitions(&key, &settings, &state.http_client).await.map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_transition(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    key: String,
+    transition_id: String,
+) -> Result<(), String> {
+    let settings = jira_settings(&app).await?;
+    crate::sprint::transition(&key, &transition_id, &settings, &state.http_client)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_assign(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    key: String,
+    account_id: Option<String>,
+) -> Result<(), String> {
+    let settings = jira_settings(&app).await?;
+    crate::sprint::assign(&key, account_id.as_deref(), &settings, &state.http_client)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_set_points(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    key: String,
+    field: String,
+    points: Option<f64>,
+) -> Result<(), String> {
+    let settings = jira_settings(&app).await?;
+    crate::sprint::set_points(&key, &field, points, &settings, &state.http_client)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_assignable_users(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    project_key: String,
+) -> Result<Vec<crate::sprint::JiraPerson>, String> {
+    let settings = jira_settings(&app).await?;
+    crate::sprint::assignable_users(&project_key, &settings, &state.http_client)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_issue_detail(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<crate::sprint::IssueDetail, String> {
+    let settings = jira_settings(&app).await?;
+    crate::sprint::issue_detail(&key, &settings, &state.http_client)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_add_comment(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    key: String,
+    body: String,
+) -> Result<crate::sprint::IssueComment, String> {
+    if body.trim().is_empty() {
+        return Err("Il commento è vuoto.".into());
+    }
+    let settings = jira_settings(&app).await?;
+    crate::sprint::add_comment(&key, &body, &settings, &state.http_client)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_issues_by_keys(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    keys: Vec<String>,
+) -> Result<Vec<crate::sprint::SprintIssue>, String> {
+    if keys.is_empty() {
+        return Ok(vec![]);
+    }
+    let settings = jira_settings(&app).await?;
+    Ok(crate::sprint::issues_by_keys(&keys, &settings, &state.http_client).await)
+}
+
+/// `since` is an RFC 3339 instant: the standup the summary starts from.
+#[tauri::command]
+pub async fn sprint_changes(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    sprint_id: u64,
+    since: String,
+) -> Result<Vec<crate::sprint::ChangeEvent>, String> {
+    let since = chrono::DateTime::parse_from_rfc3339(&since)
+        .map_err(|e| format!("Data non valida '{since}': {e}"))?
+        .with_timezone(&chrono::Utc);
+    let settings = jira_settings(&app).await?;
+    crate::sprint::change_events(sprint_id, since, &settings, &state.http_client)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn sprint_categories_load(app: tauri::AppHandle) -> Result<storage::SprintCategories, String> {
+    Ok(storage::load_sprint_categories(&storage::data_dir(&app)?))
+}
+
+#[tauri::command]
+pub async fn sprint_categories_save(
+    app: tauri::AppHandle,
+    categories: storage::SprintCategories,
+) -> Result<(), String> {
+    storage::save_sprint_categories(&storage::data_dir(&app)?, &categories)
+}
+
+/// An attachment's bytes, raw: the frontend gets an `ArrayBuffer` and shows
+/// it through a blob URL (the CSP allows `blob:` images, not Jira's hosts).
+#[tauri::command]
+pub async fn sprint_attachment(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    id: String,
+    thumbnail: bool,
+) -> Result<tauri::ipc::Response, String> {
+    let settings = jira_settings(&app).await?;
+    crate::sprint::attachment_bytes(&id, thumbnail, &settings, &state.http_client)
+        .await
+        .map(tauri::ipc::Response::new)
+        .map_err(String::from)
+}

@@ -27,7 +27,7 @@ export interface ChecklistItem {
   done: boolean;
 }
 
-export type AppView = "status" | "list" | "settings" | "stale";
+export type AppView = "status" | "list" | "settings" | "stale" | "sprint";
 
 export const state = {
   // ── Dashboard ──────────────────────────────────────────────────────────────

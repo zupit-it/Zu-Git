@@ -26,6 +26,8 @@ export function setStatus(message: string, tone: "neutral" | "danger" = "neutral
   const target = document.querySelector<HTMLElement>("[data-status]");
   if (target) {
     target.innerHTML = message;
+    // A narrow window cuts the status short: the whole message stays on hover.
+    target.title = target.textContent ?? "";
   }
   const syncStatus = document.querySelector<HTMLElement>("[data-sync-status]");
   if (syncStatus) {
@@ -59,6 +61,8 @@ export function stopSyncLabelTicker() {
 
 export function setView(view: AppView) {
   state.currentView = view;
+  // Lets the CSS show what belongs to one view only (the review load strip).
+  document.body.dataset.view = view;
 
   document.querySelectorAll<HTMLElement>("[data-view-panel]").forEach((panel) => {
     panel.toggleAttribute("hidden", panel.dataset.viewPanel !== view);
@@ -214,6 +218,11 @@ export function renderSettings(values: SettingsFormValues) {
   if (staleHint) staleHint.hidden = !state.staleBranchesEnabled;
   // Turning the tab off while looking at it would leave the app on a hidden view.
   if (!state.staleBranchesEnabled && state.currentView === "stale") setView("list");
+  // The sprint board only needs Jira.
+  const jiraReady = values.jiraBaseUrl.trim() !== "" && values.jiraEmail.trim() !== "" && values.jiraToken.trim() !== "";
+  const sprintTab = document.querySelector<HTMLElement>('[data-view-tab="sprint"]');
+  if (sprintTab) sprintTab.hidden = !jiraReady;
+  if (!jiraReady && state.currentView === "sprint") setView("list");
   void refreshGoogleStatus();
   syncSettingsSections();
   openUnconfiguredSections();
