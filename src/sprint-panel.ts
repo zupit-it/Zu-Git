@@ -27,7 +27,6 @@ const details = new Map<string, Load<M.IssueDetail>>();
 const checklists = new Map<string, Load<ChecklistItem[]>>();
 const commentDrafts = new Map<string, string>();
 const expandedComments = new Set<string>();
-const expandedDescriptions = new Set<string>();
 let editingPoints: string | null = null;
 /** Categories whose stories outside the sprint are shown (they are hidden by default). */
 const expandedOutside = new Set<string>();
@@ -297,22 +296,11 @@ function hydratePictures(el: HTMLElement) {
       .then((url) => {
         if (!holder.isConnected || !holder.classList.contains("is-loading")) return;
         placePicture(holder, url);
-        updateDescriptionClamp(el);
       })
       .catch(() => {
         if (holder.isConnected) pictureFailed(holder);
       });
   });
-}
-
-function updateDescriptionClamp(el: HTMLElement) {
-  const desc = el.querySelector<HTMLElement>("[data-sp-desc]");
-  const toggle = el.querySelector<HTMLElement>("[data-sp-desc-toggle]");
-  if (!desc || !toggle) return;
-  const expanded = desc.classList.contains("is-expanded");
-  const clamped = !expanded && desc.scrollHeight > desc.clientHeight + 4;
-  desc.classList.toggle("is-clamped", clamped);
-  toggle.hidden = !clamped && !expanded;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -500,13 +488,9 @@ function renderIssue(key: string, fromCategory: string | null): string {
     const d = detail.value;
     const media = mediaResolver(d);
     const description = adfToHtml(d.description, { media });
-    const expanded = expandedDescriptions.has(key);
     sections.push(`<section class="sp-sec">
       <h3 class="sp-sec-title">Descrizione</h3>
-      ${description
-        ? `<div class="sp-desc adf${expanded ? " is-expanded" : ""}" data-sp-desc>${description}</div>
-           <button type="button" class="sp-link sp-desc-toggle" data-sp-desc-toggle hidden>${expanded ? "Mostra meno" : "Mostra tutto"}</button>`
-        : `<p class="sp-empty">Nessuna descrizione.</p>`}
+      ${description ? `<div class="adf">${description}</div>` : `<p class="sp-empty">Nessuna descrizione.</p>`}
     </section>`);
 
     sections.push(attachmentsSection(d));
@@ -765,7 +749,6 @@ export function renderPanel() {
 
   const newBody = el.querySelector<HTMLElement>("[data-sp-panel-body]");
   if (newBody && renderedKey === panelFor) newBody.scrollTop = scroll;
-  updateDescriptionClamp(el);
   hydratePictures(el);
   const textarea = el.querySelector<HTMLTextAreaElement>("[data-sp-comment]");
   if (textarea) autosize(textarea);
@@ -962,12 +945,6 @@ export function initPanelEvents(step: (delta: number) => void) {
     if (subtask) return openInJira(subtask.dataset.spSubtask ?? key);
     if (target.closest("[data-sp-more-comments]")) {
       expandedComments.add(key);
-      renderPanel();
-      return;
-    }
-    if (target.closest("[data-sp-desc-toggle]")) {
-      if (expandedDescriptions.has(key)) expandedDescriptions.delete(key);
-      else expandedDescriptions.add(key);
       renderPanel();
       return;
     }

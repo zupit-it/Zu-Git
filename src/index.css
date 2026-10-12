@@ -8058,20 +8058,6 @@ body.sp-is-resizing * { cursor: col-resize !important; user-select: none; }
 .sp-check input { margin: 3px 0 0; accent-color: var(--accent); }
 .sp-check.is-done span { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--ink-faint); }
 
-.sp-desc { position: relative; max-height: 460px; overflow: hidden; }
-.sp-desc.is-expanded { max-height: none; }
-.sp-desc.is-clamped::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 56px;
-  background: linear-gradient(rgba(255, 255, 255, 0), var(--surface));
-  pointer-events: none;
-}
-.sp-desc-toggle { margin-top: 6px; }
-
 /* Jira rich text */
 .adf { color: var(--ink-soft); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .adf > :last-child { margin-bottom: 0; }
