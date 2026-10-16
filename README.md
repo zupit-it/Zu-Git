@@ -431,6 +431,10 @@ Enter the version number **without** the `v` prefix (e.g. `0.2.0`). The workflow
 
 The build workflow compiles and packages the app for macOS (arm64 + x86\_64), Windows, and Linux, then uploads the installers to a GitHub Release.
 
+**A build failed?** Fix it on `main` and run **Release** again with the **same** version. A version
+already bumped is not bumped twice: the workflow moves its tag to `main` as it is now and builds it
+again. It refuses only once that version's release is published — then release a new one.
+
 The updater release requires the GitHub repository secrets `TAURI_SIGNING_PRIVATE_KEY`
 and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The public key matching that private key is
 stored in `src-tauri/tauri.conf.json`; Tauri generates the updater bundle signatures

@@ -25,9 +25,23 @@ jobs:
           node-version: 22
 
       - name: Bump versions
+        id: bump
         run: |
           set -e
           VERSION="${{ inputs.version }}"
+
+          # Run again for a version bumped already — its build failed, say: no
+          # second bump, the tag moves to main as it is now and the build reruns.
+          if grep -q "^## \[$VERSION\]" CHANGELOG.md; then
+            CURRENT=$(jq -r .version package.json)
+            if [ "$CURRENT" != "$VERSION" ]; then
+              echo "::error::CHANGELOG.md has [$VERSION] but package.json is at $CURRENT."
+              exit 1
+            fi
+            echo "v$VERSION is bumped already: rebuilding it from main."
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # package.json
           jq --arg v "$VERSION" '.version = $v' package.json > _tmp && mv _tmp package.json
@@ -39,17 +53,33 @@ jobs:
           sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" src-tauri/Cargo.toml
 
       - name: Bump changelog
+        if: steps.bump.outputs.rebuild != 'true'
         run: node scripts/changelog.js bump "${{ inputs.version }}"
 
       - name: Commit & tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
+          TAG="v${{ inputs.version }}"
+
+          # A published release keeps its tag: it is the code people installed.
+          # (A draft left by a failed build is not found by tag: it may move.)
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)" = "false" ]; then
+            echo "::error::$TAG is published already: release a new version instead."
+            exit 1
+          fi
+
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml CHANGELOG.md
-          git commit -m "chore: release v${{ inputs.version }}"
-          git tag "v${{ inputs.version }}"
-          git push origin HEAD
-          git push origin "v${{ inputs.version }}"
+          if [ "${{ steps.bump.outputs.rebuild }}" != "true" ]; then
+            git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml CHANGELOG.md
+            git commit -m "chore: release $TAG"
+            git push origin HEAD
+          fi
+          # On the commit to build; a tag left by a failed build moves along.
+          git tag -f "$TAG"
+          git push --force origin "$TAG"
 
       - name: Trigger build
         # GITHUB_TOKEN cannot trigger workflows via git push (GitHub anti-loop policy),
