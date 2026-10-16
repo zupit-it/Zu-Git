@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.0.1] - 2026-10-16
+
 ### Added
 - **PR diff: a comment editor like GitHub's** — every comment written in the diff (on lines, in a
   reply, in the review's summary) has **Write** / **Preview** and buttons for bold, italic,
