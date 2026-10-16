@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.ts",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "prepare": "node scripts/install-hooks.js"
   },
   "type": "module",
   "private": true,

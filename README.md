@@ -409,6 +409,10 @@ npm install
 npm run dev
 ```
 
+`npm install` also points git at `.githooks`: before every push, `pre-push` runs what CI checks —
+`tsc --noEmit` and `cargo clippy -- -D warnings` — plus the unit tests, and stops the push if one
+fails. `git push --no-verify` skips it.
+
 ## Build
 
 ```bash

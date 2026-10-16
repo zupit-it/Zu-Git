@@ -62,6 +62,9 @@ pub struct PackInfo {
     pub custom: bool,
 }
 
+/// A sheet of the pack: its file name and its bytes.
+type Sheet = (String, Vec<u8>);
+
 /// What the app needs of a manifest, once it reads right.
 #[derive(Debug)]
 struct Manifest {
@@ -255,7 +258,7 @@ fn read_entry(entry: &mut impl Read, max: u64, name: &str) -> Result<Vec<u8>, St
 
 /// The zip's manifest and sheets, checked: manifest.json at its top, or in the
 /// one folder it holds (as zipping a folder makes it).
-fn read_pack(zip_bytes: &[u8]) -> Result<(Manifest, Vec<(String, Vec<u8>)>), String> {
+fn read_pack(zip_bytes: &[u8]) -> Result<(Manifest, Vec<Sheet>), String> {
     if zip_bytes.len() > MAX_ZIP_BYTES {
         return Err("Character pack: the zip is bigger than 64 MB.".into());
     }

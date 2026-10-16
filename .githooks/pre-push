@@ -1,0 +1,32 @@
+#!/bin/sh
+# Before a push, the checks CI runs on it (.github/workflows/build.yml), plus
+# the unit tests: a push that would fail there stops here instead.
+# Git uses this folder once `npm install` has run (scripts/install-hooks.js).
+# In a hurry: git push --no-verify.
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# An IDE may run git without the shell's PATH: where cargo and node usually are.
+PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+
+fail() {
+  printf '\n✗ pre-push: %s failed. Fix it, or push with --no-verify.\n' "$1" >&2
+  exit 1
+}
+
+for tool in npx npm cargo; do
+  command -v "$tool" >/dev/null 2>&1 || fail "looking for $tool (not on PATH)"
+done
+
+printf '▸ TypeScript (tsc --noEmit)\n'
+npx --no-install tsc --noEmit || fail "TypeScript"
+
+printf '▸ Unit tests\n'
+# Quiet when they pass; the end of their output when they do not.
+out=$(npm test --silent 2>&1) || { printf '%s\n' "$out" | tail -40; fail "unit tests"; }
+
+printf '▸ Clippy (-D warnings)\n'
+cargo clippy --quiet --manifest-path src-tauri/Cargo.toml -- -D warnings || fail "Clippy"
+
+printf '✓ pre-push checks passed\n'
