@@ -41,6 +41,9 @@ dirs = "6"
 toml = "0.8"
 # Character packs for the Tiny King: zips loaded, and his own saved as one.
 zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+# zip takes flate2 without a backend; on macOS another crate happens to pick one,
+# on Windows none does and flate2 refuses to build. Its default: miniz_oxide.
+flate2 = "1"
 
 # setsid(2) when handing secrets to the `security` CLI over stdin.
 [target.'cfg(target_os = "macos")'.dependencies]
