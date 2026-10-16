@@ -1,0 +1,9 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema/acl/capability.schema.json",
+  "identifier": "pet",
+  "description": "The Tiny King's window (meme mode): it only listens for what to play",
+  "windows": ["pet"],
+  "permissions": [
+    "core:event:default"
+  ]
+}

@@ -13,6 +13,7 @@ import { renderMarkdown, suggestionBlock } from "./markdown-lite";
 import { hunkTail } from "./pr-diff-parse";
 import type { GhComment, GhThread } from "./pr-threads";
 import { escHtml, relativeTime } from "./utils";
+import { commentBox } from "./comment-box";
 
 export type Side = "new" | "old";
 
@@ -112,10 +113,15 @@ function suggestion(code: string | null): string {
   return code ? suggestionBlock(code) : "";
 }
 
+/** On lines of the new code: a suggestion can change them. */
+function suggestable(at: { side: Side; line: number | null; path?: string | null }): boolean {
+  return at.side === "new" && at.line !== null && at.path !== null;
+}
+
 /** Textarea and buttons; Esc and ⌘/Ctrl+Enter are handled by the view. */
-function editor(text: string, error: string | null | undefined, save: string, placeholder = ""): string {
+function editor(text: string, error: string | null | undefined, save: string, placeholder = "", suggest = false): string {
   const rows = Math.min(12, Math.max(3, text.split("\n").length + 1));
-  return `<textarea class="pd-ai-edit" data-pd-edit rows="${rows}" placeholder="${escHtml(placeholder)}">${escHtml(text)}</textarea>` +
+  return commentBox(`<textarea class="pd-ai-edit" data-pd-edit rows="${rows}" placeholder="${escHtml(placeholder)}">${escHtml(text)}</textarea>`, { suggest }) +
     errorLine(error) +
     `<div class="pd-ai-card__actions">` +
       `<button class="pd-ai-btn pd-ai-btn--primary" type="button" data-pd-action="save" title="${SUBMIT_KEYS}">${save}</button>` +
@@ -148,7 +154,7 @@ function renderAiCard(review: AiReview, comment: AiComment, state: CardState): s
 
   if (editing !== null) {
     return `<div class="pd-ai-card pd-ai-card--editing" data-pd-card="${key}">` + head +
-      editor(editing, state.error, "Save & keep") + `</div>`;
+      editor(editing, state.error, "Save & keep", "", suggestable(comment)) + `</div>`;
   }
 
   return `<div class="pd-ai-card pd-ai-card--${comment.severity}" data-pd-card="${key}">` +
@@ -186,7 +192,7 @@ function renderUserCard(comment: UserComment, state: CardState): string {
 
   if (editing !== null) {
     return `<div class="pd-ai-card pd-ai-card--user pd-ai-card--editing" data-pd-card="${key}">` + head +
-      editor(editing, state.error, "Save") + `</div>`;
+      editor(editing, state.error, "Save", "", suggestable(comment)) + `</div>`;
   }
 
   return `<div class="pd-ai-card pd-ai-card--user" data-pd-card="${key}">` +
@@ -219,7 +225,7 @@ export function renderDraft(draft: Draft, error: string | null, loose = false): 
       ? `<div class="pd-gh-where">These lines changed since you started: the comment is saved on <code>${escHtml(draft.headSha.slice(0, 7))}</code>, where you wrote it.</div>` +
         (draft.diffHunk ? snippetHtml(draft.diffHunk, rangeSpan(draft.line, draft.endLine)) : "")
       : "") +
-    editor(draft.text, error, "Add comment", `Leave a comment — ${SUBMIT_KEYS} to add`) +
+    editor(draft.text, error, "Add comment", `Leave a comment — ${SUBMIT_KEYS} to add`, suggestable(draft)) +
     `</div>`;
 }
 
@@ -315,7 +321,7 @@ export function renderPendingReply(reply: UserReply, state: CardState): string {
 export function renderReplyEditor(thread: GhThread, text: string, error: string | null, busy: boolean): string {
   const rows = Math.min(10, Math.max(3, text.split("\n").length + 1));
   return `<div class="pd-gh-reply" data-pd-card="${escHtml(`reply:${thread.id}`)}">` +
-    `<textarea class="pd-ai-edit" data-pd-edit rows="${rows}" placeholder="Reply — ${SUBMIT_KEYS} adds it to your review">${escHtml(text)}</textarea>` +
+    commentBox(`<textarea class="pd-ai-edit" data-pd-edit rows="${rows}" placeholder="Reply — ${SUBMIT_KEYS} adds it to your review">${escHtml(text)}</textarea>`, { suggest: suggestable(thread) }) +
     errorLine(error) +
     `<div class="pd-ai-card__actions">` +
       `<button class="pd-ai-btn pd-ai-btn--primary" type="button" data-pd-action="save" title="${SUBMIT_KEYS} — goes out when you publish your review"${busy ? " disabled" : ""}>Add to review</button>` +
@@ -447,7 +453,7 @@ export function renderPublishButtons(state: PublishState, count: number, hasSumm
     button("COMMENT", busy ?? (count ? `Comment · ${count}` : "Comment"), true,
       busy ?? (count || hasSummary ? null : "Nothing to publish yet: comment on some lines, or write a summary.")) +
     button("REQUEST_CHANGES", "Request changes", false,
-      busy ?? (state.ownPr ? OWN_PR : hasSummary ? null : "Write a summary first: GitHub needs a text to request changes.")) +
+      busy ?? (state.ownPr ? OWN_PR : null)) +
     button("APPROVE", "Approve", false, busy ?? (state.ownPr ? OWN_PR : null)) +
     (state.note ? `<span class="pd-publish__note">${state.note}</span>` : "") +
     `</div>`;
@@ -469,8 +475,10 @@ export function renderPublishPanel(mine: UserReview, summary: string, state: Pub
       `<span>${written ? `${written} go out as one review` : "Nothing written yet: an approval needs no comment"}</span>` +
     `</div>` +
     `<div class="pd-summary" data-pd-card="summary">` +
-      `<textarea class="pd-ai-edit" data-pd-review-text${state.busy ? " readonly" : ""} rows="${Math.min(10, Math.max(3, summary.split("\n").length + 1))}" ` +
-        `placeholder="Summary — optional; it heads your review on GitHub">${escHtml(summary)}</textarea>` +
+      commentBox(
+        `<textarea class="pd-ai-edit" data-pd-review-text${state.busy ? " readonly" : ""} rows="${Math.min(10, Math.max(3, summary.split("\n").length + 1))}" ` +
+          `placeholder="Summary — optional; it heads your review on GitHub">${escHtml(summary)}</textarea>`,
+      ) +
       (lineless
         ? `<div class="pd-summary__note">${lineless} comment${lineless === 1 ? "" : "s"} with no line ${lineless === 1 ? "joins" : "join"} this text.</div>`
         : "") +

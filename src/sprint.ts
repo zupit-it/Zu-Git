@@ -236,7 +236,7 @@ function dateRange(startIso: string, endIso: string): string {
 function standupChanges(): Map<string, M.StoryChange> | null {
   const data = sp.data;
   if (!data?.sprint || !sp.standupEvents) return null;
-  return M.summarizeChanges(sp.standupEvents, data.issues, data.columns, data.sprint.id, hidden(), flagMeaning());
+  return M.summarizeChanges(sp.standupEvents, data.issues, data.columns, data.sprint, hidden(), flagMeaning());
 }
 
 
@@ -302,7 +302,7 @@ function renderStandup() {
     events: sp.standupEvents,
     issues: data.issues,
     columns: data.columns,
-    sprintId: data.sprint.id,
+    sprint: data.sprint,
     hidden: hidden(),
     prs: state.currentDashboard?.prs ?? [],
     now,

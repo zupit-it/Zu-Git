@@ -9,14 +9,16 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { PullRequestSummary } from "./shared/pr-model";
-import { openExternal } from "./api";
+import { openExternal, refreshDashboard } from "./api";
 import { SVG, errorMessage, escHtml, formatDiffNum } from "./utils";
 import {
-  EXPAND_STEP, alignSides, diffGaps, expandGap, fileLines, gapLines, gapSize, hunkFor, hunkSides, isGeneratedFile,
+  EXPAND_STEP, alignSides, diffGaps, expandGap, fileLines, gapLines, gapSize, hunkFor, hunkSides, isGeneratedFile, linesFor,
   languageFor, layerOrder, matchesHead, parsePatch, pathTree, sameCode, splitRows, treeOrder, withAgentOrder,
   type DiffGap, type DiffHunk, type DiffLang, type DiffLine, type FileGroup, type GapShown, type PathTree,
 } from "./pr-diff-parse";
 import type { Token } from "./pr-diff-highlight";
+import { MD_SHORTCUTS, formatMarkdown, type MdFormat } from "./md-format";
+import { renderMarkdown } from "./markdown-lite";
 import {
   READ_ONLY_HINT, addUserComment, deleteUserComment, discardAiReview, getAiReviews, getCommentPositions,
   deleteReply, getUserComments, keepAiComment, publishReview, refreshAiReviewBadges, replyNow, reviewPrompt,
@@ -625,6 +627,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   /** A newer commit GitHub reported while the diff was open; null while up to date. */
   let newHead: string | null = null;
   let headPoll = 0;
+  /** Something went out to GitHub (a review, a reply, a resolve): the list behind refreshes on close. */
+  let changedOnGitHub = false;
 
   // ── Close & keyboard ────────────────────────────────────────────────────────
 
@@ -640,6 +644,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     window.removeEventListener("focus", onWindowFocus);
     overlay.remove();
     void refreshAiReviewBadges();
+    // The PR's review state and conversations on the list are from before.
+    if (changedOnGitHub) void refreshDashboard("auto");
   }
 
   const isMac = navigator.platform.toUpperCase().includes("MAC");
@@ -657,6 +663,13 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
       if (e.target instanceof HTMLTextAreaElement) { escapeEditor(e.target); return; }
       if (typing && filter.value) { filter.value = ""; applyFilter(); return; }
       if (!showUnsaved()) close();
+      return;
+    }
+    // ⌘B, ⌘I, ⌘E, ⌘K in any comment being written, as on GitHub.
+    const shortcut = mod && !e.shiftKey && !e.altKey ? MD_SHORTCUTS[e.key.toLowerCase()] : undefined;
+    if (shortcut && e.target instanceof HTMLTextAreaElement && e.target.closest(".pd-cbox")) {
+      e.preventDefault(); e.stopPropagation();
+      applyFormat(e.target, shortcut);
       return;
     }
     // In the review's text ⌘↵ only saves, as it does in every other editor:
@@ -714,6 +727,12 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
 
     const verdict = target.closest<HTMLElement>("[data-pd-publish]");
     if (verdict) { void onPublish(verdict); return; }
+
+    const format = target.closest<HTMLElement>("[data-pd-format]");
+    const formatted = format && boxArea(format);
+    if (format && formatted) { applyFormat(formatted, format.dataset.pdFormat as MdFormat); return; }
+    const tab = target.closest<HTMLElement>("[data-pd-tab]");
+    if (tab) { showTab(tab, tab.dataset.pdTab === "preview" ? "preview" : "write"); return; }
 
     const cardAction = target.closest<HTMLElement>("[data-pd-action]");
     if (cardAction) { e.stopPropagation(); void onCardAction(cardAction); return; }
@@ -1576,6 +1595,98 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     if (action === "delete") await remove(ref, key);
   }
 
+  // ── Comment editor: Markdown buttons and preview ───────────────────────────
+
+  // A button pressed keeps the caret in the text it works on.
+  overlay.addEventListener("mousedown", (e) => {
+    if ((e.target as Element).closest("[data-pd-format], [data-pd-tab]")) e.preventDefault();
+  });
+
+  /** Tallest a comment grows as it is written; past that it scrolls. */
+  const COMMENT_MAX_PX = 340;
+
+  // The text grows with what is written, from the rows it was drawn with.
+  overlay.addEventListener("input", (e) => {
+    const area = e.target;
+    if (!(area instanceof HTMLTextAreaElement) || !area.closest(".pd-cbox")) return;
+    area.style.height = "auto";
+    area.style.height = `${Math.min(area.scrollHeight + 2, COMMENT_MAX_PX)}px`;
+  });
+
+  function boxArea(el: Element): HTMLTextAreaElement | null {
+    return el.closest(".pd-cbox")?.querySelector<HTMLTextAreaElement>("textarea") ?? null;
+  }
+
+  /** Where the comment with `key` sits, as far as a suggestion needs. */
+  function commentedAt(key: string): { path: string; side: Side; line: number; endLine: number | null } | null {
+    const at = (path: string | null, side: Side, line: number | null, endLine: number | null) =>
+      path && line !== null ? { path, side, line, endLine } : null;
+    const draft = draftFor(key);
+    if (draft) return at(draft.path, draft.side, draft.line, draft.endLine);
+    const ref = findRef(key);
+    if (ref) return at(ref.comment.path, ref.comment.side, ref.comment.line, ref.comment.endLine);
+    const threadId = threadOfKey(key);
+    const thread = threads.find(t => t.id === threadId);
+    if (!thread) return null;
+    // A conversation on a range runs from startLine to line.
+    return thread.startLine !== null
+      ? at(thread.path, thread.side, thread.startLine, thread.line)
+      : at(thread.path, thread.side, thread.line, null);
+  }
+
+  /** The code of the lines `area`'s comment is on: "" when they are not in the diff. */
+  function suggestionCode(area: HTMLTextAreaElement): string {
+    const key = area.closest<HTMLElement>("[data-pd-card]")?.dataset.pdCard ?? "";
+    const at = commentedAt(key);
+    const v = at ? views[indexByPath.get(at.path) ?? -1] : undefined;
+    return (at && v ? linesFor(v.hunks, at.side, at.line, at.endLine) : null) ?? "";
+  }
+
+  /** Applies a Markdown button to `area` through the editing commands, so ⌘Z
+   *  undoes it and the input handler keeps the text. */
+  function applyFormat(area: HTMLTextAreaElement, format: MdFormat) {
+    if (area.readOnly) return;
+    if (area.hidden) showTab(area, "write");
+    const edit = formatMarkdown(
+      format,
+      { value: area.value, start: area.selectionStart, end: area.selectionEnd },
+      format === "suggestion" ? suggestionCode(area) : undefined,
+    );
+    if (!edit) return;
+    area.focus();
+    area.setSelectionRange(edit.from, edit.to);
+    if (edit.text === "" || !document.execCommand("insertText", false, edit.text)) {
+      area.setRangeText(edit.text, edit.from, edit.to);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    area.setSelectionRange(edit.selStart, edit.selEnd);
+  }
+
+  /** Write or Preview in the comment box around `el`. */
+  function showTab(el: Element, tab: "write" | "preview") {
+    const box = el.closest<HTMLElement>(".pd-cbox");
+    const area = box?.querySelector<HTMLTextAreaElement>("textarea");
+    const preview = box?.querySelector<HTMLElement>(".pd-cbox__preview");
+    if (!box || !area || !preview) return;
+    const previewing = tab === "preview";
+    if (previewing) {
+      // As tall as the text was, so the buttons below stay put.
+      preview.style.minHeight = `${area.offsetHeight}px`;
+      preview.innerHTML = area.value.trim()
+        ? renderMarkdown(area.value)
+        : `<span class="pd-cbox__empty">Nothing to preview</span>`;
+    }
+    area.hidden = previewing;
+    preview.hidden = !previewing;
+    box.classList.toggle("is-preview", previewing);
+    for (const button of box.querySelectorAll<HTMLElement>("[data-pd-tab]")) {
+      const on = button.dataset.pdTab === tab;
+      button.classList.toggle("is-on", on);
+      button.setAttribute("aria-selected", String(on));
+    }
+    if (!previewing) area.focus();
+  }
+
   // ── Replies to GitHub's conversations ──────────────────────────────────────
 
   const replyKey = (threadId: string) => `reply:${threadId}`;
@@ -1624,6 +1735,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     redrawGhThread(threadId);
     const resolved = await going;
     if (resolved !== null) {
+      changedOnGitHub = true;
       threads = threads.map(t => t.id === threadId
         ? { ...t, resolved, resolvedBy: resolved ? viewerLogin || t.resolvedBy : null }
         : t);
@@ -1686,6 +1798,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     const sending = run(key, async () => { await replyNow(threadId, text); return true; }, "Could not reply.");
     redrawGhThread(threadId);
     if (await sending) {
+      changedOnGitHub = true;
       replyEditors.delete(threadId);
       // It comes back as one of GitHub's own comments.
       await loadThreads();
@@ -1784,6 +1897,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     try {
       if (summaryTimer) await saveSummary();
       const result = await publishReview(pr.repo, pr.id, event, headSha);
+      changedOnGitHub = true;
       mine = result.mine;
       summaryText = mine.summary ?? "";
       // Editors left open on what went out: a new comment given its id must not inherit one.

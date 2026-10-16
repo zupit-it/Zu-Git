@@ -802,6 +802,67 @@
                 </details>
               </div>
 
+              <div class="settings-group">
+                <h2 class="settings-group-title">Fun</h2>
+                <!-- Fun card -->
+                <details class="settings-card" data-settings-section="fun">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Fun</div>
+                      <div class="settings-card-title">A lighter ZuGit</div>
+                    </div>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field">
+                      <label class="field-label">Memes</label>
+                      <label class="filter-pill">
+                        <input id="memeMode" name="memeMode" type="checkbox" />
+                        <span>Meme mode</span>
+                      </label>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="petCycles">Tiny King · animation cycles</label>
+                      <input id="petCycles" name="petCycles" type="number" min="1" max="5" step="1" placeholder="3" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="petLingerSeconds">Stays afterwards (seconds)</label>
+                      <input id="petLingerSeconds" name="petLingerSeconds" type="number" min="0" max="30" step="1" placeholder="4" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="petNagMinutes">Reminders every (minutes)</label>
+                      <input id="petNagMinutes" name="petNagMinutes" type="number" min="0" max="480" step="5" placeholder="30" />
+                      <p class="field-hint">He comes knocking about approved PRs of yours not merged yet, changes asked on yours, and reviews waiting on you. 0 turns reminders off.</p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Character</label>
+                      <div class="pet-try">
+                        <span class="pet-pack-name" data-pet-pack-name>Tiny King (built in)</span>
+                        <button class="secondary-button" type="button" data-pet-pack-load>Load character…</button>
+                        <button class="secondary-button" type="button" data-pet-pack-reset hidden>Back to Tiny King</button>
+                        <button class="secondary-button" type="button" data-pet-pack-export>Download Tiny King's pack</button>
+                      </div>
+                      <p class="field-hint" data-pet-pack-result hidden></p>
+                      <p class="field-hint">A character pack is a zip with a manifest.json and PNG sheets. The Tiny King's pack is saved to your Downloads folder, with a guide to making your own.</p>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label">Try him out</label>
+                      <div class="pet-try">
+                        <button class="secondary-button" type="button" data-pet-try="pr_merged">PR merged</button>
+                        <button class="secondary-button" type="button" data-pet-try="ci_failed">CI failed</button>
+                        <button class="secondary-button" type="button" data-pet-try="review_wait">Review waiting</button>
+                      </div>
+                      <p class="field-hint">In meme mode he walks in from the right edge of your screen when one of your PRs is merged, its CI turns red, changes are asked on it or it gets new comments, or a new review asks for you, with a bubble saying which. The buttons use the values above, even before saving.</p>
+                    </div>
+                  </div>
+                </details>
+              </div>
+
               <!-- Hidden submit (triggered by save bar button via form="settings-form") -->
               <button type="submit" class="primary-button form-actions" style="display:none" aria-hidden="true" tabindex="-1">Save</button>
             </form>

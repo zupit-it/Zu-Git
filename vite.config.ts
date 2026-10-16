@@ -12,5 +12,7 @@ export default defineConfig({
     target: ["es2021", "chrome105", "safari15"],
     minify: !process.env.TAURI_DEBUG,
     sourcemap: !!process.env.TAURI_DEBUG,
+    // pet.html: the Tiny King's own window (meme mode).
+    rollupOptions: { input: ["index.html", "pet.html"] },
   },
 });

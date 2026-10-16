@@ -101,6 +101,26 @@ export function hunkFor(
   return null;
 }
 
+/** The text of lines `line`…`endLine` on `side`, as the diff has them: what a
+ *  suggestion starts from. Null when one of them is not in the diff. */
+export function linesFor(
+  hunks: DiffHunk[], side: "new" | "old", line: number, endLine: number | null,
+): string | null {
+  const no = numberOn(side);
+  const text = new Map<number, string>();
+  for (const l of hunks.flatMap(h => h.lines)) {
+    const n = no(l);
+    if (n !== null) text.set(n, l.text);
+  }
+  const out: string[] = [];
+  for (let n = line; n <= (endLine ?? line); n++) {
+    const t = text.get(n);
+    if (t === undefined) return null;
+    out.push(t);
+  }
+  return out.join("\n");
+}
+
 /**
  * Whether a comment's code still reads the same, at the same lines, in a newer
  * diff: then it stays under its line, as GitHub carries a comment over code

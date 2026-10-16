@@ -1,0 +1,215 @@
+{
+  "format": "zugit-pet",
+  "version": 1,
+  "name": "Tiny King",
+  "cell": {
+    "width": 288,
+    "height": 384
+  },
+  "columns": 4,
+  "walk": {
+    "step": 6,
+    "hidden": 264
+  },
+  "clips": {
+    "idle": {
+      "sheet": "idle.png",
+      "durations": [
+        900,
+        160,
+        180,
+        70,
+        110,
+        80,
+        160,
+        400
+      ]
+    },
+    "pr_merged": {
+      "sheet": "pr_merged.png",
+      "durations": [
+        90,
+        90,
+        100,
+        80,
+        90,
+        210,
+        100,
+        110,
+        120,
+        90,
+        90,
+        140
+      ]
+    },
+    "ci_failed": {
+      "sheet": "ci_failed.png",
+      "durations": [
+        90,
+        100,
+        160,
+        150,
+        180,
+        320,
+        430,
+        240,
+        160,
+        110,
+        110,
+        140
+      ]
+    },
+    "review_wait": {
+      "sheet": "review_wait.png",
+      "durations": [
+        90,
+        120,
+        160,
+        180,
+        180,
+        100,
+        180,
+        100,
+        180,
+        110,
+        110,
+        140
+      ]
+    },
+    "walk_neutral_left": {
+      "sheet": "walk_neutral_left.png",
+      "durations": [
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110
+      ]
+    },
+    "walk_stop_neutral_left": {
+      "sheet": "walk_stop_neutral_left.png",
+      "durations": [
+        90,
+        90,
+        110
+      ]
+    },
+    "change_neutral_to_angry_left": {
+      "sheet": "change_neutral_to_angry_left.png",
+      "durations": [
+        80,
+        70,
+        80,
+        70,
+        140
+      ]
+    },
+    "change_neutral_to_impatient_left": {
+      "sheet": "change_neutral_to_impatient_left.png",
+      "durations": [
+        80,
+        70,
+        80,
+        70,
+        140
+      ]
+    },
+    "change_neutral_to_happy_left": {
+      "sheet": "change_neutral_to_happy_left.png",
+      "durations": [
+        80,
+        70,
+        80,
+        70,
+        140
+      ]
+    },
+    "walk_start_neutral": {
+      "sheet": "walk_start_neutral.png",
+      "durations": [
+        90,
+        90,
+        90
+      ]
+    },
+    "walk_neutral": {
+      "sheet": "walk_neutral.png",
+      "durations": [
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110
+      ]
+    },
+    "walk_start_angry": {
+      "sheet": "walk_start_angry.png",
+      "durations": [
+        90,
+        90,
+        90
+      ]
+    },
+    "walk_angry": {
+      "sheet": "walk_angry.png",
+      "durations": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ]
+    },
+    "walk_start_impatient": {
+      "sheet": "walk_start_impatient.png",
+      "durations": [
+        90,
+        90,
+        90
+      ]
+    },
+    "walk_impatient": {
+      "sheet": "walk_impatient.png",
+      "durations": [
+        85,
+        85,
+        85,
+        85,
+        85,
+        85,
+        85,
+        85
+      ]
+    },
+    "walk_start_happy": {
+      "sheet": "walk_start_happy.png",
+      "durations": [
+        90,
+        90,
+        90
+      ]
+    },
+    "walk_happy": {
+      "sheet": "walk_happy.png",
+      "durations": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ]
+    }
+  }
+}

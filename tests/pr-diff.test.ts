@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  EXPAND_STEP, alignSides, diffGaps, expandGap, fileLines, gapLines, gapSize, hunkFor, hunkSides, hunkTail,
+  EXPAND_STEP, alignSides, diffGaps, expandGap, fileLines, gapLines, gapSize, hunkFor, hunkSides, hunkTail, linesFor,
   isGeneratedFile, languageFor, layerOrder, matchesHead, parsePatch, pathTree, sameCode, splitRows, treeOrder,
   withAgentOrder,
 } from "../src/pr-diff-parse.ts";
@@ -157,6 +157,13 @@ test("a comment's code is cut from its hunk like GitHub's diffHunk, ending on it
   );
   assert.equal(hunkFor([hunk], "old", 11, null), "@@ -10,2 +10,1 @@\n   name = input.required<string>();\n-  age = 0;");
   assert.equal(hunkFor([hunk], "new", 99, null), null);
+});
+
+test("a suggestion starts from the commented lines' code, only when all are in the diff", () => {
+  const [hunk] = parsePatch(PATCH);
+  assert.equal(linesFor([hunk], "new", 11, 12), "  age = input(0);\n  role = input<string>();");
+  assert.equal(linesFor([hunk], "new", 12, null), "  role = input<string>();");
+  assert.equal(linesFor([hunk], "new", 12, 99), null);
 });
 
 test("on a newer commit a comment stays under its line only while its code is the same", () => {

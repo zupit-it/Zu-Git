@@ -63,6 +63,14 @@ struct PersistedSettings {
     notifications_enabled: bool,
     #[serde(default)]
     color_blind_mode: bool,
+    #[serde(default)]
+    meme_mode: bool,
+    #[serde(default = "default_pet_cycles")]
+    pet_cycles: u32,
+    #[serde(default = "default_pet_linger_seconds")]
+    pet_linger_seconds: u32,
+    #[serde(default = "default_pet_nag_minutes")]
+    pet_nag_minutes: u32,
     #[serde(default = "default_merge_transition")]
     jira_merge_transition: String,
     #[serde(default = "default_reaction_score_enabled")]
@@ -153,6 +161,18 @@ fn default_day_end() -> String {
 }
 fn default_slot_minutes() -> u32 {
     15
+}
+
+fn default_pet_cycles() -> u32 {
+    3
+}
+
+fn default_pet_linger_seconds() -> u32 {
+    4
+}
+
+fn default_pet_nag_minutes() -> u32 {
+    30
 }
 fn default_history_days() -> u32 {
     60
@@ -322,6 +342,10 @@ pub fn load_settings_from(dir: &Path) -> AppSettings {
         } else {
             String::new()
         },
+        meme_mode: if persisted.meme_mode { "on".to_string() } else { String::new() },
+        pet_cycles: persisted.pet_cycles.to_string(),
+        pet_linger_seconds: persisted.pet_linger_seconds.to_string(),
+        pet_nag_minutes: persisted.pet_nag_minutes.to_string(),
         jira_merge_transition: persisted.jira_merge_transition,
         reaction_score_enabled: if persisted.reaction_score_enabled { "on".to_string() } else { String::new() },
         score_rule_reviews_enabled: if persisted.score_rule_reviews_enabled { "on".to_string() } else { String::new() },
@@ -390,6 +414,10 @@ pub async fn save_settings(
         jira_repo_boards: normalized.jira_repo_boards.clone(),
         notifications_enabled: normalized.notifications_enabled,
         color_blind_mode: normalized.color_blind_mode,
+        meme_mode: normalized.meme_mode,
+        pet_cycles: normalized.pet_cycles,
+        pet_linger_seconds: normalized.pet_linger_seconds,
+        pet_nag_minutes: normalized.pet_nag_minutes,
         jira_merge_transition: normalized.jira_merge_transition.clone(),
         reaction_score_enabled: normalized.reaction_score_enabled,
         score_rule_reviews_enabled: normalized.score_rule_reviews_enabled,

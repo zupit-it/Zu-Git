@@ -1,7 +1,8 @@
 /**
  * Review-comment Markdown, as far as the diff view needs it: fenced code (a
  * ```suggestion block shows as a suggested change, as on GitHub), `code`,
- * **bold** and links. Comments come from other people, so everything is
+ * **bold**, _italic_, ~~struck~~, links, > quotes, - and 1. lists, - [ ] task
+ * lists and # headings. Comments come from other people, so everything is
  * escaped first; a link is a data attribute the view opens through
  * open_external, which takes http(s) only. No imports: the node tests load it.
  */
@@ -33,14 +34,35 @@ function bareLink(match: string): string {
   return link(url, url) + tail;
 }
 
-/** Prose: code spans stay literal, the rest gets bold and links. */
+/** Prose: code spans stay literal, the rest gets emphasis and links. Italic
+ *  needs a word boundary around it, so snake_case and 2*3*4 stay as they are. */
 function inline(text: string): string {
   return text.split(/(`[^`\n]+`)/).map((part, i) => {
     if (i % 2 === 1) return `<code>${esc(part.slice(1, -1))}</code>`;
     return esc(part)
       .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/~~([^~\n]+)~~/g, "<del>$1</del>")
+      .replace(/(^|[^\w*])\*([^*\s](?:[^*\n]*[^*\s])?)\*(?![\w*])/g, "$1<em>$2</em>")
+      .replace(/(^|[^\w])_([^_\s](?:[^_\n]*[^_\s])?)_(?!\w)/g, "$1<em>$2</em>")
       .replace(LINK, (match: string, label?: string, url?: string) => (label && url ? link(url, label) : bareLink(match)));
   }).join("");
+}
+
+const QUOTE = /^\s*>\s?(.*)$/;
+const ITEM = /^\s*(?:([-*+])|(\d+)[.)])\s+(.*)$/;
+const TASK = /^\[([ xX])\]\s+(.*)$/;
+const HEADING = /^\s*#{1,6}\s+(.+?)\s*#*\s*$/;
+
+/** One list's items, numbered or not as its first one is. */
+function list(items: string[], ordered: boolean): string {
+  const tag = ordered ? "ol" : "ul";
+  const lis = items.map((item) => {
+    const task = TASK.exec(item);
+    if (!task) return `<li>${inline(item)}</li>`;
+    const done = task[1] !== " ";
+    return `<li class="pd-md-task"><input type="checkbox" disabled${done ? " checked" : ""}> ${inline(task[2])}</li>`;
+  });
+  return `<${tag} class="pd-md-list">${lis.join("")}</${tag}>`;
 }
 
 export function renderMarkdown(text: string): string {
@@ -53,6 +75,35 @@ export function renderMarkdown(text: string): string {
     prose = [];
   };
   for (let i = 0; i < lines.length; i++) {
+    if (QUOTE.test(lines[i])) {
+      flush();
+      const quoted: string[] = [];
+      for (; i < lines.length && QUOTE.test(lines[i]); i++) quoted.push(QUOTE.exec(lines[i])?.[1] ?? "");
+      i--;
+      html.push(`<blockquote class="pd-md-quote">${renderMarkdown(quoted.join("\n"))}</blockquote>`);
+      continue;
+    }
+    const first = ITEM.exec(lines[i]);
+    if (first) {
+      flush();
+      const ordered = !first[1];
+      const items: string[] = [];
+      // Items of the same kind; a bullet after numbers starts a list of its own.
+      let item: RegExpExecArray | null = first;
+      while (item && !item[1] === ordered) {
+        items.push(item[3]);
+        item = ++i < lines.length ? ITEM.exec(lines[i]) : null;
+      }
+      i--;
+      html.push(list(items, ordered));
+      continue;
+    }
+    const heading = HEADING.exec(lines[i]);
+    if (heading) {
+      flush();
+      html.push(`<div class="pd-md-h">${inline(heading[1])}</div>`);
+      continue;
+    }
     const open = FENCE_OPEN.exec(lines[i]);
     if (!open) { prose.push(lines[i]); continue; }
     flush();

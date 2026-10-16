@@ -34,6 +34,8 @@ pub struct SprintRef {
     pub name: String,
     pub state: String,
     pub start_date: Option<String>,
+    /// When the sprint was actually started: `startDate` is the one typed in.
+    pub activated_date: Option<String>,
     pub end_date: Option<String>,
     pub goal: Option<String>,
 }
@@ -316,6 +318,7 @@ pub fn parse_sprints(payload: &Value) -> Vec<SprintRef> {
                         name: text(&sprint["name"]),
                         state: text(&sprint["state"]),
                         start_date: opt_text(&sprint["startDate"]),
+                        activated_date: opt_text(&sprint["activatedDate"]),
                         end_date: opt_text(&sprint["endDate"]),
                         goal: opt_text(&sprint["goal"]),
                     })

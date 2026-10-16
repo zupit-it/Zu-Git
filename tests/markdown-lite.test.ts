@@ -40,3 +40,35 @@ test("bold, and an unclosed fence runs to the end", () => {
   assert.equal(renderMarkdown("**careful**"), `<div class="pd-md-p"><strong>careful</strong></div>`);
   assert.equal(renderMarkdown("```\nopen"), `<pre class="pd-md-code">open</pre>`);
 });
+
+test("italic and struck text, but not snake_case or arithmetic", () => {
+  assert.equal(
+    renderMarkdown("_why_ *here* ~~old~~ a_b_c 2*3*4"),
+    `<div class="pd-md-p"><em>why</em> <em>here</em> <del>old</del> a_b_c 2*3*4</div>`,
+  );
+  assert.equal(renderMarkdown("**bold** and *it*"), `<div class="pd-md-p"><strong>bold</strong> and <em>it</em></div>`);
+});
+
+test("quotes nest the rest of the Markdown", () => {
+  assert.equal(
+    renderMarkdown("> you wrote **this**\n> twice\n\nReply"),
+    `<blockquote class="pd-md-quote"><div class="pd-md-p">you wrote <strong>this</strong>\ntwice</div></blockquote><div class="pd-md-p">Reply</div>`,
+  );
+});
+
+test("lists, numbered or not, and task lists", () => {
+  assert.equal(
+    renderMarkdown("Steps:\n- one\n- `two`\n1. first\n2) second"),
+    `<div class="pd-md-p">Steps:</div><ul class="pd-md-list"><li>one</li><li><code>two</code></li></ul>` +
+      `<ol class="pd-md-list"><li>first</li><li>second</li></ol>`,
+  );
+  assert.equal(
+    renderMarkdown("- [ ] tests\n- [x] lint"),
+    `<ul class="pd-md-list"><li class="pd-md-task"><input type="checkbox" disabled> tests</li>` +
+      `<li class="pd-md-task"><input type="checkbox" disabled checked> lint</li></ul>`,
+  );
+});
+
+test("a heading is a line of its own, escaped like the rest", () => {
+  assert.equal(renderMarkdown("## Note <b>\ntext"), `<div class="pd-md-h">Note &lt;b&gt;</div><div class="pd-md-p">text</div>`);
+});

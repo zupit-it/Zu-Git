@@ -205,7 +205,7 @@ test("changes per story: net moves, the most telling first, with their history",
     ],
     issues,
     columns,
-    42,
+    { id: 42, startDate: null },
     new Set(),
   );
   assert.equal(changes.get("PENT-1")?.kind, "closed", "out of order events are sorted: To Do → Done is a close");
@@ -241,7 +241,7 @@ test("standup: one line per story, closed apart, filed stories left out", () => 
     ],
     issues,
     columns,
-    sprintId: 42,
+    sprint: { id: 42, startDate: "2026-10-05T07:00:00Z" },
     hidden: new Set(["PENT-9"]),
     prs: [],
     now: new Date("2026-10-09T12:00:00Z"),
@@ -253,13 +253,34 @@ test("standup: one line per story, closed apart, filed stories left out", () => 
   assert.deepEqual(standup.flagged.map((i) => i.key), ["PENT-4"]);
 });
 
+test("new in the sprint: only what came in once it had started", () => {
+  const issues = [issue("PENT-1", "1"), issue("PENT-2", "1"), issue("PENT-3", "1")];
+  const added = (key: string, at: string, from: string): ChangeEvent => ({
+    key, at, author: "Sara", field: "sprint", from, to: from ? `${from},42` : "42", fromString: null, toString: "Sprint 42",
+  });
+  const events = [
+    added("PENT-1", "2026-10-12T08:55:00.000+0200", "41"),
+    added("PENT-2", "2026-10-12T08:58:00.000+0200", ""),
+    added("PENT-3", "2026-10-12T15:00:00.000+0200", ""),
+  ];
+  // Typed in as 9:00, started at 9:05 after closing sprint 41.
+  const sprint = { id: 42, startDate: "2026-10-12T07:00:00Z", activatedDate: "2026-10-12T07:05:00Z" };
+  const changes = summarizeChanges(events, issues, columns, sprint, new Set());
+  assert.ok(!changes.has("PENT-1"), "carried over from the sprint closed to start this one");
+  assert.ok(!changes.has("PENT-2"), "planned in before the start");
+  assert.equal(changes.get("PENT-3")?.kind, "added");
+  // When Jira gives no actual start, the typed-in one is used.
+  const typed = summarizeChanges(events, issues, columns, { id: 42, startDate: "2026-10-12T06:57:00Z" }, new Set());
+  assert.deepEqual([...typed.keys()], ["PENT-2", "PENT-3"]);
+});
+
 test("standup: GitHub state of the stories' PRs", () => {
   const issues = [issue("PENT-1", "3"), issue("PENT-2", "5"), issue("PENT-3", "5")];
   const standup = buildStandup({
     events: [],
     issues,
     columns,
-    sprintId: 1,
+    sprint: { id: 1, startDate: null },
     hidden: new Set(),
     prs: [
       pr({ jiraKey: "PENT-1", hasFailedPipeline: true, pipelineState: "failure" }),
@@ -359,10 +380,10 @@ test("Jira's flag is information under the board's name, never a block", () => {
     { key: "PENT-7", at: "2026-10-09T10:00:00.000+0200", author: "Luca", field: "status", from: "3", to: "5", fromString: "In Progress", toString: "Review" },
     { key: "PENT-7", at: "2026-10-09T10:05:00.000+0200", author: "Luca", field: "flag", from: null, to: null, fromString: null, toString: "Impediment" },
   ];
-  const plain = summarizeChanges(events, issues, columns, 1, new Set());
+  const plain = summarizeChanges(events, issues, columns, { id: 1, startDate: null }, new Set());
   assert.deepEqual(plain.get("PENT-7")?.kinds.map((k) => k.short), ["da In Progress", "con flag"]);
   assert.match(plain.get("PENT-7")?.lines[1] ?? "", /flag messo$/);
-  const inTest = summarizeChanges(events, issues, columns, 1, new Set(), { label: "In test" });
+  const inTest = summarizeChanges(events, issues, columns, { id: 1, startDate: null }, new Set(), { label: "In test" });
   assert.deepEqual(inTest.get("PENT-7")?.kinds.map((k) => k.short), ["da In Progress", "in test"]);
   assert.match(inTest.get("PENT-7")?.lines[1] ?? "", /flag «In test»$/);
   const flagged = STANDUP_GROUPS.find((group) => group.id === "flagged");

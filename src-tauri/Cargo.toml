@@ -14,7 +14,9 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# macos-private-api: the Tiny King's window is transparent (meme mode).
+# protocol-asset: it shows a character pack loaded from the app's data folder.
+tauri = { version = "2", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
@@ -37,6 +39,8 @@ parking_lot = "0.12"
 dirs = "6"
 # Reading Codex's config.toml for the MCP setup status.
 toml = "0.8"
+# Character packs for the Tiny King: zips loaded, and his own saved as one.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 
 # setsid(2) when handing secrets to the `security` CLI over stdin.
 [target.'cfg(target_os = "macos")'.dependencies]

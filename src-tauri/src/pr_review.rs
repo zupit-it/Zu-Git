@@ -1127,9 +1127,6 @@ pub fn plan_review(
 
     let summary = mine.summary.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let body = summary.map(str::to_string).into_iter().chain(paragraphs).collect::<Vec<_>>().join("\n\n");
-    if event == ReviewEvent::RequestChanges && body.is_empty() {
-        return Err("GitHub needs a text to request changes: write a summary for your review.".into());
-    }
     // Replies go with the main review, as on GitHub they wait for its submit.
     let replies: Vec<DraftReply> = mine
         .replies
@@ -1385,10 +1382,12 @@ mod tests {
         let index = DiffIndex::new(&[]);
         let empty = UserReview::new("org/app", 7);
         let none = HashMap::new();
-        assert!(plan_review(&empty, "head", ReviewEvent::RequestChanges, &index, &none).is_err());
         assert!(plan_review(&empty, "head", ReviewEvent::Comment, &index, &none).is_err());
-        let approval = plan_review(&empty, "head", ReviewEvent::Approve, &index, &none).unwrap();
-        assert!(approval.main.is_some_and(|m| m.comments.is_empty() && m.body.is_empty()));
+        // A verdict needs no text, as on GitHub.
+        for event in [ReviewEvent::Approve, ReviewEvent::RequestChanges] {
+            let verdict = plan_review(&empty, "head", event, &index, &none).unwrap();
+            assert!(verdict.main.is_some_and(|m| m.comments.is_empty() && m.body.is_empty()));
+        }
     }
 
     #[test]

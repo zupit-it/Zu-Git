@@ -435,6 +435,22 @@ pub async fn fetch_pr_head(
     Ok(crate::github::fetch_pr_meta(&repo, number, &settings, &state.http_client).await?.head_sha)
 }
 
+/// Whether a PR is open, closed or merged: in meme mode, one of yours leaving
+/// the list is asked about, and a merge brings the Tiny King out.
+#[tauri::command]
+pub async fn fetch_pr_state(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+) -> Result<String, String> {
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let settings = storage::load_settings(&app).await?;
+    Ok(crate::github::fetch_pr_meta(&repo, number, &settings, &state.http_client).await?.state)
+}
+
 /// Remote branches with no open PR, untouched for longer than the configured
 /// threshold. Not part of the dashboard refresh: scanning every branch of every
 /// repo is expensive, so the view asks for it on demand.

@@ -24,6 +24,9 @@ import {
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
 import { initSettingsSections } from "./settings-sections";
+import { installSadReviewer } from "./meme";
+import { installPetReminder, petTry } from "./pet-triggers";
+import { installPetPackControls } from "./pet-pack-ui";
 import { openSprintView, refreshSprint, focusSprintSearch } from "./sprint";
 import { escHtml, avatarColor, loginInitials, errorMessage } from "./utils";
 
@@ -41,6 +44,17 @@ window.addEventListener("DOMContentLoaded", () => {
     .querySelector<HTMLButtonElement>("[data-discard-button]")
     ?.addEventListener("click", () => setSettingsDirtyState(false));
   initSettingsSections();
+  installSadReviewer();
+  installPetReminder();
+  installPetPackControls();
+  document.querySelectorAll<HTMLButtonElement>("[data-pet-try]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const animation = button.dataset.petTry;
+      if (animation === "pr_merged" || animation === "ci_failed" || animation === "review_wait") {
+        petTry(animation, button.form);
+      }
+    }),
+  );
 
   // ── Toolbar actions ─────────────────────────────────────────────────────────
   document

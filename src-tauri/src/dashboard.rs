@@ -500,6 +500,7 @@ fn enrich(
         updated_at_iso: pr.updated_at.clone(),
         pipeline_state: pr.pipeline_state.clone(),
         has_failed_pipeline: pr.pipeline_state == PipelineState::Failure,
+        failed_checks: pr.failed_checks.clone(),
         additions: pr.additions,
         deletions: pr.deletions,
         auto_merge_method: pr.auto_merge_method.clone(),

@@ -26,6 +26,8 @@ export interface SprintRef {
   name: string;
   state: string;
   startDate: string | null;
+  /** When it was actually started; `startDate` is the one typed in. */
+  activatedDate?: string | null;
   endDate: string | null;
   goal: string | null;
 }
@@ -360,11 +362,20 @@ function describeEvent(event: ChangeEvent, flag: FlagMeaning): string {
   }
 }
 
-function inSprintChange(event: ChangeEvent, sprintId: number): boolean {
-  const id = String(sprintId);
+/**
+ * A story added once the sprint was under way, as Jira's sprint report counts
+ * scope changes. Stories planned in, or carried over from the sprint closed
+ * to start this one, were there from the start.
+ */
+function addedToSprint(event: ChangeEvent, sprint: SprintStart): boolean {
+  const id = String(sprint.id);
   const ids = (value: string | null) => (value ?? "").split(",").map((part) => part.trim());
-  return ids(event.to).includes(id) && !ids(event.from).includes(id);
+  if (!ids(event.to).includes(id) || ids(event.from).includes(id)) return false;
+  const started = Date.parse(sprint.activatedDate ?? sprint.startDate ?? "");
+  return Number.isNaN(started) || Date.parse(event.at) > started;
 }
+
+export type SprintStart = Pick<SprintRef, "id" | "startDate" | "activatedDate">;
 
 /**
  * Net changes per story since the standup: from where a story was then to
@@ -375,7 +386,7 @@ export function summarizeChanges(
   events: ChangeEvent[],
   issues: SprintIssue[],
   columns: BoardColumn[],
-  sprintId: number,
+  sprint: SprintStart,
   hidden: Set<string>,
   flag: FlagMeaning = DEFAULT_FLAG,
 ): Map<string, StoryChange> {
@@ -414,7 +425,7 @@ export function summarizeChanges(
       }
     }
 
-    const added = of("sprint").find((event) => inSprintChange(event, sprintId));
+    const added = of("sprint").find((event) => addedToSprint(event, sprint));
     if (added) kinds.push({ kind: "added", text: added.author ? `da ${added.author}` : "", short: "nuova nello sprint" });
 
     const flags = of("flag");
@@ -512,7 +523,7 @@ export interface StandupInput {
   events: ChangeEvent[];
   issues: SprintIssue[];
   columns: BoardColumn[];
-  sprintId: number;
+  sprint: SprintStart;
   hidden: Set<string>;
   prs: PullRequestSummary[];
   now: Date;
@@ -525,7 +536,7 @@ export function buildStandup(input: StandupInput): Standup {
     closed: [], flagged: [], movedBack: [], moved: [], added: [], assigned: [], estimated: [],
     ci: [], changes: [], waiting: [],
   };
-  const changes = summarizeChanges(input.events, input.issues, input.columns, input.sprintId, hidden, input.flag);
+  const changes = summarizeChanges(input.events, input.issues, input.columns, input.sprint, hidden, input.flag);
   for (const [key, change] of changes) {
     for (const item of change.kinds) standup[item.kind].push({ key, text: item.text });
   }

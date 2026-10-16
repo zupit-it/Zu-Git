@@ -32,6 +32,7 @@ const statusBySection: Record<string, (form: HTMLFormElement) => SectionStatus> 
   toggl: (form) => toggle(form, "togglEnabled"),
   calendar: (form) => toggle(form, "googleCalendarEnabled"),
   accessibility: (form) => toggle(form, "colorBlindMode"),
+  fun: (form) => toggle(form, "memeMode"),
 };
 
 function sections(): HTMLDetailsElement[] {

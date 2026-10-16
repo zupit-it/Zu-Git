@@ -229,7 +229,9 @@ struct GqlReviewThread {
 }
 
 /// Flat struct covering both CheckRun and StatusContext inline fragments.
-/// Discriminated at runtime via `__typename`.
+/// Discriminated at runtime via `__typename`. GraphQL spells the states in
+/// capitals (`COMPLETED`, `FAILURE`): they are kept in lower case, the REST
+/// spelling the checks below compare with.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct GqlStatusContext {
@@ -238,15 +240,20 @@ struct GqlStatusContext {
     // CheckRun fields
     database_id: Option<u64>,
     name: Option<String>,
+    #[serde(default, deserialize_with = "lowercase")]
     status: Option<String>,
+    #[serde(default, deserialize_with = "lowercase")]
     conclusion: Option<String>,
     started_at: Option<String>,
     completed_at: Option<String>,
-    // StatusContext fields (legacy) — present in JSON but aggregated via rollup.state
-    #[allow(dead_code)]
+    // StatusContext fields (legacy): aggregated via rollup.state, named in failed_check_names
     context: Option<String>,
-    #[allow(dead_code)]
+    #[serde(default, deserialize_with = "lowercase")]
     state: Option<String>,
+}
+
+fn lowercase<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    Ok(Option::<String>::deserialize(deserializer)?.map(|value| value.to_ascii_lowercase()))
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -280,6 +287,8 @@ pub struct GithubPullRequestRecord {
     pub base_ref: String,
     pub draft: bool,
     pub pipeline_state: PipelineState,
+    /// Checks that failed on the head commit, by name.
+    pub failed_checks: Vec<String>,
     pub review_summary: GithubReviewSummary,
     pub additions: u32,
     pub deletions: u32,
@@ -606,6 +615,7 @@ async fn fetch_repo_pull_requests_inner(
             base_ref: pr.base_ref.as_ref().map(|b| b.name.clone()).unwrap_or_default(),
             draft: pr.is_draft,
             pipeline_state: details.pipeline_state.clone(),
+            failed_checks: details.failed_checks.clone(),
             review_summary: details.review_summary.clone(),
             additions: details.additions,
             deletions: details.deletions,
@@ -623,6 +633,7 @@ async fn fetch_repo_pull_requests_inner(
 struct PrDetails {
     participant_avatars: HashMap<String, String>,
     pipeline_state: PipelineState,
+    failed_checks: Vec<String>,
     review_summary: GithubReviewSummary,
     additions: u32,
     deletions: u32,
@@ -675,6 +686,7 @@ fn build_pr_details(pr: &GqlPr, _head_sha: &str) -> PrDetails {
         .first()
         .and_then(|c| c.commit.status_check_rollup.as_ref());
     let pipeline_state = summarize_pipeline_state(rollup);
+    let failed_checks = failed_check_names(rollup);
 
     let auto_merge_method = pr.auto_merge_request.as_ref().map(|r| r.merge_method.clone());
     let unresolved_threads = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved).count() as u32;
@@ -686,6 +698,7 @@ fn build_pr_details(pr: &GqlPr, _head_sha: &str) -> PrDetails {
     PrDetails {
         participant_avatars: avatars,
         pipeline_state,
+        failed_checks,
         review_summary,
         additions: pr.additions,
         deletions: pr.deletions,
@@ -816,6 +829,39 @@ fn summarize_pipeline_state(rollup: Option<&GqlStatusCheckRollup>) -> PipelineSt
     }
 
     PipelineState::Unknown
+}
+
+/// Names of the checks that failed on the head commit, latest run of each, then
+/// legacy commit statuses: what the Tiny King names when CI turns red.
+fn failed_check_names(rollup: Option<&GqlStatusCheckRollup>) -> Vec<String> {
+    let Some(rollup) = rollup else {
+        return vec![];
+    };
+    let check_runs: Vec<&GqlStatusContext> = rollup
+        .contexts
+        .nodes
+        .iter()
+        .filter(|c| c.typename == "CheckRun")
+        .collect();
+    let mut names: Vec<String> = keep_latest_check_runs(&check_runs)
+        .into_iter()
+        .filter(|cr| {
+            cr.status.as_deref() == Some("completed")
+                && matches!(cr.conclusion.as_deref(), Some("failure" | "timed_out" | "startup_failure"))
+        })
+        .filter_map(|cr| cr.name.clone())
+        .collect();
+    names.extend(
+        rollup
+            .contexts
+            .nodes
+            .iter()
+            .filter(|c| c.typename == "StatusContext" && matches!(c.state.as_deref(), Some("failure" | "error")))
+            .filter_map(|c| c.context.clone()),
+    );
+    names.sort();
+    names.dedup();
+    names
 }
 
 // ── Branch discovery & PR creation ───────────────────────────────────────────
@@ -2612,6 +2658,74 @@ pub async fn fetch_stale_branches(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rollup as GraphQL sends it: enums in capitals.
+    fn rollup(state: &str, runs: &[(&str, &str, Option<&str>, &str)]) -> GqlStatusCheckRollup {
+        let nodes: Vec<serde_json::Value> = runs
+            .iter()
+            .enumerate()
+            .map(|(i, (name, status, conclusion, at))| serde_json::json!({
+                "__typename": "CheckRun", "databaseId": i, "name": name, "status": status,
+                "conclusion": conclusion, "startedAt": at, "completedAt": at,
+            }))
+            .collect();
+        serde_json::from_value(serde_json::json!({ "state": state, "contexts": { "nodes": nodes } })).unwrap()
+    }
+
+    const T1: &str = "2026-10-15T08:00:00Z";
+    const T2: &str = "2026-10-15T09:00:00Z";
+
+    #[test]
+    fn a_failed_check_run_makes_the_pipeline_fail_while_others_still_run() {
+        let r = rollup("PENDING", &[("build", "COMPLETED", Some("FAILURE"), T1), ("e2e", "IN_PROGRESS", None, T1)]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Failure);
+        let r = rollup("PENDING", &[("lint", "COMPLETED", Some("TIMED_OUT"), T1)]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Failure);
+    }
+
+    #[test]
+    fn a_check_run_waiting_for_action_is_not_a_success() {
+        let r = rollup("SUCCESS", &[("build", "COMPLETED", Some("SUCCESS"), T1), ("deploy", "COMPLETED", Some("ACTION_REQUIRED"), T1)]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::ActionRequired);
+    }
+
+    #[test]
+    fn queued_check_runs_keep_the_pipeline_pending() {
+        let r = rollup("EXPECTED", &[("build", "QUEUED", None, T1)]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Pending);
+    }
+
+    #[test]
+    fn a_rerun_that_passed_replaces_the_failure() {
+        let r = rollup("PENDING", &[("build", "COMPLETED", Some("FAILURE"), T1), ("build", "COMPLETED", Some("SUCCESS"), T2), ("e2e", "IN_PROGRESS", None, T2)]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Pending);
+        let r = rollup("SUCCESS", &[("build", "COMPLETED", Some("SUCCESS"), T1)]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Success);
+        assert_eq!(summarize_pipeline_state(None), PipelineState::Unknown);
+    }
+
+    #[test]
+    fn failed_checks_are_named_from_the_latest_runs_and_legacy_statuses() {
+        let rollup: GqlStatusCheckRollup = serde_json::from_value(serde_json::json!({
+            "state": "FAILURE",
+            "contexts": { "nodes": [
+                { "__typename": "CheckRun", "databaseId": 1, "name": "build", "status": "COMPLETED",
+                  "conclusion": "FAILURE", "startedAt": "2026-10-15T08:00:00Z", "completedAt": "2026-10-15T08:05:00Z" },
+                // A rerun that passed: build is green again.
+                { "__typename": "CheckRun", "databaseId": 2, "name": "build", "status": "COMPLETED",
+                  "conclusion": "SUCCESS", "startedAt": "2026-10-15T09:00:00Z", "completedAt": "2026-10-15T09:05:00Z" },
+                { "__typename": "CheckRun", "databaseId": 3, "name": "lint", "status": "COMPLETED",
+                  "conclusion": "TIMED_OUT", "startedAt": "2026-10-15T09:00:00Z", "completedAt": "2026-10-15T09:10:00Z" },
+                { "__typename": "CheckRun", "databaseId": 4, "name": "e2e", "status": "IN_PROGRESS",
+                  "conclusion": null, "startedAt": "2026-10-15T09:00:00Z", "completedAt": null },
+                { "__typename": "StatusContext", "context": "ci/jenkins", "state": "ERROR" },
+                { "__typename": "StatusContext", "context": "ci/sonar", "state": "SUCCESS" }
+            ] }
+        }))
+        .unwrap();
+        assert_eq!(failed_check_names(Some(&rollup)), vec!["ci/jenkins", "lint"]);
+        assert!(failed_check_names(None).is_empty());
+    }
 
     #[test]
     fn a_pr_file_keeps_its_blob_only_when_it_is_an_object_id() {

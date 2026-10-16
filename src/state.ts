@@ -70,6 +70,11 @@ export const state = {
   togglDayEnd: defaultSettings.togglDayEnd,
   togglSlotMinutes: defaultSettings.togglSlotMinutes,
 
+  // ── Tiny King (meme mode) ─────────────────────────────────────────────────
+  petCycles: defaultSettings.petCycles,
+  petLingerSeconds: defaultSettings.petLingerSeconds,
+  petNagMinutes: defaultSettings.petNagMinutes,
+
   // ── Stale branches ────────────────────────────────────────────────────────
   staleBranchesEnabled: defaultSettings.staleBranchesEnabled,
   staleBranchDays: defaultSettings.staleBranchDays,

@@ -11,6 +11,13 @@ export interface AppSettings {
   jiraRepoBoards: Record<string, string>;
   notificationsEnabled: boolean;
   colorBlindMode: boolean;
+  memeMode: boolean;
+  /** Tiny King (meme mode): times he plays what he came for. */
+  petCycles: number;
+  /** Seconds he stays, idle, before walking off. */
+  petLingerSeconds: number;
+  /** Minutes between reminders of what waits on you; 0 = never. */
+  petNagMinutes: number;
   jiraMergeTransition: string;
   reactionScoreEnabled: boolean;
   scoreRuleReviewsEnabled: boolean;
@@ -72,6 +79,10 @@ export interface SettingsFormValues {
   jiraRepoBoards: string;
   notificationsEnabled: string;   // "on" | ""
   colorBlindMode: string;         // "on" | ""
+  memeMode: string;               // "on" | ""
+  petCycles: string;
+  petLingerSeconds: string;
+  petNagMinutes: string;
   jiraMergeTransition: string;
   reactionScoreEnabled: string;          // "on" | ""
   scoreRuleReviewsEnabled: string;       // "on" | ""
@@ -111,6 +122,10 @@ export const defaultSettings: AppSettings = {
   jiraRepoBoards: {},
   notificationsEnabled: true,
   colorBlindMode: false,
+  memeMode: false,
+  petCycles: 3,
+  petLingerSeconds: 4,
+  petNagMinutes: 30,
   jiraMergeTransition: "MERGE REQUEST",
   reactionScoreEnabled: true,
   scoreRuleReviewsEnabled: true,
@@ -195,6 +210,10 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
       .join("\n"),
     notificationsEnabled: settings.notificationsEnabled ? "on" : "",
     colorBlindMode: settings.colorBlindMode ? "on" : "",
+    memeMode: settings.memeMode ? "on" : "",
+    petCycles: String(settings.petCycles),
+    petLingerSeconds: String(settings.petLingerSeconds),
+    petNagMinutes: String(settings.petNagMinutes),
     jiraMergeTransition: settings.jiraMergeTransition,
     reactionScoreEnabled: settings.reactionScoreEnabled ? "on" : "",
     scoreRuleReviewsEnabled: settings.scoreRuleReviewsEnabled ? "on" : "",
@@ -258,6 +277,10 @@ export function normalizeSettings(
     jiraRepoBoards: parseRepoBoards(values.jiraRepoBoards),
     notificationsEnabled: values.notificationsEnabled === "on",
     colorBlindMode: values.colorBlindMode === "on",
+    memeMode: values.memeMode === "on",
+    petCycles: boundedInt(values.petCycles, 1, 5, defaultSettings.petCycles),
+    petLingerSeconds: boundedInt(values.petLingerSeconds, 0, 30, defaultSettings.petLingerSeconds),
+    petNagMinutes: boundedInt(values.petNagMinutes, 0, 480, defaultSettings.petNagMinutes),
     jiraMergeTransition: values.jiraMergeTransition?.trim() || "MERGE REQUEST",
     reactionScoreEnabled: values.reactionScoreEnabled === "on",
     scoreRuleReviewsEnabled: values.scoreRuleReviewsEnabled === "on",

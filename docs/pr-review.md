@@ -180,7 +180,7 @@ click as GitHub's submit (`publishReview` → `plan_review`, `create_review`). O
 ⌘/Ctrl+Enter in the text saves it, as in every other editor. Esc or a click elsewhere closes the
 panel, the text stays. Above the files, the *You* block
 keeps only what has no line in this diff: outdated comments and comments with no line. On the reviewer's own PR only
-Comment works, as on GitHub; Request changes waits for a summary; a button that cannot work says why
+Comment works, as on GitHub; Request changes, like Approve, needs no text; a button that cannot work says why
 on hover and when clicked. An editor still holding text blocks publishing until it is saved or
 cancelled — it would not go out. The note under the buttons links the review, or gives GitHub's
 reason when it refused.
@@ -199,7 +199,7 @@ reason when it refused.
 - Comments on code that changed since they were written go on the commit they were written on, one
   review per commit, as plain comments — GitHub shows them as outdated there, with that code.
 - The main review goes first. If GitHub refuses it, nothing is sent and nothing changes in ZuGit;
-  its reason is returned. *Request changes* needs a text, which is checked before sending.
+  its reason is returned.
 - What GitHub accepted leaves ZuGit — those comments, and the summary with the main review — and
   comes back as GitHub's own conversations. A refused older review keeps its comments here.
 - ZuGit's copy changes only after GitHub accepted, and is read again from the file then: a comment

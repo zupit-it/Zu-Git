@@ -18,6 +18,13 @@ pub struct AppSettings {
     pub jira_repo_boards: HashMap<String, String>,
     pub notifications_enabled: bool,
     pub color_blind_mode: bool,
+    pub meme_mode: bool,
+    /// Tiny King (meme mode): times he plays what he came for.
+    pub pet_cycles: u32,
+    /// Seconds he stays, idle, before walking off.
+    pub pet_linger_seconds: u32,
+    /// Minutes between reminders of what waits on you; 0 = never.
+    pub pet_nag_minutes: u32,
     pub jira_merge_transition: String,
     pub reaction_score_enabled: bool,
     pub score_rule_reviews_enabled: bool,
@@ -72,6 +79,10 @@ impl Default for AppSettings {
             jira_repo_boards: HashMap::new(),
             notifications_enabled: true,
             color_blind_mode: false,
+            meme_mode: false,
+            pet_cycles: 3,
+            pet_linger_seconds: 4,
+            pet_nag_minutes: 30,
             jira_merge_transition: "Merge Request".to_string(),
             reaction_score_enabled: true,
             score_rule_reviews_enabled: true,
@@ -123,6 +134,14 @@ pub struct SettingsFormValues {
     pub jira_repo_boards: String,
     pub notifications_enabled: String,  // "on" | ""
     pub color_blind_mode: String,       // "on" | ""
+    #[serde(default)]
+    pub meme_mode: String,              // "on" | ""
+    #[serde(default)]
+    pub pet_cycles: String,
+    #[serde(default)]
+    pub pet_linger_seconds: String,
+    #[serde(default)]
+    pub pet_nag_minutes: String,
     pub jira_merge_transition: String,
     pub reaction_score_enabled: String,                   // "on" | ""
     pub score_rule_reviews_enabled: String,               // "on" | ""
@@ -276,6 +295,9 @@ pub struct PullRequestSummary {
     pub updated_at_iso: String,
     pub pipeline_state: PipelineState,
     pub has_failed_pipeline: bool,
+    /// Checks that failed on the head commit, by name.
+    #[serde(default)]
+    pub failed_checks: Vec<String>,
     pub additions: u32,
     pub deletions: u32,
     pub auto_merge_method: Option<String>,
@@ -497,6 +519,19 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         jira_repo_boards: parse_repo_boards(&values.jira_repo_boards),
         notifications_enabled: values.notifications_enabled.trim() == "on",
         color_blind_mode: values.color_blind_mode.trim() == "on",
+        meme_mode: values.meme_mode.trim() == "on",
+        pet_cycles: match values.pet_cycles.trim().parse::<u32>() {
+            Ok(n) if (1..=5).contains(&n) => n,
+            _ => 3,
+        },
+        pet_linger_seconds: match values.pet_linger_seconds.trim().parse::<u32>() {
+            Ok(n) if n <= 30 => n,
+            _ => 4,
+        },
+        pet_nag_minutes: match values.pet_nag_minutes.trim().parse::<u32>() {
+            Ok(n) if n <= 480 => n,
+            _ => 30,
+        },
         jira_merge_transition: {
             let t = values.jira_merge_transition.trim().to_string();
             if t.is_empty() { "Merge Request".to_string() } else { t }
@@ -583,6 +618,10 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         } else {
             String::new()
         },
+        meme_mode: if settings.meme_mode { "on".to_string() } else { String::new() },
+        pet_cycles: settings.pet_cycles.to_string(),
+        pet_linger_seconds: settings.pet_linger_seconds.to_string(),
+        pet_nag_minutes: settings.pet_nag_minutes.to_string(),
         jira_merge_transition: settings.jira_merge_transition.clone(),
         reaction_score_enabled: if settings.reaction_score_enabled { "on".to_string() } else { String::new() },
         score_rule_reviews_enabled: if settings.score_rule_reviews_enabled { "on".to_string() } else { String::new() },
@@ -855,6 +894,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             updated_at_iso: "2026-05-17T07:46:00Z".to_string(),
             pipeline_state: PipelineState::Success,
             has_failed_pipeline: false,
+            failed_checks: vec![],
             additions: 312,
             deletions: 47,
             auto_merge_method: Some("SQUASH".to_string()),
@@ -906,6 +946,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             updated_at_iso: "2026-05-17T06:00:00Z".to_string(),
             pipeline_state: PipelineState::Success,
             has_failed_pipeline: false,
+            failed_checks: vec![],
             additions: 58,
             deletions: 120,
             auto_merge_method: None,
@@ -957,6 +998,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             updated_at_iso: "2026-05-17T07:52:00Z".to_string(),
             pipeline_state: PipelineState::Pending,
             has_failed_pipeline: false,
+            failed_checks: vec![],
             additions: 5,
             deletions: 3,
             auto_merge_method: None,

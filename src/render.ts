@@ -17,6 +17,7 @@ import {
   getAvailableRepos,
 } from "./filters";
 import { computeMyScore } from "./reaction-score";
+import { petReactToDashboard } from "./pet-triggers";
 import { clearSettingsSectionsDirty, openUnconfiguredSections, syncSettingsSections } from "./settings-sections";
 import type { MyScore, MyScoreItem } from "./shared/pr-model";
 
@@ -198,6 +199,11 @@ export function renderSettings(values: SettingsFormValues) {
   state.togglSlotMinutes =
     Number.parseInt(values.togglSlotMinutes, 10) || defaultSettings.togglSlotMinutes;
   document.documentElement.toggleAttribute("data-colorblind", values.colorBlindMode === "on");
+  document.documentElement.toggleAttribute("data-meme", values.memeMode === "on");
+  const pet = normalizeSettings(values);
+  state.petCycles = pet.petCycles;
+  state.petLingerSeconds = pet.petLingerSeconds;
+  state.petNagMinutes = pet.petNagMinutes;
   const queueWarning = document.querySelector<HTMLElement>("[data-merge-queue-warning]");
   if (queueWarning) queueWarning.hidden = values.mergeQueueEnabled !== "on";
   const togglHint = document.querySelector<HTMLElement>("[data-toggl-hint]");
@@ -1232,6 +1238,7 @@ export async function notifyQueueConflictBlocked(pr: PullRequestSummary) {
 // ── Full dashboard render ─────────────────────────────────────────────────────
 
 export function renderDashboard(snapshot: DashboardSnapshot) {
+  void petReactToDashboard(state.currentDashboard, snapshot);
   state.currentDashboard = snapshot;
   const myPendingReviewIds = getMyPendingReviewIds(snapshot);
   const myChangesRequestedIds = getMyChangesRequestedIds(snapshot);

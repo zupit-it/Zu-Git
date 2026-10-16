@@ -7,6 +7,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **PR diff: a comment editor like GitHub's** — every comment written in the diff (on lines, in a
+  reply, in the review's summary) has **Write** / **Preview** and buttons for bold, italic,
+  strikethrough, code, links, quotes, lists and task lists, with ⌘B, ⌘I, ⌘E, ⌘K (Ctrl on Windows);
+  ⌘Z undoes them. On lines of the new code, **Suggest** inserts a `suggestion` block holding those
+  lines. The box grows as you write; comments now render italics, struck text, quotes, lists, task
+  lists and headings.
+- **Fun: meme mode and the Tiny King** — Settings → **Fun** turns on meme mode. The Tiny King walks
+  in from the right edge of the screen, click-through and always on top, when one of your PRs is
+  merged, its CI turns red, changes are asked on it or it gets new comments, and when a review asks
+  for you. He reacts in a mood (happy, angry, impatient), his bubble says which PR, who waits and
+  since when, which checks failed; several pieces of news play in one visit. Reminders come every
+  so often about approved PRs not merged, changes to make and reviews to do. Settings: animation
+  cycles, how long he stays, how often he reminds; **Try him out** calls him. In the diff, the sad
+  reviewer peeks over the comment being written, eyes on the caret.
+- **Fun: a character of your own** — **Load character…** replaces the Tiny King with a pack: a zip
+  with `manifest.json` and PNG sheets, validated on the way in (pictures and data only; bounded file
+  sizes, image dimensions, frame lengths and walking speed; plain file names). **Download Tiny
+  King's pack** saves his to the Downloads folder with a guide and a prompt for drawing one;
+  **Back to Tiny King** restores him.
+
+### Changed
+- **Request changes without a summary** — in the PR review, Request changes no longer waits for a
+  summary: like Approve, and as on GitHub, the text is optional.
+
+### Fixed
+- **CI status check by check** — GitHub's GraphQL spells check states in capitals and they were
+  compared in lower case, so only the overall state counted: a PR now shows as failing as soon as
+  one check fails while others run, as *Action required* when a check waits for someone, and as
+  running while checks are queued.
+- **Settings fields aligned** — an input no longer sits lower than the one beside it when that one
+  has a hint under it.
+
 ---
 
 ## [3.0.0] - 2026-10-12

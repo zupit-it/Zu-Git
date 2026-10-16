@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Tiny King</title>
+    <style>
+      /* The window (pet.rs) is 300 × 296: the king at the bottom right, his bubble
+         above-left of his head. */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      :root {
+        /* The king's own palette (STYLE.txt): ivory fur, royal gold, crimson. */
+        --ivory: #fff8ec;
+        --gold: #e4a92d;
+        --ink: #2b1a10;
+        --ink-soft: #5d4a3c;
+        --ink-faint: #8c7663;
+        --tone: var(--gold);
+      }
+      /* He walks in and out by himself (pet.ts): the window's right edge is the
+         screen's, so what is past it is out of sight. */
+      canvas {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: 138px;
+        height: 184px;
+        filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .35));
+      }
+
+      /* What he has come about. Its tail points down at his head (x ≈ 225). */
+      .bubble {
+        position: absolute;
+        right: 40px;
+        bottom: 172px;
+        box-sizing: border-box;
+        display: flex;
+        gap: 9px;
+        width: max-content;
+        max-width: 256px;
+        padding: 9px 12px 12px 9px;
+        border: 1.5px solid var(--gold);
+        border-radius: 16px;
+        background: var(--ivory);
+        color: var(--ink);
+        font: 500 12px/1.3 ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, .3);
+        opacity: 0;
+        transform-origin: 85% 100%;
+        transition: opacity .2s ease;
+      }
+      /* Pages keep one width: the bubble does not jump as they turn. */
+      .bubble.is-paged { width: 256px; }
+      .bubble[data-tone="pr_merged"] { --tone: #2e9e5b; }
+      .bubble[data-tone="ci_failed"] { --tone: #d64545; }
+      .bubble.is-shown { opacity: 1; animation: bubble-pop .45s cubic-bezier(.34, 1.56, .64, 1); }
+      @keyframes bubble-pop {
+        from { opacity: 0; transform: translateY(10px) scale(.6); }
+        to { opacity: 1; transform: none; }
+      }
+
+      .bubble-badge {
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--tone);
+        font-size: 13px;
+        line-height: 1;
+        box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .15);
+      }
+      .bubble-body { min-width: 0; transition: opacity .15s ease; }
+      .bubble-body.is-turning { opacity: 0; }
+      .bubble-title, .bubble-detail {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .bubble-title { font-weight: 700; font-size: 13px; padding-top: 3px; }
+      /* Typed out first; then what is under it. */
+      .bubble-detail, .bubble-note { opacity: 0; transition: opacity .25s ease; }
+      .bubble.is-typed .bubble-detail, .bubble.is-typed .bubble-note { opacity: 1; }
+      .bubble-detail { margin-top: 2px; color: var(--ink-soft); }
+      .bubble-note { margin-top: 3px; font-size: 11px; color: var(--ink-faint); }
+      .bubble-detail:empty, .bubble-note:empty { display: none; }
+      .bubble-pager {
+        position: absolute;
+        top: 6px;
+        right: 9px;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--ink-faint);
+      }
+      .bubble-pager:empty { display: none; }
+      .bubble-pager:not(:empty) ~ .bubble-body .bubble-title { padding-right: 22px; }
+
+      /* Empties as his stay runs out. */
+      .bubble-bar {
+        position: absolute;
+        left: 14px;
+        right: 14px;
+        bottom: 5px;
+        height: 3px;
+        border-radius: 2px;
+        background: rgba(43, 26, 16, .08);
+        overflow: hidden;
+      }
+      .bubble-bar i {
+        display: block;
+        height: 100%;
+        background: var(--tone);
+        border-radius: inherit;
+        transform-origin: left;
+      }
+
+      /* Curved, its top over the bubble's border so the two read as one. */
+      .bubble-tail {
+        position: absolute;
+        right: 28px;
+        top: calc(100% - 1.5px);
+        overflow: visible;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bubble" aria-live="polite">
+      <span class="bubble-pager"></span>
+      <span class="bubble-badge" aria-hidden="true"></span>
+      <div class="bubble-body">
+        <div class="bubble-title"></div>
+        <div class="bubble-detail"></div>
+        <div class="bubble-note"></div>
+      </div>
+      <div class="bubble-bar"><i></i></div>
+      <svg class="bubble-tail" width="22" height="14" viewBox="0 0 22 14" aria-hidden="true">
+        <path d="M2 0 C7 5 11 9 17 13 C14 8 14 4 20 0" fill="#fff8ec" stroke="#e4a92d" stroke-width="1.5" stroke-linejoin="round" />
+      </svg>
+    </div>
+    <canvas width="288" height="384"></canvas>
+    <script type="module" src="/src/pet.ts"></script>
+  </body>
+</html>

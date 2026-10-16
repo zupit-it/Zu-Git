@@ -38,8 +38,25 @@ const VERSIONS: VersionBlock[] = [
         body: "Recurring activities and the other stories you book time on but do not need to see every day go into <strong>categories</strong> of your own, like <em>Attività ricorrenti</em>: from <strong>Categorie</strong> in the head, the selection bar, a right click, or by dragging a story onto the category's chip. They leave the board, its totals and the standup; the chip lists them. A story that leaves the sprint stays filed, so when it comes back in a later sprint it is already in its category. Categories are kept on your computer: no Jira permission needed.",
       },
       {
+        title: "Fun — meme mode and the Tiny King",
+        body: "A new <strong>Fun</strong> section in Settings turns on <strong>meme mode</strong>, and with it the <strong>Tiny King</strong>. He walks in from the right edge of your screen — over whatever you are working in, never taking a click — when one of your PRs is <strong>merged</strong>, its <strong>CI turns red</strong>, <strong>changes are asked</strong> on it or it gets <strong>new comments</strong>, and when a <strong>review asks for you</strong>. He arrives unaware, his face turns to the news — happy, angry, impatient — and his bubble types out which PR it is: who is waiting and since when, which checks failed. Several pieces of news come one after the other in a single visit, and he walks off in the mood of the last. Every so often he also comes knocking about what still waits on you: approved PRs not merged, changes to make, reviews to do. Settings → Fun sets how many times he acts, how long he stays and how often he reminds you; <strong>Try him out</strong> calls him on the spot. In the diff, meanwhile, the <strong>sad reviewer</strong> peeks over the comment you are writing, his eyes on your caret.",
+        imgs: ["/assets/changelog/tiny-king.png"],
+      },
+      {
+        title: "Fun — a character of your own",
+        body: "<strong>Load character…</strong> in Settings → Fun puts your own character in the Tiny King's place: a zip with a manifest and PNG sheets, checked before it is kept — pictures and data only, within sizes that cannot slow your computer down or keep him on screen for ever. <strong>Download Tiny King's pack</strong> saves his own to your Downloads folder, with a guide to the format and a prompt to have Codex or ChatGPT draw you one from a photo. <strong>Back to Tiny King</strong> brings him back.",
+      },
+      {
         title: "PR diff — the code around the changes",
         body: "Above, between and below the changes, the diff now has GitHub's expanders: <strong>↓</strong> shows 20 more lines under the change above, <strong>↑</strong> 20 more over the change below, a short gap opens in one click and a long one with <strong>Show all</strong>. The file's header has <strong>Expand all lines</strong> to read the whole file in place, and <strong>Collapse expanded lines</strong> to fold it back. The lines come from the file at the PR's head and are coloured like the rest; as on GitHub, comments still go on the lines of the diff.",
+      },
+      {
+        title: "PR diff — a comment editor like GitHub's",
+        body: "Every comment you write in the diff — on lines, in a reply, in your review's summary — has <strong>Write</strong> and <strong>Preview</strong>, and buttons for bold, italic, strikethrough, code, links, quotes, lists and task lists, with ⌘B, ⌘I, ⌘E and ⌘K (Ctrl on Windows); ⌘Z undoes them like typing. On lines of the new code, <strong>Suggest</strong> drops in a <code>suggestion</code> block holding those lines, ready to edit. The box grows as you write, and comments now show italics, struck text, quotes, lists, task lists and headings as GitHub does.",
+      },
+      {
+        title: "CI status — check by check",
+        body: "A PR's CI now shows as <strong>failing</strong> as soon as one check fails, even while others are still running; a check waiting for someone's action shows as <strong>Action required</strong>, and queued checks as <strong>running</strong>. GitHub spells these states in capitals, and ZuGit used to miss them, relying on the overall state alone.",
       },
     ],
   },

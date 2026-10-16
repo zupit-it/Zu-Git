@@ -7,6 +7,8 @@ mod jira;
 mod mcp;
 mod mcp_setup;
 mod models;
+mod pet;
+mod pet_pack;
 mod pr_review;
 mod release_picks;
 mod secret_store;
@@ -121,6 +123,13 @@ pub fn run() {
             commands::fetch_pr_diff,
             commands::fetch_pr_file_text,
             commands::fetch_pr_head,
+            commands::fetch_pr_state,
+            pet::pet_play,
+            pet::pet_done,
+            pet_pack::pet_pack_import,
+            pet_pack::pet_pack_reset,
+            pet_pack::pet_pack_info,
+            pet_pack::pet_pack_export,
             commands::fetch_pr_threads,
             commands::ai_review_list,
             commands::ai_review_get,

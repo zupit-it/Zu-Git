@@ -2955,6 +2955,9 @@ img.avatar { object-fit: cover; }
 .settings-field {
   display: grid;
   gap: 0;
+  /* Label and input at the top: a hint under the field beside it makes the row
+     taller, and that height must not push this one's input down. */
+  align-content: start;
 }
 
 .settings-field-wide {
@@ -6742,6 +6745,77 @@ ul.field-hint {
 }
 .pd-ai-edit:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 
+/* The comment editor (comment-box.ts): Write / Preview and Markdown buttons over the text */
+.pd-cbox {
+  position: relative;
+  margin-top: 6px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.pd-cbox:focus-within { box-shadow: 0 0 0 3px var(--accent-soft); }
+.pd-cbox__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+  background: var(--surface-alt);
+}
+.pd-cbox__tabs { display: flex; gap: 2px; }
+.pd-cbox__tabs button {
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink-muted);
+  font: 500 11.5px/18px var(--font);
+  cursor: pointer;
+}
+.pd-cbox__tabs button:hover { color: var(--ink); }
+.pd-cbox__tabs button.is-on { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--border); }
+.pd-cbox__tools { display: flex; align-items: center; flex-wrap: wrap; gap: 1px; }
+.pd-cbox__tools button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink-soft);
+  font: 600 13px/1 var(--font);
+  cursor: pointer;
+}
+.pd-cbox__tools button:hover { background: var(--accent-soft); color: var(--accent-ink); }
+.pd-cbox__tools b { font-weight: 800; }
+.pd-cbox__tools i { font-family: Georgia, "Times New Roman", serif; font-size: 14px; }
+.pd-cbox__tools s { text-decoration-thickness: 1.5px; }
+.pd-cbox__sep { width: 1px; height: 14px; margin: 0 4px; background: var(--border-strong); }
+.pd-cbox__tools .pd-cbox__suggest {
+  margin-left: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--accent-bd);
+  color: var(--accent-ink);
+  font: 600 11.5px/1 var(--font);
+}
+.pd-cbox.is-preview .pd-cbox__tools { opacity: .45; }
+.pd-cbox .pd-ai-edit {
+  display: block;
+  margin: 0;
+  border: 0;
+  border-radius: 0 0 8px 8px;
+}
+.pd-cbox .pd-ai-edit:focus { box-shadow: none; }
+.pd-cbox__preview { margin: 0; padding: 6px 8px; box-sizing: border-box; overflow-wrap: anywhere; }
+.pd-cbox__empty { color: var(--ink-faint); font-style: italic; }
+
 /* Side by side: base left, head right. Long lines wrap so both halves stay in view. */
 .pd-lines--split { width: auto; }
 
@@ -6845,7 +6919,7 @@ ul.field-hint {
 }
 .pd-gh-replyopen:hover { border-color: var(--border-strong); }
 .pd-gh-reply { padding: 8px 11px; border-top: 1px solid var(--border); }
-.pd-gh-reply .pd-ai-edit { margin-top: 0; }
+.pd-gh-reply .pd-cbox { margin-top: 0; }
 /* The user's replies waiting for their review, inside the conversation */
 .pd-gh-comment--pending { background: var(--accent-soft); }
 .pd-gh-avatar--you { background: var(--ok-soft); border: 1px solid var(--ok); }
@@ -6915,10 +6989,20 @@ details[open] > .pd-gh-summary { border-bottom: 1px solid var(--border); }
 }
 .pd-md-link { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
 .pd-md-link:hover { text-decoration: underline; }
+.pd-md-quote {
+  margin: 4px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--ink-soft);
+}
+.pd-md-list { margin: 4px 0; padding-left: 20px; }
+.pd-md-task { list-style: none; margin-left: -18px; }
+.pd-md-task input { margin: 0 3px 0 0; vertical-align: -1px; }
+.pd-md-h { margin: 6px 0 2px; font-size: 13.5px; font-weight: 700; }
 
 /* The text heading the user's review */
 .pd-summary { margin-top: 8px; }
-.pd-summary .pd-ai-edit { margin-top: 0; }
+.pd-summary .pd-cbox { margin-top: 0; }
 .pd-summary__note { margin-top: 4px; font-size: 11.5px; color: var(--ink-muted); }
 
 /* Comment, Request changes, Approve */
@@ -8712,3 +8796,39 @@ body.sp-is-resizing * { cursor: col-resize !important; user-select: none; }
 .sp-lb-nav:hover { background: rgba(255, 255, 255, 0.2); }
 .sp-lb-nav--prev { left: 18px; }
 .sp-lb-nav--next { right: 18px; }
+
+/* ── Meme mode ────────────────────────────────────────────────── */
+/* About to open a PR's diff: a face whose helmet is the arrow. Hotspot on the helmet's tip. */
+[data-meme] [data-pr-diff],
+[data-meme] [data-sp-pr] {
+  cursor: url("/assets/meme/diff-cursor-48.png") 15 0, pointer;
+  cursor: -webkit-image-set(url("/assets/meme/diff-cursor-48.png") 1x, url("/assets/meme/diff-cursor-96.png") 2x) 15 0, pointer;
+}
+
+/* The sad reviewer: peeking over the top edge of the comment being written, eyes
+   on the caret, his chin behind the box. In a card he rises beside its head
+   line (You · Lines …) and a little past the card's top, into the thread's
+   padding, so the box only moves down a little. Under a conversation's last
+   comment, or the publish panel's heading, there is text to keep clear of.
+   The picture shows at once; the canvas over it, once drawn, moves the eyes. */
+.pd-cbox--face { margin-top: 22px; }
+.pd-gh-reply .pd-cbox--face, .pd-summary .pd-cbox--face { margin-top: 44px; }
+.pd-meme {
+  position: absolute;
+  z-index: 1;
+  right: 18px;
+  bottom: calc(100% + 1px);
+  width: 80px;
+  height: 60px;
+  overflow: hidden;
+  pointer-events: none;
+  background: url("/assets/meme/sad-reviewer.png") top center / 80px 80px no-repeat;
+  filter: drop-shadow(0 -1px 3px rgba(0, 0, 0, .25));
+}
+.pd-meme canvas { display: block; width: 80px; height: 80px; }
+
+/* Settings → Fun: buttons that call the Tiny King out, and his pack. */
+.pet-try { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pet-pack-name { margin-right: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+[data-pet-pack-result] { color: var(--ok); overflow-wrap: anywhere; }
+[data-pet-pack-result].is-danger { color: var(--fail); }

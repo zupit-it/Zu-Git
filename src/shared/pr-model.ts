@@ -52,6 +52,8 @@ export interface PullRequestSummary {
   updatedAtIso: string;
   pipelineState: "success" | "pending" | "failure" | "action-required" | "unknown";
   hasFailedPipeline: boolean;
+  /** Checks that failed on the head commit, by name. */
+  failedChecks?: string[];
   additions: number;
   deletions: number;
   autoMergeMethod: string | null;
