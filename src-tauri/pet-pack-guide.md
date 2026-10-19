@@ -11,11 +11,13 @@ Il pacchetto resta solo sul tuo computer: per darlo a un collega, passagli lo zi
 
 - `manifest.json`: il nome del personaggio, la dimensione delle celle e, per ogni
   animazione (clip), lo sheet e la durata di ogni frame.
-- Gli sheet PNG con sfondo trasparente: i frame di una clip affiancati in una
+- Gli sheet, PNG o WebP, con sfondo trasparente: i frame di una clip affiancati in una
   griglia, letti da sinistra a destra e poi riga per riga.
 
 Lo zip può avere `manifest.json` in cima oppure dentro un'unica cartella.
-Sono ammessi solo PNG; massimo 64 MB in tutto e 16 MB per immagine.
+Sono ammessi PNG e WebP non animati; massimo 64 MB in tutto e 16 MB per immagine.
+Il Tiny King usa WebP lossy (qualità 100): pesa circa un terzo dei PNG e la
+differenza non si vede.
 
 ## manifest.json
 
@@ -28,7 +30,7 @@ Sono ammessi solo PNG; massimo 64 MB in tutto e 16 MB per immagine.
   "columns": 4,
   "walk": { "step": 6, "hidden": 264 },
   "clips": {
-    "idle": { "sheet": "idle.png", "durations": [900, 160, 180, 70, 110, 80, 160, 400] }
+    "idle": { "sheet": "idle.webp", "durations": [900, 160, 180, 70, 110, 80, 160, 400] }
   }
 }
 ```
@@ -94,5 +96,5 @@ Allega questo zip e una tua foto, poi chiedi a Codex o ChatGPT qualcosa come:
 > Celle 288 × 384 trasparenti, piedi sempre alla stessa altezza, stesso numero
 > di frame e stessi tempi del Tiny King. Rispetta le regole sui passaggi: frame
 > di inizio e fine identici dove indicato, camminate sul posto. Consegna uno
-> zip con manifest.json e gli sheet PNG, verificando che ogni sheet abbia le
+> zip con manifest.json e gli sheet (PNG o WebP), verificando che ogni sheet abbia le
 > dimensioni dichiarate.

@@ -1,6 +1,6 @@
 // ── Tiny King: the character pack ─────────────────────────────────────────────
 // Who walks on screen comes from a pack: a manifest.json naming each clip's
-// sheet and frame lengths, and the PNG sheets, their cells read left to right
+// sheet and frame lengths, and the sheets (PNG or still WebP), their cells read left to right
 // then top to bottom. The Tiny King is the pack built in (public/assets/pet);
 // one loaded in Settings → Fun takes his place (pet_pack.rs checks it on the
 // way in, the window reads it). The clips:
@@ -52,7 +52,7 @@ export const PACK_LIMITS = {
 } as const;
 
 export interface PetClip {
-  /** The sheet's file name in the pack, a PNG. */
+  /** The sheet's file name in the pack, a PNG or a still WebP. */
   sheet: string;
   /** How long each frame stays, in ms; one entry per frame. */
   durations: number[];
@@ -71,7 +71,7 @@ export interface PetManifest {
   clips: Record<string, PetClip>;
 }
 
-const SHEET = /^[\w-][\w.-]{0,59}\.png$/i;
+const SHEET = /^[\w-][\w.-]{0,59}\.(png|webp)$/i;
 const CLIP = /^[a-z0-9_]{1,48}$/;
 /** Names Windows keeps for devices, whatever the extension. */
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
@@ -94,7 +94,7 @@ export function checkManifest(value: unknown): PetManifest {
   for (const [name, clip] of Object.entries(clips ?? {})) {
     if (!CLIP.test(name)) fail("clip names are lowercase letters, digits and _, 48 at most");
     if (typeof clip?.sheet !== "string" || !SHEET.test(clip.sheet) || RESERVED.test(clip.sheet)) {
-      fail(`${name}: sheet must be a plain .png file name`);
+      fail(`${name}: sheet must be a plain .png or .webp file name`);
     }
     const d = clip.durations;
     const frameMs: readonly [number, number] = name.startsWith("walk_") ? [PACK_LIMITS.frameMs[0], PACK_LIMITS.walkFrameMs] : PACK_LIMITS.frameMs;

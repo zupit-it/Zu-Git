@@ -8,6 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **Tiny King: a third of the weight** — his sheets are lossy WebP now (quality 100) instead of PNG:
+  12.9 MB down to 4.6 MB, with no difference to see. Same manifest, same cells, same timings.
+  Character packs can use WebP sheets too (still images, not animated ones); PNG keeps working.
 - **Jira token: scopes for the Sprint tab** — Settings now lists every scope a token with scopes
   needs, the Jira Software ones included (`read:board-scope:jira-software`, `read:sprint:jira-software`
   and the others): without them the Sprint tab found no board and no sprint.

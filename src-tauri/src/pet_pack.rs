@@ -1,5 +1,5 @@
 //! Character packs for the Tiny King's window (meme mode): a zip holding a
-//! manifest.json and PNG sheets, as pet-sprites.ts describes them. One loaded
+//! manifest.json and PNG or WebP sheets, as pet-sprites.ts describes them. One loaded
 //! takes the Tiny King's place, kept in the app's data folder; the Tiny King
 //! built in can be saved as a zip to start from, with a guide to making one.
 
@@ -81,12 +81,13 @@ fn int_in(v: &Value, (min, max): (u64, u64)) -> Option<u64> {
     v.as_u64().filter(|n| (min..=max).contains(n))
 }
 
-/// A plain file name: letters, digits, `_`, `-` and dots, ending in .png, not
-/// hidden, not one Windows keeps for a device. No path can hide in it.
+/// A plain file name: letters, digits, `_`, `-` and dots, ending in .png or
+/// .webp, not hidden, not one Windows keeps for a device. No path can hide in it.
 fn is_sheet_name(name: &str) -> bool {
     let stem = name.split('.').next().unwrap_or("").to_ascii_lowercase();
+    let lower = name.to_ascii_lowercase();
     name.len() <= MAX_FILE_NAME
-        && name.to_ascii_lowercase().ends_with(".png")
+        && (lower.ends_with(".png") || lower.ends_with(".webp"))
         && !name.starts_with('.')
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
         && !RESERVED.contains(&stem.as_str())
@@ -123,7 +124,7 @@ fn check_manifest(value: &Value) -> Result<Manifest, String> {
         }
         let sheet = spec["sheet"].as_str().unwrap_or("");
         if !is_sheet_name(sheet) {
-            return fail(format!("{clip}: sheet must be a plain .png file name"));
+            return fail(format!("{clip}: sheet must be a plain .png or .webp file name"));
         }
         let durations: Vec<u64> = spec["durations"]
             .as_array()
@@ -210,11 +211,60 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     }
 }
 
+/// A still WebP's width and height when it is one, whole: the RIFF header
+/// counting the file to its last byte, each chunk within it, the size read
+/// from the first (VP8, VP8L or VP8X). An animated one is refused: the window
+/// draws cells of a sheet, and would only ever see its first frame.
+fn webp_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.get(..4)? != b"RIFF" || bytes.get(8..12)? != b"WEBP" {
+        return None;
+    }
+    let le32 = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let le24 = |at: usize| bytes.get(at..at + 3).map(|b| u32::from_le_bytes([b[0], b[1], b[2], 0]));
+    let le16 = |at: usize| bytes.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as u32);
+    if (le32(4)? as usize).checked_add(8)? != bytes.len() {
+        return None;
+    }
+    let mut at = 12;
+    let mut size = None;
+    while at < bytes.len() {
+        let kind = bytes.get(at..at + 4)?;
+        let len = le32(at + 4)? as usize;
+        let data = at + 8;
+        // Chunks are padded to an even length.
+        let end = data.checked_add(len)?.checked_add(len & 1)?;
+        if end > bytes.len() {
+            return None;
+        }
+        if at == 12 {
+            size = match kind {
+                b"VP8X" if len >= 10 => {
+                    const ANIMATION: u8 = 0x02;
+                    if bytes[data] & ANIMATION != 0 {
+                        return None;
+                    }
+                    Some((le24(data + 4)? + 1, le24(data + 7)? + 1))
+                }
+                b"VP8L" if len >= 5 && bytes[data] == 0x2f => {
+                    let bits = le32(data + 1)?;
+                    Some(((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1))
+                }
+                b"VP8 " if len >= 10 && bytes.get(data + 3..data + 6)? == [0x9d, 0x01, 0x2a] => {
+                    Some((le16(data + 6)? & 0x3fff, le16(data + 8)? & 0x3fff))
+                }
+                _ => return None,
+            };
+        }
+        at = end;
+    }
+    size.filter(|_| at == bytes.len())
+}
+
 /// `sheet`'s pixel count, when it holds `frames` cells of `manifest`'s size laid
 /// out its way: wide and tall enough for them, and no more.
 fn check_sheet(manifest: &Manifest, sheet: &str, frames: usize, bytes: &[u8]) -> Result<u64, String> {
-    let Some((width, height)) = png_size(bytes) else {
-        return Err(format!("Character pack: {sheet} is not a whole PNG."));
+    let Some((width, height)) = png_size(bytes).or_else(|| webp_size(bytes)) else {
+        return Err(format!("Character pack: {sheet} is not a whole PNG or still WebP."));
     };
     let columns = manifest.columns as usize;
     let used = frames.min(columns) as u32;
@@ -370,7 +420,7 @@ fn built_in_zip(file: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<u8>, Strin
     use zip::write::SimpleFileOptions;
     use zip::CompressionMethod;
     let text = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-    // PNGs are compressed already.
+    // PNG and WebP are compressed already.
     let image = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let mut add = |name: &str, bytes: &[u8], options: SimpleFileOptions| -> Result<(), String> {
@@ -431,6 +481,55 @@ mod tests {
         bytes
     }
 
+    /// A WebP of `chunks`, each (fourcc, payload), padded and counted as RIFF wants.
+    fn riff(chunks: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+        let mut body = b"WEBP".to_vec();
+        for (kind, data) in chunks {
+            body.extend(*kind);
+            body.extend((data.len() as u32).to_le_bytes());
+            body.extend(data);
+            if data.len() % 2 == 1 {
+                body.push(0);
+            }
+        }
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend((body.len() as u32).to_le_bytes());
+        bytes.extend(body);
+        bytes
+    }
+
+    /// A lossless WebP's header: its size, as VP8L packs it.
+    fn vp8l(width: u32, height: u32) -> Vec<u8> {
+        let bits = (width - 1) | (height - 1) << 14 | 1 << 28;
+        let mut data = vec![0x2f];
+        data.extend(bits.to_le_bytes());
+        data
+    }
+
+    /// A WebP with alpha, as lossy encoders write it: VP8X first, then the image.
+    fn webp_x(width: u32, height: u32, flags: u8) -> Vec<u8> {
+        let mut head = vec![flags, 0, 0, 0];
+        head.extend(&(width - 1).to_le_bytes()[..3]);
+        head.extend(&(height - 1).to_le_bytes()[..3]);
+        let mut frame = vec![0, 0, 0, 0x9d, 0x01, 0x2a];
+        frame.extend((width as u16).to_le_bytes());
+        frame.extend((height as u16).to_le_bytes());
+        riff(&[(b"VP8X", head), (b"ALPH", vec![0; 3]), (b"VP8 ", frame)])
+    }
+
+    #[test]
+    fn webp_sizes_are_read_from_each_kind_of_header() {
+        assert_eq!(webp_size(&riff(&[(b"VP8L", vp8l(128, 96))])), Some((128, 96)));
+        assert_eq!(webp_size(&webp_x(1152, 768, 0x10)), Some((1152, 768)));
+        let mut lossy = vec![0, 0, 0, 0x9d, 0x01, 0x2a];
+        lossy.extend(128u16.to_le_bytes());
+        lossy.extend(96u16.to_le_bytes());
+        assert_eq!(webp_size(&riff(&[(b"VP8 ", lossy)])), Some((128, 96)));
+        // Animated: the window would only ever draw its first frame.
+        assert_eq!(webp_size(&webp_x(128, 96, 0x12)), None);
+        assert_eq!(webp_size(&png(128, 96)), None);
+    }
+
     fn manifest() -> Value {
         let clips: serde_json::Map<String, Value> = REQUIRED_CLIPS
             .iter()
@@ -481,7 +580,7 @@ mod tests {
 
     #[test]
     fn a_sheet_name_is_a_plain_file_and_never_a_device() {
-        for bad in ["../evil.png", "a/b.png", "a\\b.png", ".hidden.png", "idle.svg", "CON.png", "nul.png", "com1.sprite.png", ""] {
+        for bad in ["../evil.png", "a/b.png", "a\\b.png", ".hidden.png", "idle.svg", "idle.gif", "../evil.webp", "CON.webp", "nul.png", "com1.sprite.png", ""] {
             let mut m = manifest();
             m["clips"]["idle"]["sheet"] = bad.into();
             assert!(refused(m).contains("idle: sheet"), "{bad:?} got in");
@@ -542,6 +641,25 @@ mod tests {
         let mut cut = png(128, 96);
         cut.truncate(30);
         assert!(err(cut).contains("not a whole PNG"));
+    }
+
+    #[test]
+    fn a_webp_sheet_is_checked_as_a_png_one() {
+        assert!(read_pack(&zip_pack("", webp_x(128, 96, 0x10))).is_ok());
+        let err = |sheet: Vec<u8>| read_pack(&zip_pack("", sheet)).unwrap_err();
+        assert!(err(webp_x(96, 96, 0x10)).contains("too small"));
+        assert!(err(webp_x(16_000, 16_000, 0x10)).contains("bigger than"));
+        assert!(err(webp_x(128, 96, 0x12)).contains("not a whole PNG or still WebP"));
+        let mut tacked = webp_x(128, 96, 0x10);
+        tacked.extend(b"<html><script>alert(1)</script>");
+        assert!(err(tacked).contains("not a whole PNG or still WebP"));
+        let mut cut = webp_x(128, 96, 0x10);
+        cut.truncate(30);
+        assert!(err(cut).contains("not a whole PNG or still WebP"));
+        // A chunk claiming more than the file holds.
+        let mut long = webp_x(128, 96, 0x10);
+        long[16] = 0xff;
+        assert!(err(long).contains("not a whole PNG or still WebP"));
     }
 
     #[test]

@@ -15,7 +15,7 @@ test("the Tiny King's own pack reads right, with the measures he walks by", () =
   const pack = packFrom(checkManifest(builtIn), (file) => `/assets/pet/${file}`);
   assert.equal(pack.name, "Tiny King");
   assert.deepEqual(pack.walk, { step: 6, hidden: 264, enterFrames: 44 });
-  assert.equal(pack.sheetUrl("walk_happy"), "/assets/pet/walk_happy.png");
+  assert.equal(pack.sheetUrl("walk_happy"), "/assets/pet/walk_happy.webp");
   assert.ok(pack.has("change_neutral_to_angry_left"));
   assert.ok(!pack.has("toString"));
 });
@@ -59,6 +59,7 @@ test("a pack cannot keep him on screen for ever, nor name a device", () => {
   throwsFor((m) => { m.walk = { step: 0.01 }; }, /out of bounds/);
   throwsFor((m) => { m.walk = { hidden: 10_000 }; }, /out of bounds/);
   throwsFor((m) => { m.clips.idle = { sheet: "CON.png", durations: [100] }; }, /idle: sheet/);
+  throwsFor((m) => { m.clips.idle = { sheet: "idle.gif", durations: [100] }; }, /idle: sheet/);
   throwsFor((m) => { m.clips.IDLE = { sheet: "x.png", durations: [100] }; }, /clip names/);
   const fine = manifest();
   fine.walk = { step: 1, hidden: 90 };
