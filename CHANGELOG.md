@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Jira token: scopes for the Sprint tab** — Settings now lists every scope a token with scopes
+  needs, the Jira Software ones included (`read:board-scope:jira-software`, `read:sprint:jira-software`
+  and the others): without them the Sprint tab found no board and no sprint.
 ---
 
 ## [3.0.2] - 2026-10-16

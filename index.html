@@ -355,11 +355,20 @@
                       </div>
                       <input id="jiraToken" name="jiraToken" type="password" placeholder="Atlassian API token (classic or with scopes)" />
                       <p class="field-hint">
-                        Consigliato: <strong>Create API token with scopes</strong>, con gli scope
-                        <code>read:jira-work</code>, <code>write:jira-work</code> e <code>read:jira-user</code>.
-                        Dà a ZuGit solo i permessi che usa; i token classici funzionano ancora, ma
-                        Atlassian li sta dismettendo.
+                        Consigliato: <strong>Create API token with scopes</strong>, app <strong>Jira</strong>,
+                        con questi scope. Dà a ZuGit solo i permessi che usa; i token classici funzionano
+                        ancora, ma Atlassian li sta dismettendo.
                       </p>
+                      <ul class="field-hint">
+                        <li>
+                          Lettura: <code>read:jira-user</code>, <code>read:jira-work</code>,
+                          <code>read:board-scope:jira-software</code>, <code>read:board-scope.admin:jira-software</code>,
+                          <code>read:project:jira</code>, <code>read:sprint:jira-software</code>,
+                          <code>read:issue-details:jira</code>, <code>read:jql:jira</code>
+                        </li>
+                        <li>Scrittura: <code>write:jira-work</code></li>
+                        <li>Senza gli scope <code>…:jira-software</code> la scheda Sprint non trova board né sprint.</li>
+                      </ul>
                     </div>
                     <div class="settings-field settings-field-wide">
                       <label class="field-label" for="jiraRepoBoards">Repo → Jira board mapping</label>

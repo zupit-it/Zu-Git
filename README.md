@@ -126,13 +126,18 @@ to the site. Nothing to configure: the **Jira URL** setting stays the site URL.
 everything your account can do, and it is the kind of token Atlassian is moving to — classic tokens
 are being phased out. Create it from
 [id.atlassian.com → API tokens](https://id.atlassian.com/manage-profile/security/api-tokens) with
-**Create API token with scopes**, app **Jira**, and these classic scopes:
+**Create API token with scopes**, app **Jira**, and these scopes:
 
 | Scope | Used for |
 |---|---|
-| `read:jira-work` | issue search, fields, changelog, fix versions, transitions list; boards, sprints and attachments of the Sprint tab |
-| `write:jira-work` | checklist write-back, workflow transitions, fix version moves; the Sprint tab's moves, assignees, estimates and comments |
+| `read:jira-work` | issue search, fields, changelog, fix versions, transitions list; attachments of the Sprint tab |
 | `read:jira-user` | `/myself` (credential check, your transitions in the Toggl planner) |
+| `read:board-scope:jira-software`, `read:board-scope.admin:jira-software` | the Sprint tab's boards and their configuration (columns, estimation field) |
+| `read:sprint:jira-software` | the boards' active sprints |
+| `read:project:jira`, `read:issue-details:jira`, `read:jql:jira` | the sprint's stories, as the board's filter sees them |
+| `write:jira-work` | checklist write-back, workflow transitions, fix version moves; the Sprint tab's moves, assignees, estimates and comments |
+
+Without the `…:jira-software` scopes the Sprint tab finds no board and no sprint.
 
 ### Ticket enrichment
 
