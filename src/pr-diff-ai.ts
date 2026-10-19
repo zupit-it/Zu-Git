@@ -7,7 +7,7 @@
 
 import {
   READ_ONLY_HINT, agentLabel, isOutdated,
-  type AiComment, type AiReview, type UserComment, type UserReply, type UserReview,
+  type AiComment, type AiReview, type ReviewEvent, type UserComment, type UserReply, type UserReview,
 } from "./ai-review";
 import { renderMarkdown, suggestionBlock } from "./markdown-lite";
 import { hunkTail } from "./pr-diff-parse";
@@ -435,6 +435,54 @@ export interface PublishState {
   busy: boolean;
   /** What the last publish did, as markup. */
   note: string;
+  /** The review that went out, until another one is written. */
+  done: PublishDone | null;
+}
+
+/** A review GitHub accepted: its verdict, and where to see it. */
+export interface PublishDone {
+  event: ReviewEvent;
+  /** The commit it was given on, and its page on GitHub; older ones carried comments written before. */
+  reviews: { commit: string; url: string; latest: boolean }[];
+}
+
+/** How each verdict reads once it is on GitHub: in the top bar, in the panel, in the toast. */
+export function verdictWords(event: ReviewEvent, ref: string): { short: string; long: string; toast: string } {
+  switch (event) {
+    case "APPROVE":
+      return { short: "Approved", long: `You approved ${ref} on GitHub`, toast: `${ref} approvata su GitHub` };
+    case "REQUEST_CHANGES":
+      return { short: "Changes requested", long: `You requested changes on ${ref}`, toast: `${ref}: modifiche richieste su GitHub` };
+    default:
+      return { short: "Commented", long: `Your review of ${ref} is on GitHub`, toast: `${ref}: review pubblicata su GitHub` };
+  }
+}
+
+/** Shown while nothing new is written: the published review rather than the buttons that sent it. */
+function renderPublishDone(done: PublishDone, ref: string, note: string): string {
+  const links = done.reviews.map(r => {
+    const label = r.latest ? "View your review ↗" : `On ${escHtml(r.commit.slice(0, 7))} ↗`;
+    return r.url.startsWith("https://") ? `<a class="pd-md-link" href="#" data-pd-link="${escHtml(r.url)}">${label}</a>` : label;
+  });
+  const latest = done.reviews.find(r => r.latest) ?? done.reviews[0];
+  const on = latest ? `On <code>${escHtml(latest.commit.slice(0, 7))}</code>` : "";
+  return `<div class="pd-publish-done pd-publish-done--${done.event.toLowerCase()}" role="status">` +
+      `<span class="pd-publish-done__icon" aria-hidden="true">✓</span>` +
+      `<div class="pd-publish-done__body">` +
+        `<strong>${escHtml(verdictWords(done.event, ref).long)}</strong>` +
+        `<span>${[on, ...links].filter(Boolean).join(" · ")}</span>` +
+      `</div>` +
+    `</div>` +
+    (note ? `<div class="pd-publish__note">${note}</div>` : "") +
+    `<div class="pd-publish pd-publish--done">` +
+      `<button class="pd-ai-btn" type="button" data-pd-publish-again>Write another review</button>` +
+      `<button class="pd-ai-btn pd-ai-btn--primary" type="button" data-pd-close>Close diff</button>` +
+    `</div>`;
+}
+
+/** The done state stands only while nothing new waits to go out. */
+export function showsDone(state: PublishState, count: number): boolean {
+  return !!state.done && !state.busy && count === 0;
 }
 
 const OWN_PR = "GitHub doesn't let you approve or request changes on your own pull request.";
@@ -460,8 +508,12 @@ export function renderPublishButtons(state: PublishState, count: number, hasSumm
 }
 
 /** What "Publish review" opens, under the top bar: the review's text and its verdict. */
-export function renderPublishPanel(mine: UserReview, summary: string, state: PublishState): string {
+export function renderPublishPanel(mine: UserReview, summary: string, state: PublishState, ref: string): string {
   const count = mine.comments.length + mine.replies.length;
+  if (state.done && showsDone(state, count)) {
+    return `<div class="pd-publish-pop__head"><strong>Publish your review</strong></div>` +
+      renderPublishDone(state.done, ref, state.note);
+  }
   const comments = mine.comments.length;
   const replies = mine.replies.length;
   const written = [
@@ -487,7 +539,11 @@ export function renderPublishPanel(mine: UserReview, summary: string, state: Pub
 }
 
 /** The top bar's way in, with what is waiting to go out. */
-export function renderPublishOpen(count: number, open: boolean): string {
+export function renderPublishOpen(count: number, open: boolean, done: PublishDone | null): string {
+  if (done && count === 0) {
+    return `<span aria-hidden="true">✓</span> ${escHtml(verdictWords(done.event, "").short)}` +
+      `<span class="pd-publish-open__caret" aria-hidden="true">${open ? "▴" : "▾"}</span>`;
+  }
   return `Publish review${count ? `<span class="pd-publish-open__count">${count}</span>` : ""}` +
     `<span class="pd-publish-open__caret" aria-hidden="true">${open ? "▴" : "▾"}</span>`;
 }

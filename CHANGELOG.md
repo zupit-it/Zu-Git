@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Jira token: scopes for the Sprint tab** — Settings now lists every scope a token with scopes
   needs, the Jira Software ones included (`read:board-scope:jira-software`, `read:sprint:jira-software`
   and the others): without them the Sprint tab found no board and no sprint.
+- **PR diff: the review's outcome is clear** — once GitHub has the review, the publish panel says
+  what went out (*You approved #482 on GitHub*, with the commit and a link) instead of showing the
+  buttons again, the top bar keeps the verdict (**✓ Approved**, **Changes requested**,
+  **Commented**) until another review is written, and a toast confirms it. *Publishing…* ends as
+  soon as GitHub answers, and the PR list behind refreshes right away instead of on close.
+
 ---
 
 ## [3.0.2] - 2026-10-16

@@ -7041,6 +7041,40 @@ details[open] > .pd-gh-summary { border-bottom: 1px solid var(--border); }
   text-align: center;
 }
 .pd-publish-open__caret { font-size: 11px; line-height: 1; opacity: .85; }
+/* A review went out: its verdict stays in the top bar */
+.pd-publish-open--done { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.pd-publish-open--done:hover { border-color: var(--ok); filter: brightness(.97); }
+.pd-publish-open--done.pd-publish-open--changes { background: var(--fail-soft); border-color: var(--fail); color: var(--fail); }
+
+/* The panel once the review is on GitHub */
+.pd-publish-done {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--ok);
+  border-radius: 8px;
+  background: var(--ok-soft);
+}
+.pd-publish-done--request_changes { border-color: var(--fail); background: var(--fail-soft); }
+.pd-publish-done__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ok);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+.pd-publish-done--request_changes .pd-publish-done__icon { background: var(--fail); }
+.pd-publish-done__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 12px; color: var(--ink-muted); }
+.pd-publish-done__body strong { font-size: 13px; color: var(--ink); }
+.pd-publish--done { justify-content: flex-end; margin-top: 10px; }
+.pd-publish-pop > .pd-publish__note { margin-top: 6px; }
 
 .pd-publish-pop {
   position: absolute;
@@ -8542,6 +8576,7 @@ body.sp-is-resizing * { cursor: col-resize !important; user-select: none; }
   transition: opacity 160ms, transform 160ms;
 }
 .sp-toast--danger { background: #8f2219; }
+.sp-toast--success .sp-toast-text::first-letter { color: #7ee2b0; }
 .sp-toast-text { flex: 1; line-height: 1.4; }
 .sp-toast-action {
   flex-shrink: 0;

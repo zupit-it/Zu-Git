@@ -27,11 +27,12 @@ import {
 } from "./ai-review";
 import {
   anchorKey, cardKey, draftKey, fileKey, renderCard, renderDraft, renderGhPanel, renderGhThread, renderPanel,
-  renderPendingReply, renderPublishButtons, renderPublishOpen, renderPublishPanel, renderReplyEditor,
-  type CardRef, type Draft, type PublishState, type ReplyArea, type Side, type ThreadItem,
+  renderPendingReply, renderPublishButtons, renderPublishOpen, renderPublishPanel, renderReplyEditor, verdictWords,
+  type CardRef, type Draft, type PublishDone, type PublishState, type ReplyArea, type Side, type ThreadItem,
 } from "./pr-diff-ai";
 import { getPrHead, getPrThreads, resolveThread, threadsSignature, type GhThread } from "./pr-threads";
 import { state as appState } from "./state";
+import { showToast } from "./sprint-ui";
 
 interface PrFileDiff {
   filename: string;
@@ -621,6 +622,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   let publishNote = "";
   /** The publish panel under the top bar is open. */
   let publishOpen = false;
+  /** The review that went out: the panel and the top bar say so until another is written. */
+  let publishDone: PublishDone | null = null;
 
   // The commit the diff on screen is of — not the dashboard's, which may lag behind.
   let headSha = pr.headSha;
@@ -702,6 +705,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     if (e.target === overlay) { if (!showUnsaved()) close(); return; }
     const target = e.target as Element;
     if (target.closest("[data-pd-publish-open]")) { togglePublish(!publishOpen); return; }
+    if (target.closest("[data-pd-publish-again]")) { publishDone = null; publishNote = ""; drawPublish(); focusEditor("summary"); return; }
     if (publishOpen && !target.closest("[data-pd-publish-pop]")) togglePublish(false);
     if (target.closest("[data-pd-close]")) { close(); return; }
     if (target.closest("[data-pd-github]")) { void openExternal(`${pr.url}/files`); return; }
@@ -1831,16 +1835,19 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   // ── Publishing ──────────────────────────────────────────────────────────────
 
   function publishState(): PublishState {
-    return { ownPr, busy: publishing, note: publishNote };
+    return { ownPr, busy: publishing, note: publishNote, done: publishDone };
   }
 
   /** The top bar's way in, and the panel under it when open. */
   function drawPublish() {
     const count = mine.comments.length + mine.replies.length;
     const open = $<HTMLElement>("[data-pd-publish-open]");
-    open.innerHTML = renderPublishOpen(count, publishOpen);
+    const done = count === 0 ? publishDone : null;
+    open.innerHTML = renderPublishOpen(count, publishOpen, done);
     open.setAttribute("aria-expanded", String(publishOpen));
     open.classList.toggle("pd-publish-open--waiting", count > 0);
+    open.classList.toggle("pd-publish-open--done", !!done);
+    open.classList.toggle("pd-publish-open--changes", done?.event === "REQUEST_CHANGES");
     const pop = $<HTMLElement>("[data-pd-publish-pop]");
     pop.hidden = !publishOpen;
     if (!publishOpen) return;
@@ -1848,7 +1855,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     const shell = $<HTMLElement>(".pd-shell");
     pop.style.top = `${open.offsetTop + open.offsetHeight + 6}px`;
     pop.style.right = `${Math.max(12, shell.clientWidth - open.offsetLeft - open.offsetWidth)}px`;
-    keepingFocus(() => { pop.innerHTML = renderPublishPanel(mine, summaryText, publishState()); });
+    keepingFocus(() => { pop.innerHTML = renderPublishPanel(mine, summaryText, publishState(), `#${pr.id}`); });
   }
 
   function togglePublish(open: boolean) {
@@ -1893,41 +1900,64 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     }
     publishing = true;
     publishNote = "";
+    publishDone = null;
     syncPublishButtons();
+    let result: PublishResult | null = null;
     try {
       if (summaryTimer) await saveSummary();
-      const result = await publishReview(pr.repo, pr.id, event, headSha);
-      changedOnGitHub = true;
-      mine = result.mine;
-      summaryText = mine.summary ?? "";
-      // Editors left open on what went out: a new comment given its id must not inherit one.
-      for (const key of [...edits.keys()]) {
-        if (!findRef(key) && !replyOf(key)) { edits.delete(key); errors.delete(key); }
-      }
-      publishNote = publishedNote(result);
-      indexComments();
-      layout();
-      // What GitHub accepted comes back as its own conversations.
-      await loadThreads();
+      result = await publishReview(pr.repo, pr.id, event, headSha);
     } catch (err) {
       publishNote = `<span class="pd-publish__error">${escHtml(errorMessage(err, "Could not publish the review."))}</span>`;
       // Refused for new commits: the reload notice shows at once.
       void checkHead();
     } finally {
+      // Done when GitHub answers: reloading its conversations is not part of the wait.
       publishing = false;
+    }
+    if (!result) {
       drawPanel();
       drawPublish();
+      return;
     }
+    mine = result.mine;
+    summaryText = mine.summary ?? "";
+    // Editors left open on what went out: a new comment given its id must not inherit one.
+    for (const key of [...edits.keys()]) {
+      if (!findRef(key) && !replyOf(key)) { edits.delete(key); errors.delete(key); }
+    }
+    if (result.published.length) {
+      publishDone = {
+        event,
+        reviews: result.published.map(r => ({ ...r, latest: r.commit.toLowerCase() === headSha.toLowerCase() })),
+      };
+    }
+    publishNote = failedNote(result);
+    indexComments();
+    layout();
+    drawPanel();
+    drawPublish();
+    if (publishDone) announce(publishDone);
+    // The list behind shows the PR's review state: brought up to date now, not on close.
+    if (result.published.length) {
+      changedOnGitHub = false;
+      void refreshDashboard("auto");
+    }
+    // What GitHub accepted comes back as its own conversations.
+    await loadThreads();
   }
 
-  function publishedNote(result: PublishResult): string {
-    const links = result.published.map(r => {
-      const label = r.commit.toLowerCase() === headSha.toLowerCase() ? "View your review" : `On ${escHtml(r.commit.slice(0, 7))}`;
-      return r.url.startsWith("https://") ? `<a class="pd-md-link" href="#" data-pd-link="${escHtml(r.url)}">${label}</a>` : label;
+  function announce(done: PublishDone) {
+    const url = (done.reviews.find(r => r.latest) ?? done.reviews[0])?.url ?? "";
+    showToast(`✓ ${verdictWords(done.event, `${pr.repo} #${pr.id}`).toast}`, {
+      tone: done.event === "REQUEST_CHANGES" ? "neutral" : "success",
+      action: url.startsWith("https://") ? { label: "Apri", run: () => void openExternal(url) } : undefined,
     });
-    const failed = result.failed.map(f =>
-      `<span class="pd-publish__error">${f.comments} not published — ${escHtml(f.error)} They stay here.</span>`);
-    return [links.length ? `Published on GitHub · ${links.join(" · ")}` : "", ...failed].filter(Boolean).join(" ");
+  }
+
+  /** What GitHub refused: those comments stay here, said so under the outcome. */
+  function failedNote(result: PublishResult): string {
+    return result.failed.map(f =>
+      `<span class="pd-publish__error">${f.comments} not published — ${escHtml(f.error)} They stay here.</span>`).join(" ");
   }
 
   // Two clicks, no dialog: a whole review is the one thing worth a second thought.
