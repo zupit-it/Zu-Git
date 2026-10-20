@@ -21,6 +21,31 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Sprint — pin a story, keep it at hand everywhere",
+        body: "The pin in a story's panel keeps it with you in every section, not just the Sprint tab. A switch in the top bar, with the story's key, shows and hides it: in the PR list, Status or Settings the panel docks on the right and the page makes room for it. Hiding it keeps it pinned; opening another story turns the switch off, and turning it back on returns to the pinned one. It stays until you unpin it or pin another — with <strong>Annulla</strong> if that was a slip. In the PR list, a click on a PR's <strong>Jira key</strong> now opens its story in the same panel, with status, assignee, checklist, description and comments, without leaving the list.",
+      },
+      {
+        title: "PR diff — the review's outcome is clear",
+        body: "Once GitHub has your review, the publish panel says what went out — <em>You approved #482 on GitHub</em>, with the commit and a link — instead of showing the buttons again. The top bar keeps the verdict (<strong>✓ Approved</strong>, <strong>Changes requested</strong>, <strong>Commented</strong>) until you write another review, and a toast confirms it. <em>Publishing…</em> ends as soon as GitHub answers, and the PR list behind refreshes right away instead of when you close the diff.",
+      },
+      {
+        title: "Zoom the whole app",
+        body: "<strong>⌘+</strong> and <strong>⌘−</strong> (Ctrl on Windows and Linux) zoom every section at once, from 50% to 200%, and <strong>⌘0</strong> goes back to 100%. A short notice at the top shows the level, with <strong>Ripristina 100%</strong> when it isn't 100%. ZuGit remembers the level on the next launch.",
+      },
+      {
+        title: "Jira — the scopes the Sprint tab needs",
+        body: "<strong>Settings → Jira</strong> now lists every scope a token with scopes needs, the Jira Software ones included (<code>read:board-scope:jira-software</code>, <code>read:sprint:jira-software</code> and the others). Without them the Sprint tab found no board and no sprint: if that happened to you, create a new token with the full list.",
+      },
+      {
+        title: "Fun — a lighter Tiny King",
+        body: "His sheets are WebP now instead of PNG: 12.9 MB down to 4.6 MB, with no difference to see. Character packs can use WebP sheets too (still images, not animated ones); PNG keeps working.",
+      },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
+      {
         title: "Fun — meme mode and the Tiny King",
         body: "A new <strong>Fun</strong> section in Settings turns on <strong>meme mode</strong>, and with it the <strong>Tiny King</strong>. He walks in from the right edge of your screen — over whatever you are working in, never taking a click — when one of your PRs is <strong>merged</strong>, its <strong>CI turns red</strong>, <strong>changes are asked</strong> on it or it gets <strong>new comments</strong>, and when a <strong>review asks for you</strong>. He arrives unaware, his face turns to the news — happy, angry, impatient — and his bubble types out which PR it is: who is waiting and since when, which checks failed. Several pieces of news come one after the other in a single visit, and he walks off in the mood of the last. Every so often he also comes knocking about what still waits on you: approved PRs not merged, changes to make, reviews to do. Settings → Fun sets how many times he acts, how long he stays and how often he reminds you; <strong>Try him out</strong> calls him on the spot. In the diff, meanwhile, the <strong>sad reviewer</strong> peeks over the comment you are writing, his eyes on your caret.",
         imgs: ["/assets/changelog/tiny-king.png"],
@@ -37,11 +62,6 @@ const VERSIONS: VersionBlock[] = [
         title: "CI status — check by check",
         body: "A PR's CI now shows as <strong>failing</strong> as soon as one check fails, even while others are still running; a check waiting for someone's action shows as <strong>Action required</strong>, and queued checks as <strong>running</strong>. GitHub spells these states in capitals, and ZuGit used to miss them, relying on the overall state alone.",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "Sprint — the whole sprint at a glance",
         body: "A new <strong>Sprint</strong> tab, there as soon as Jira is configured, shows the active sprint of your board on one screen: a pill per story with the <strong>face</strong> of whoever has it, the <strong>key</strong>, the <strong>points</strong> and a dot for its PR — green approved, amber changes requested or waiting, red CI failing. The columns are your Jira board's own; <strong>Persone</strong> turns them into one row per person with their open points, a click on a face in the head dims everyone else, and the button next to the views adds each story's title. The bar by the sprint's name compares the points closed with where a steady pace would be today, and the <strong>?</strong> explains every mark. <strong>Drag</strong> a story to another column to move it — the ones your workflow cannot reach are hatched — or, in <strong>Persone</strong>, onto someone else to reassign it; every move can be undone for a few seconds. ⌘-click (Ctrl-click) selects several stories at once, a right click offers the same actions. Jira's flag is shown as information, never as a block, under the name your team gives it — <em>In test</em>, say.",
