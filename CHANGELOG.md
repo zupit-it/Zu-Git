@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Tiny King: click him to open what he came about** — his window still lets clicks through, but
+  not over him and his bubble. With the cursor there, a button shows what a click opens:
+  **Apri ZuGit** brings ZuGit up on the PR list, scrolled to the PR's row and lit up a moment; for a
+  review to do, **Apri diff** opens its diff straight away. A merged PR opens on GitHub, a page about
+  several PRs opens the list, and a row hidden by the list's filters opens on its diff. Then he
+  takes his leave.
+
 ---
 
 ## [3.0.3] - 2026-10-20

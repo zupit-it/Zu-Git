@@ -21,6 +21,15 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Fun — click the Tiny King",
+        body: "With the cursor on him or his bubble, a button shows what a click opens. <strong>Apri ZuGit</strong> brings ZuGit up on the PR list, scrolled to the PR he is talking about and lit up a moment; for a review to do, <strong>Apri diff</strong> opens its diff straight away. A merged PR opens on GitHub, and a page about several PRs opens the list. Then he takes his leave. Everywhere else around him clicks still go to what is underneath.",
+      },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
+      {
         title: "Sprint — pin a story, keep it at hand everywhere",
         body: "The pin in a story's panel keeps it with you in every section, not just the Sprint tab. A switch in the top bar, with the story's key, shows and hides it: in the PR list, Status or Settings the panel docks on the right and the page makes room for it. Hiding it keeps it pinned; opening another story turns the switch off, and turning it back on returns to the pinned one. It stays until you unpin it or pin another — with <strong>Annulla</strong> if that was a slip. In the PR list, a click on a PR's <strong>Jira key</strong> now opens its story in the same panel, with status, assignee, checklist, description and comments, without leaving the list.",
       },
@@ -37,18 +46,9 @@ const VERSIONS: VersionBlock[] = [
         body: "<strong>Settings → Jira</strong> now lists every scope a token with scopes needs, the Jira Software ones included (<code>read:board-scope:jira-software</code>, <code>read:sprint:jira-software</code> and the others). Without them the Sprint tab found no board and no sprint: if that happened to you, create a new token with the full list.",
       },
       {
-        title: "Fun — click the Tiny King",
-        body: "With the cursor on him or his bubble, a button shows what a click opens. <strong>Apri ZuGit</strong> brings ZuGit up on the PR list, scrolled to the PR he is talking about and lit up a moment; for a review to do, <strong>Apri diff</strong> opens its diff straight away. A merged PR opens on GitHub, and a page about several PRs opens the list. Then he takes his leave. Everywhere else around him clicks still go to what is underneath.",
-      },
-      {
         title: "Fun — a lighter Tiny King",
         body: "His sheets are WebP now instead of PNG: 12.9 MB down to 4.6 MB, with no difference to see. Character packs can use WebP sheets too (still images, not animated ones); PNG keeps working.",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "Fun — meme mode and the Tiny King",
         body: "A new <strong>Fun</strong> section in Settings turns on <strong>meme mode</strong>, and with it the <strong>Tiny King</strong>. He walks in from the right edge of your screen — over whatever you are working in, never taking a click — when one of your PRs is <strong>merged</strong>, its <strong>CI turns red</strong>, <strong>changes are asked</strong> on it or it gets <strong>new comments</strong>, and when a <strong>review asks for you</strong>. He arrives unaware, his face turns to the news — happy, angry, impatient — and his bubble types out which PR it is: who is waiting and since when, which checks failed. Several pieces of news come one after the other in a single visit, and he walks off in the mood of the last. Every so often he also comes knocking about what still waits on you: approved PRs not merged, changes to make, reviews to do. Settings → Fun sets how many times he acts, how long he stays and how often he reminds you; <strong>Try him out</strong> calls him on the spot. In the diff, meanwhile, the <strong>sad reviewer</strong> peeks over the comment you are writing, his eyes on your caret.",
