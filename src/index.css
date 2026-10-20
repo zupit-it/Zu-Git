@@ -8699,6 +8699,19 @@ body.sp-is-resizing * { cursor: col-resize !important; user-select: none; }
 }
 .sp-toast.is-held .sp-toast-timer { animation-play-state: paused; }
 .sp-toast.is-leaving { opacity: 0; transform: translateY(6px); }
+/* Zoom level, shown while ⌘+ / ⌘− / ⌘0 change it */
+.zoom-pill {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  z-index: 400;
+  min-height: 34px;
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+  animation: none;
+}
+.zoom-pill:has([data-zoom-reset][hidden]) { padding-right: 14px; }
+.zoom-pill.is-leaving { transform: translate(-50%, -6px); }
 @keyframes sp-toast-in { from { opacity: 0; transform: translateY(8px); } }
 @keyframes sp-toast-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 

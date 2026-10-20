@@ -15,6 +15,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pinned one. It stays pinned until you unpin it or pin another (with **Annulla**).
 - **PR list: the Jira key opens the story** — a click on a PR's key opens its story in the side
   panel, with status, assignee, checklist, description and comments, without leaving the list.
+- **Zoom the whole app** — **⌘+** / **⌘−** (Ctrl on Windows and Linux) zoom every section at once,
+  from 50% to 200%, and **⌘0** goes back to 100%. A short notice at the top shows the level, with
+  **Ripristina 100%** when it isn't 100%. The level is kept on the next launch.
 
 ### Changed
 - **Tiny King: a third of the weight** — his sheets are lossy WebP now (quality 100) instead of PNG:

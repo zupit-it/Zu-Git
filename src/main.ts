@@ -30,6 +30,7 @@ import { installPetPackControls } from "./pet-pack-ui";
 import { openSprintView, refreshSprint, focusSprintSearch } from "./sprint";
 import { mountStoryDock, openStory } from "./sprint-dock";
 import { escHtml, avatarColor, loginInitials, errorMessage } from "./utils";
+import { installZoom } from "./zoom";
 
 window.addEventListener("DOMContentLoaded", () => {
   // ── Settings form ───────────────────────────────────────────────────────────
@@ -422,6 +423,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const isMac = navigator.platform.toUpperCase().includes("MAC");
   const kbdHint = document.querySelector<HTMLElement>("[data-search-kbd]");
   if (kbdHint) kbdHint.textContent = isMac ? "⌘F" : "Ctrl+F";
+  installZoom(isMac);
 
   document.addEventListener("keydown", (e) => {
     const mod = isMac ? e.metaKey : e.ctrlKey;
