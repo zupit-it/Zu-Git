@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.0.3] - 2026-10-20
+
 ### Added
 - **Sprint: pin a story** — the pin in a story's panel keeps it at hand from every section: a
   switch in the top bar (with the story's key) shows and hides it, in the PR list, Status or
