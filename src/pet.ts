@@ -6,9 +6,12 @@
 // a moment, idle, then walks back out in the mood of the last news; once he is
 // past the edge the window is closed. The acts are frontal and the walks in
 // profile, with nothing drawn between them: a short dissolve joins the two.
+// A click on him or his bubble brings ZuGit up on the PR the page is about,
+// its row in the list or, for a review to do, its diff; and he takes his leave.
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { PetPage } from "./pet-lines";
 import {
   PET_MOODS, checkManifest, isPetPlay, packFrom,
   type PetAnimation, type PetMood, type PetPack, type PetPlay,
@@ -56,6 +59,12 @@ let offset = 0;
 let running = false;
 /** The frame on the canvas, for a dissolve to start from. */
 let shown: { image: HTMLImageElement; frame: number } | null = null;
+/** Standing where he stops, not walking: only then is he there to be clicked. */
+let atRest = false;
+/** Clicked: the news he is on ends after the clip playing, without lingering. */
+let hurried = false;
+/** The bubble's page on screen, which a click opens. */
+let pageShown: PetPage | null = null;
 
 function sheet(name: string): Promise<HTMLImageElement | null> {
   let loaded = sheets.get(name);
@@ -122,7 +131,7 @@ async function playClip(name: string, plays = 1) {
   const image = await sheet(name);
   if (!image) return;
   const { durations } = pack.clips[name];
-  for (let play = 0; play < plays; play++) {
+  for (let play = 0; play < plays && (play === 0 || !hurried); play++) {
     for (let frame = 0; frame < durations.length; frame++) {
       draw(image, frame);
       await wait(durations[frame]);
@@ -165,6 +174,7 @@ async function enter() {
   // At rest on what would be the walk's frame 4: its stop starts from that frame.
   offset = 0;
   await playClip("walk_stop_neutral_left");
+  atRest = true;
 }
 
 /** His face turning to `mood`, still in profile, and held a moment. */
@@ -183,6 +193,7 @@ const exitMood = (mood: PetMood): PetMood =>
  *  in profile, its start, then its walk. */
 async function leave(feeling: PetMood) {
   const mood = exitMood(feeling);
+  atRest = false;
   await dissolveTo(`walk_start_${mood}`, 0);
   await playClip(`walk_start_${mood}`);
   await walk(`walk_${mood}`, 1, () => offset >= pack.walk.hidden);
@@ -196,7 +207,8 @@ const TYPE_MS = 22;
 const BADGES: Record<PetAnimation, string> = { idle: "👑", pr_merged: "🎉", ci_failed: "💥", review_wait: "🔔" };
 
 const part = (name: string) => bubble.querySelector(`.bubble-${name}`) as HTMLElement;
-const [badge, body, title, detail, note, pager] = ["badge", "body", "title", "detail", "note", "pager"].map(part);
+const [badge, body, title, detail, note, pager, actions] =
+  ["badge", "body", "title", "detail", "note", "pager", "actions"].map(part);
 const bar = bubble.querySelector(".bubble-bar i") as HTMLElement;
 /** Bumped by each new bubble: typing and page turns of an older one stop. */
 let speech = 0;
@@ -226,6 +238,8 @@ async function showPage(play: PetPlay, index: number, turn: number) {
     if (turn !== speech) return;
   }
   const page = play.pages[index];
+  pageShown = page;
+  showActions(page, play.animation === "pr_merged");
   bubble.classList.remove("is-typed");
   detail.textContent = page.detail ?? "";
   note.textContent = page.note ?? "";
@@ -235,10 +249,30 @@ async function showPage(play: PetPlay, index: number, turn: number) {
   if (turn === speech) bubble.classList.add("is-typed");
 }
 
+/** What ZuGit opens on a click: the PR's row in the list, or its diff. */
+type Opening = "row" | "diff";
+
+/** The bubble's buttons for `page`: where a click takes you, and for a review
+ *  to do its diff besides. A merged PR is no longer in the list: GitHub has it. */
+function showActions(page: PetPage, merged: boolean) {
+  const button = (label: string, open: Opening) => {
+    const element = document.createElement("button");
+    element.type = "button";
+    element.textContent = label;
+    element.dataset.open = open;
+    return element;
+  };
+  actions.replaceChildren(
+    button(merged && page.pr ? "Apri su GitHub ›" : "Apri ZuGit ›", "row"),
+    ...(page.pr && page.diff ? [button("Apri diff ›", "diff")] : []),
+  );
+}
+
 /** Shows `play`'s pages for `totalMs`, turning them evenly while the bar empties;
  *  without pages, takes the bubble away. */
 function say(play: PetPlay | null, totalMs = 0) {
   const turn = ++speech;
+  pageShown = null;
   if (!play?.pages.length) {
     bubble.classList.remove("is-shown");
     return;
@@ -282,6 +316,7 @@ async function run() {
   let mood: PetMood = "neutral";
   for (let next = queue.shift(), first = true; next; next = queue.shift(), first = false) {
     mood = PET_MOODS[next.animation];
+    hurried = false;
     // Only on arrival is he in profile: his face turns, then he faces the front.
     const reaction = first ? reactionOf(mood) : null;
     const arrivalMs = first ? (reaction ? sum(pack.clips[reaction].durations) + REACTION_HOLD_MS : 0) + DISSOLVE_MS : 0;
@@ -298,7 +333,9 @@ async function run() {
     if (first) await dissolveTo(next.animation, 0);
     await playClip(next.animation, next.cycles);
     // Acts end on the neutral pose, which idle starts from.
-    for (let breath = 0; breath < breaths && (breath < reading || !queue.length); breath++) await playClip("idle");
+    for (let breath = 0; breath < breaths && !hurried && (breath < reading || !queue.length); breath++) {
+      await playClip("idle");
+    }
   }
   say(null);
   await leave(mood);
@@ -324,6 +361,65 @@ function playAll(plays: unknown): boolean {
   valid.forEach(play);
   return valid.length > 0;
 }
+
+// ── A click on him ────────────────────────────────────────────────────────────
+// His window lets clicks through to what is under it, so it gets no mouse
+// events: the page asks where the cursor is, and takes clicks only while it is
+// on him or his bubble.
+
+/** How often the page asks where the cursor is. */
+const HOVER_POLL_MS = 60;
+/** The canvas' transparent margins around him, as shares of its size. */
+const KING_INSET = { x: 0.18, top: 0.12 };
+let hovered = false;
+
+const within = (r: DOMRect, x: number, y: number) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+
+function overHim(x: number, y: number): boolean {
+  if (bubble.classList.contains("is-shown")) {
+    // The buttons stick out over the bubble's top edge.
+    if (within(bubble.getBoundingClientRect(), x, y) || within(actions.getBoundingClientRect(), x, y)) return true;
+  }
+  if (!atRest) return false;
+  const r = canvas.getBoundingClientRect();
+  const dx = r.width * KING_INSET.x;
+  return within(new DOMRect(r.left + dx, r.top + r.height * KING_INSET.top, r.width - 2 * dx, r.height * (1 - KING_INSET.top)), x, y);
+}
+
+async function hover() {
+  const cursor = await invoke<[number, number] | null>("pet_cursor").catch(() => null);
+  const over = !hurried && !!cursor && overHim(...cursor);
+  // Which button the cursor is on: CSS :hover is not to be trusted in a window
+  // that is never the active one.
+  for (const button of actions.querySelectorAll("button")) {
+    button.classList.toggle("is-hot", over && !!cursor && within(button.getBoundingClientRect(), ...cursor));
+  }
+  if (over !== hovered) {
+    hovered = over;
+    document.body.classList.toggle("is-hovered", over);
+    await invoke("pet_clickable", { on: over }).catch(() => {});
+  }
+  setTimeout(() => void hover(), HOVER_POLL_MS);
+}
+void hover();
+
+function clicked(open: Opening) {
+  if (hurried || !hovered) return;
+  const pr = pageShown?.pr ?? null;
+  void invoke("pet_open", { pr, diff: open === "diff" && !!pageShown?.diff }).catch(() => {});
+  // Whatever else he had come about is in ZuGit too.
+  queue.length = 0;
+  hurried = true;
+  say(null);
+}
+actions.addEventListener("click", (event) => {
+  const open = (event.target as Element).closest<HTMLElement>("[data-open]")?.dataset.open;
+  if (!open) return;
+  event.stopPropagation();
+  clicked(open === "diff" ? "diff" : "row");
+});
+bubble.addEventListener("click", () => clicked("row"));
+canvas.addEventListener("click", () => clicked("row"));
 
 void listen<unknown>("pet-play", (event) => void playAll(event.payload));
 // Opened without being told what to play (a browser, say): a plain visit.

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { listen } from "@tauri-apps/api/event";
 import { maybeShowChangelog, showChangelog } from "./changelog";
 import { state } from "./state";
 import {
@@ -26,6 +27,7 @@ import {
 import { initSettingsSections } from "./settings-sections";
 import { installSadReviewer } from "./meme";
 import { installPetReminder, petTry } from "./pet-triggers";
+import type { PetPrLink } from "./pet-lines";
 import { installPetPackControls } from "./pet-pack-ui";
 import { openSprintView, refreshSprint, focusSprintSearch } from "./sprint";
 import { mountStoryDock, openStory } from "./sprint-dock";
@@ -49,6 +51,24 @@ window.addEventListener("DOMContentLoaded", () => {
   mountStoryDock();
   installSadReviewer();
   installPetReminder();
+  // A click on the Tiny King brings ZuGit up (pet.rs): on the PR his bubble was
+  // about, its row in the list lit up a moment, or its diff when asked (a review
+  // to do) or when the list's filters hide its row; on GitHub once gone
+  // (merged); on the PR list for a page about several, unless he was being
+  // tried out.
+  void listen<{ pr: PetPrLink | null; diff: boolean }>("pet-open", ({ payload: { pr: link, diff } }) => {
+    if (!link) {
+      if (state.currentView !== "settings") setView("list");
+      return;
+    }
+    const pr = state.currentDashboard?.prs.find((p) => p.repo === link.repo && p.id === link.id);
+    if (!pr) { void openExternal(`https://github.com/${link.repo}/pull/${link.id}`); return; }
+    if (!diff) {
+      setView("list");
+      if (flashPrRow(pr.repo, pr.id)) return;
+    }
+    void openPrDiff(pr);
+  });
   installPetPackControls();
   document.querySelectorAll<HTMLButtonElement>("[data-pet-try]").forEach((button) =>
     button.addEventListener("click", () => {
@@ -647,4 +667,18 @@ function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
     };
     document.addEventListener("click", _arvOutsideListener, { capture: true });
   }, 0);
+}
+
+/** Scrolls the list to a PR's row and lights it up a moment; false when the
+ *  list's filters hide it. */
+function flashPrRow(repo: string, id: number): boolean {
+  const row = document.querySelector<HTMLElement>(`[data-pr-id="${CSS.escape(`${repo}/${id}`)}"]`);
+  if (!row) return false;
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  row.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+  row.classList.remove("pr-row--flash");
+  void row.offsetWidth;
+  row.classList.add("pr-row--flash");
+  row.addEventListener("animationend", () => row.classList.remove("pr-row--flash"), { once: true });
+  return true;
 }

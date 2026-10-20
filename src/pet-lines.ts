@@ -11,7 +11,14 @@ export interface PetPage {
   detail?: string;
   /** Who, since when, which checks: small print under the rest. */
   note?: string;
+  /** The PR the page is about, opened by a click on him; none on a count. */
+  pr?: PetPrLink;
+  /** A review to do: his bubble offers the PR's diff besides its row. */
+  diff?: boolean;
 }
+
+/** Enough of a PR to find it again. */
+export type PetPrLink = Pick<PullRequestSummary, "repo" | "id">;
 
 /** Picks one of `count` lines. */
 export type Choose = (count: number) => number;
@@ -105,6 +112,8 @@ function line(pool: string[], choose: Choose, vars: Record<string, string | numb
   return template.replace(/\{(\w+)\}/g, (_, name: string) => String(vars[name] ?? ""));
 }
 
+const link = ({ repo, id }: PetPrLink): PetPrLink => ({ repo, id });
+
 /** `zugit#42`: the repo without its owner, enough to tell PRs apart. */
 export function prRef(pr: Pick<PetPr, "repo" | "id">): string {
   return `${pr.repo.split("/").pop()}#${pr.id}`;
@@ -138,6 +147,7 @@ export function mergedPages(prs: PetPr[], choose: Choose = chooseAtRandom): PetP
   return onePerPr(prs, LINES.mergedMany, choose, (pr) => ({
     title: line(LINES.merged, choose, { ref: prRef(pr) }),
     detail: pr.title,
+    pr: link(pr),
   }));
 }
 
@@ -149,6 +159,7 @@ export function ciFailedPages(prs: PetPr[], choose: Choose = chooseAtRandom): Pe
     return {
       title: line(LINES.ciFailed, choose, { ref: prRef(pr) }),
       detail: pr.title,
+      pr: link(pr),
       note: checks.length ? `${checks.length === 1 ? "Check fallito" : "Check falliti"}: ${named}${more}` : undefined,
     };
   });
@@ -159,6 +170,7 @@ export function changesAskedPages(items: PetPrBy[], choose: Choose = chooseAtRan
   return onePerPr(items, LINES.changesAskedMany, choose, ({ pr, by }) => ({
     title: line(LINES.changesAsked, choose, { ref: prRef(pr), who: people(by) }),
     detail: pr.title,
+    pr: link(pr),
   }));
 }
 
@@ -167,6 +179,7 @@ export function commentedPages(items: PetPrBy[], choose: Choose = chooseAtRandom
   return onePerPr(items, LINES.commentedMany, choose, ({ pr, by, threads = 0 }) => ({
     title: line(LINES.commented, choose, { ref: prRef(pr), who: people(by) }),
     detail: pr.title,
+    pr: link(pr),
     note: threads > 0 ? (threads === 1 ? "1 nuova conversazione da risolvere" : `${threads} nuove conversazioni da risolvere`) : undefined,
   }));
 }
@@ -175,7 +188,9 @@ function reviewPage(pr: PetPr, pool: string[], choose: Choose, now: Date): PetPa
   return {
     title: line(pool, choose, { ref: prRef(pr) }),
     detail: pr.title,
+    pr: link(pr),
     note: `${pr.author} ti aspetta · aperta ${since(pr.createdAtIso, now)}`,
+    diff: true,
   };
 }
 
@@ -200,11 +215,13 @@ export function reminderPages(
     ...ready.map((pr) => ({
       title: line(LINES.readyToMerge, choose, { ref: prRef(pr) }),
       detail: pr.title,
+      pr: link(pr),
       note: `Approvata, ferma ${since(pr.updatedAtIso, now)}`,
     })),
     ...changes.map(({ pr, by }) => ({
       title: line(LINES.changesStillWaiting, choose, { ref: prRef(pr) }),
       detail: pr.title,
+      pr: link(pr),
       note: `Chieste da ${people(by)}`,
     })),
     ...reviews.map((pr) => reviewPage(pr, LINES.reviewStillWaiting, choose, now)),

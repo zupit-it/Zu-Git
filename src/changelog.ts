@@ -37,6 +37,10 @@ const VERSIONS: VersionBlock[] = [
         body: "<strong>Settings → Jira</strong> now lists every scope a token with scopes needs, the Jira Software ones included (<code>read:board-scope:jira-software</code>, <code>read:sprint:jira-software</code> and the others). Without them the Sprint tab found no board and no sprint: if that happened to you, create a new token with the full list.",
       },
       {
+        title: "Fun — click the Tiny King",
+        body: "With the cursor on him or his bubble, a button shows what a click opens. <strong>Apri ZuGit</strong> brings ZuGit up on the PR list, scrolled to the PR he is talking about and lit up a moment; for a review to do, <strong>Apri diff</strong> opens its diff straight away. A merged PR opens on GitHub, and a page about several PRs opens the list. Then he takes his leave. Everywhere else around him clicks still go to what is underneath.",
+      },
+      {
         title: "Fun — a lighter Tiny King",
         body: "His sheets are WebP now instead of PNG: 12.9 MB down to 4.6 MB, with no difference to see. Character packs can use WebP sheets too (still images, not animated ones); PNG keeps working.",
       },

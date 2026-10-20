@@ -152,10 +152,12 @@ export function petTry(animation: Exclude<PetAnimation, "idle">, form: HTMLFormE
   const field = (name: string) => (form?.elements.namedItem(name) as HTMLInputElement | null)?.value;
   const settings = normalizeSettings({ petCycles: field("petCycles"), petLingerSeconds: field("petLingerSeconds") });
   const real = animation === "review_wait" && state.currentDashboard ? petReminder(state.currentDashboard) : [];
+  // The sample PR is not real: a click on him then only brings ZuGit up.
+  const sample = (pages: PetPage[]) => pages.map(({ pr: _, ...page }) => page);
   const pages =
-    animation === "pr_merged" ? mergedPages([samplePr()])
-    : animation === "ci_failed" ? ciFailedPages([samplePr({ failedChecks: ["build", "lint"] })])
+    animation === "pr_merged" ? sample(mergedPages([samplePr()]))
+    : animation === "ci_failed" ? sample(ciFailedPages([samplePr({ failedChecks: ["build", "lint"] })]))
     : real.length ? real
-    : reviewAskedPages([samplePr()], new Date());
+    : sample(reviewAskedPages([samplePr()], new Date()));
   playPet([{ animation, pages }], { cycles: settings.petCycles, lingerSeconds: settings.petLingerSeconds });
 }

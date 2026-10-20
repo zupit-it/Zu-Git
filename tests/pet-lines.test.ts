@@ -45,7 +45,7 @@ test("waiting times read in Italian, rounded down", () => {
 
 test("a merge names the PR, with its title under it", () => {
   assert.deepEqual(mergedPages([pr(42)], first), [
-    { title: "Evviva! zugit#42 entra nel regno", detail: "PR 42" },
+    { title: "Evviva! zugit#42 entra nel regno", detail: "PR 42", pr: { repo: "zupit-it/zugit", id: 42 } },
   ]);
   assert.deepEqual(mergedPages([], first), []);
 });
@@ -73,7 +73,7 @@ test("a red CI names the failed checks, the first three and a count of the rest"
 
 test("a new review says who waits and since when", () => {
   assert.deepEqual(reviewAskedPages([pr(9)], now, first), [
-    { title: "Toc toc! zugit#9 chiede udienza", detail: "PR 9", note: "marco ti aspetta · aperta da 3 giorni" },
+    { title: "Toc toc! zugit#9 chiede udienza", detail: "PR 9", note: "marco ti aspetta · aperta da 3 giorni", pr: { repo: "zupit-it/zugit", id: 9 }, diff: true },
   ]);
 });
 
@@ -81,6 +81,8 @@ test("several new reviews: a count first, then the first few", () => {
   const pages = reviewAskedPages([pr(1), pr(2), pr(3), pr(4), pr(5)], now, first);
   assert.equal(pages.length, MAX_PAGES);
   assert.equal(pages[0].title, "5 sudditi chiedono udienza");
+  // A count is about no PR in particular: a click on it opens none.
+  assert.equal(pages[0].pr, undefined);
   assert.equal(pages[1].title, "Toc toc! zugit#1 chiede udienza");
   assert.deepEqual(reviewAskedPages([], now, first), []);
 });
@@ -104,7 +106,7 @@ test("a reminder about one thing is just that thing", () => {
 test("the reminder counts PRs to fix between those to merge and the reviews", () => {
   const pages = reminderPages({ ready: [pr(1)], changes: [{ pr: pr(2), by: ["luca"] }], reviews: [pr(3)] }, now, first);
   assert.equal(pages[0].title, "Messere, ti aspettano 1 PR da mergiare, 1 PR da correggere e 1 review");
-  assert.deepEqual(pages[2], { title: "zugit#2 aspetta ancora le tue modifiche", detail: "PR 2", note: "Chieste da luca" });
+  assert.deepEqual(pages[2], { title: "zugit#2 aspetta ancora le tue modifiche", detail: "PR 2", note: "Chieste da luca", pr: { repo: "zupit-it/zugit", id: 2 } });
 });
 
 test("people are named, two at most, then counted", () => {
@@ -116,7 +118,7 @@ test("people are named, two at most, then counted", () => {
 
 test("changes asked name who asked them", () => {
   assert.deepEqual(changesAskedPages([{ pr: pr(5), by: ["marco", "luca"] }], first), [
-    { title: "Sventura! Modifiche chieste su zugit#5 da marco e luca", detail: "PR 5" },
+    { title: "Sventura! Modifiche chieste su zugit#5 da marco e luca", detail: "PR 5", pr: { repo: "zupit-it/zugit", id: 5 } },
   ]);
   assert.equal(changesAskedPages([{ pr: pr(5), by: ["a"] }, { pr: pr(6), by: ["b"] }], first)[0].title,
     "Sventura! Modifiche chieste su 2 PR");
@@ -124,7 +126,7 @@ test("changes asked name who asked them", () => {
 
 test("new comments say who, and how many conversations to resolve", () => {
   assert.deepEqual(commentedPages([{ pr: pr(8), by: ["anna"], threads: 2 }], first), [
-    { title: "Nuovi commenti su zugit#8 da anna", detail: "PR 8", note: "2 nuove conversazioni da risolvere" },
+    { title: "Nuovi commenti su zugit#8 da anna", detail: "PR 8", note: "2 nuove conversazioni da risolvere", pr: { repo: "zupit-it/zugit", id: 8 } },
   ]);
   assert.equal(commentedPages([{ pr: pr(8), by: [], threads: 1 }], first)[0].note, "1 nuova conversazione da risolvere");
   assert.equal(commentedPages([{ pr: pr(8), by: ["anna"] }], first)[0].note, undefined);

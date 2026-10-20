@@ -2249,6 +2249,18 @@ body[data-view]:not([data-view="list"]) .rlb { display: none; }
 
 .pr-row:hover .pr-row-bar { background: var(--accent); }
 
+/* The row the Tiny King pointed to (a click on him): lit up, then fading. */
+.pr-row--flash { animation: pr-row-flash 2.6s ease-out; }
+.pr-row--flash .pr-row-bar { animation: pr-row-flash-bar 2.6s ease-out; }
+@keyframes pr-row-flash {
+  0%, 45% { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent-bd); }
+  100% { background: var(--surface); box-shadow: inset 0 0 0 1.5px transparent; }
+}
+@keyframes pr-row-flash-bar {
+  0%, 60% { background: var(--accent); width: 3px; }
+  100% { background: transparent; width: 2px; }
+}
+
 /* Merge-queue automation: permanent (not just hover) accent on the left bar
    when a PR is blocking its queue with a real conflict. */
 .pr-row--queue-blocked .pr-row-bar { background: var(--fail); }
