@@ -19,7 +19,8 @@ import {
   fileInCategory, categoryById, openCategoryMenu, openAssignMenu, openStatusMenu, openInJira, columnCategory,
   hidden, createCategory, standupClock, setStandupTime, flagMeaning, openFlagMenu,
 } from "./sprint-store";
-import { applyPanelWidth, closePanel, forgetDetails, initPanelEvents, openCategory, openIssue, renderPanel } from "./sprint-panel";
+import { closePanel, forgetDetails, openCategory, openIssue, setPanelStepper } from "./sprint-panel";
+import { placePanel } from "./sprint-dock";
 
 /** Data older than this is read again when the tab is opened. */
 const STALE_MS = 2 * 60_000;
@@ -89,18 +90,18 @@ function init() {
         <span class="sr-only">Carico lo sprint…</span>
       </div>
     </div>
-    <div class="sp-main">
+    <div class="sp-main" data-sp-main>
       <div class="sp-standup" data-sp-standup hidden></div>
       <div class="sp-scroll" data-sp-scroll><div class="sp-board" data-sp-board></div></div>
-      <aside class="sp-panel" data-sp-panel aria-hidden="true" aria-label="Dettaglio"></aside>
+      <!-- The story panel (sprint-dock.ts) comes here while this tab is open. -->
     </div>
     <div class="sp-selbar" data-sp-selbar aria-live="polite"></div>`;
 
   onRender(render);
-  applyPanelWidth();
-  initPanelEvents(step);
+  setPanelStepper(step);
   bindEvents(el);
   render();
+  placePanel();
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -111,7 +112,6 @@ function render() {
   renderStandup();
   renderBoard();
   renderSelbar();
-  renderPanel();
 }
 
 function renderHead() {
@@ -1092,23 +1092,6 @@ function bindEvents(el: HTMLElement) {
     if (card && !card.contains(event.relatedTarget as Node | null)) hideTip();
   });
   el.querySelector("[data-sp-scroll]")?.addEventListener("scroll", hideTip, { passive: true });
-
-  // A Jira avatar that does not load becomes initials (inline handlers are
-  // not allowed by the CSP, so this listens for the error on the way down).
-  document.addEventListener(
-    "error",
-    (event) => {
-      const img = event.target;
-      if (!(img instanceof HTMLImageElement) || !img.dataset.spInitials) return;
-      const span = document.createElement("span");
-      span.className = img.className;
-      span.setAttribute("style", img.getAttribute("style") ?? "");
-      span.setAttribute("aria-hidden", "true");
-      span.textContent = img.dataset.spInitials;
-      img.replaceWith(span);
-    },
-    true,
-  );
 
   document.addEventListener("keydown", onKeyDown);
 

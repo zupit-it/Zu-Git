@@ -44,6 +44,13 @@
 
         <div class="toolbar-spacer"></div>
 
+        <!-- The pinned story: shows and hides it from any view (sprint-dock.ts). -->
+        <button class="pin-switch" data-pin-switch type="button" role="switch" aria-checked="false" hidden>
+          <svg class="pin-switch__icon" width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 1.5h4M5.6 1.5v3.8L3.5 7.6v1h7v-1L8.4 5.3V1.5M7 8.6v4"/></svg>
+          <span class="pin-switch__key" data-pin-switch-key></span>
+          <span class="pin-switch__track" aria-hidden="true"><span class="pin-switch__thumb"></span></span>
+        </button>
+
         <!-- sync status + refresh -->
         <div class="sync-status" data-sync-status>
           <span class="sync-dot-wrap">
@@ -88,6 +95,8 @@
       <div class="rlb" data-reviewer-load hidden></div>
 
       <!-- ── Main content ───────────────────────────────────── -->
+      <!-- Content and, outside the Sprint tab, the story panel docked on its right (sprint-dock.ts). -->
+      <div class="app-body" data-app-body>
       <div class="app-content">
 
         <!-- Status view -->
@@ -879,6 +888,7 @@
         </section>
 
       </div><!-- /.app-content -->
+      </div><!-- /.app-body -->
 
       <!-- Sticky settings save bar -->
       <div class="settings-save-bar" data-save-bar hidden>

@@ -69,6 +69,9 @@ export const state = {
   togglDayStart: defaultSettings.togglDayStart,
   togglDayEnd: defaultSettings.togglDayEnd,
   togglSlotMinutes: defaultSettings.togglSlotMinutes,
+  /** URL, email and token are all set: the Sprint tab and the story panel work. */
+  jiraReady: false,
+  jiraBaseUrl: "",
 
   // ── Tiny King (meme mode) ─────────────────────────────────────────────────
   petCycles: defaultSettings.petCycles,

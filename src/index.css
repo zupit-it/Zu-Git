@@ -101,10 +101,19 @@ html, body {
   overflow: hidden;
 }
 
+/* Content and, outside the Sprint tab, the story panel docked on its right. */
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .app-content {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -160,6 +169,50 @@ html, body {
   background: var(--border);
   flex-shrink: 0;
 }
+
+/* ── Pinned story switch ──────────────────────────────────── */
+.pin-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 5px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+.pin-switch[hidden] { display: none; }
+.pin-switch:hover { background: var(--surface-alt); border-color: var(--border-strong); }
+.pin-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pin-switch__icon { flex-shrink: 0; color: var(--ink-muted); }
+.pin-switch__key { font: 600 11.5px/1 var(--font-mono); letter-spacing: -0.1px; white-space: nowrap; }
+.pin-switch__track {
+  position: relative;
+  width: 26px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 140ms;
+}
+.pin-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(21, 22, 26, 0.2);
+  transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.pin-switch.is-on { border-color: var(--accent-bd); background: var(--accent-soft); color: var(--accent-ink); }
+.pin-switch.is-on .pin-switch__icon { color: var(--accent); }
+.pin-switch.is-on .pin-switch__track { background: var(--accent); }
+.pin-switch.is-on .pin-switch__thumb { transform: translateX(11px); }
 
 /* ── Page nav ─────────────────────────────────────────────── */
 .page-nav {
@@ -2329,6 +2382,18 @@ body[data-view]:not([data-view="list"]) .rlb { display: none; }
   font-size: 10.5px;
   letter-spacing: 0;
 }
+
+/* The key of a PR's story: opens it in the side panel. */
+.chip-key-open {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+}
+.chip-key-open:hover .chip { border-color: var(--accent-bd); filter: brightness(0.97); }
+.chip-key-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .diffstat {
   display: inline-flex;
@@ -7928,6 +7993,25 @@ body.sp-is-dragging * { cursor: grabbing !important; user-select: none; }
   transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 200ms;
 }
 .sp-panel.is-open { transform: none; visibility: visible; transition-delay: 0s; }
+.sp-panel { --sp-panel-cur: min(max(var(--sp-panel-w, 460px), 360px), 90vw); }
+
+/* Outside the Sprint tab the panel docks: the content makes room for it. */
+.app-body > .sp-panel {
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  flex-shrink: 0;
+  box-shadow: none;
+  transform: none;
+  transition: none;
+}
+.app-body > .sp-panel:not(.is-open) { display: none; }
+.app-body > .sp-panel.is-open { animation: sp-dock-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes sp-dock-in { from { opacity: 0; transform: translateX(24px); } }
+
+.sp-pin.is-pinned { background: var(--accent-soft); color: var(--accent); }
+.sp-pin.is-pinned:hover { background: var(--accent-bd); color: var(--accent-ink); }
 
 /* Drag handle on the panel's left edge: a wide hit area, a thin line. */
 .sp-resize {

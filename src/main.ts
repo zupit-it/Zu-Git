@@ -28,6 +28,7 @@ import { installSadReviewer } from "./meme";
 import { installPetReminder, petTry } from "./pet-triggers";
 import { installPetPackControls } from "./pet-pack-ui";
 import { openSprintView, refreshSprint, focusSprintSearch } from "./sprint";
+import { mountStoryDock, openStory } from "./sprint-dock";
 import { escHtml, avatarColor, loginInitials, errorMessage } from "./utils";
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -44,6 +45,7 @@ window.addEventListener("DOMContentLoaded", () => {
     .querySelector<HTMLButtonElement>("[data-discard-button]")
     ?.addEventListener("click", () => setSettingsDirtyState(false));
   initSettingsSections();
+  mountStoryDock();
   installSadReviewer();
   installPetReminder();
   installPetPackControls();
@@ -323,6 +325,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const prButton = target.closest<HTMLElement>("[data-pr-link]");
     const prUrl = prButton?.dataset.prLink;
     if (prUrl) { void openExternal(prUrl); return; }
+
+    const storyKey = target.closest<HTMLElement>("[data-story-open]")?.dataset.storyOpen;
+    if (storyKey) { openStory(storyKey); return; }
 
     const jiraButton = target.closest<HTMLElement>("[data-jira-link]");
     const jiraUrl = jiraButton?.dataset.jiraLink;

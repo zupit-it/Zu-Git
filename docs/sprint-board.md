@@ -45,6 +45,22 @@ writes), the description and comments (ADF rendered by `adf.ts`: every text esca
 http(s) and mailto and opened in the browser), the attachments, sub-tasks, and a comment box (⌘↵).
 ↑/↓ or j/k step through the board's stories; Esc closes.
 
+### Pinned story and other views
+
+The pin in the panel's head pins the story: one at a time, remembered across restarts
+(`localStorage`). A switch with its key then appears in the app's top bar and shows or hides it from
+any view. The switch reads on only while the pinned story is the one on screen: opening another story
+(from the board, a category or the PR list) turns it off, and turning it on returns to the pinned
+one. Hiding it (the switch, ✕, Esc) keeps it pinned; it stays until unpinned from the panel or
+replaced by pinning another (the toast offers **Annulla**).
+
+The panel is one element that moves (`sprint-dock.ts`): in the Sprint tab it lies over the board;
+in the other views it docks on the right and the content makes room for it. Changing view keeps the
+pinned story on screen and closes anything else. In the PR list, a PR's Jira key opens its story there.
+Opened away from the board, the panel reads what it needs itself — the issue by key, the categories,
+and the board in the background for the points field — so it works before the Sprint tab is ever
+opened; ↑/↓ through the board's stories only show in the Sprint tab.
+
 The panel's left edge drags to resize it (← / → when focused, double click back to 460 px). The
 width chosen is remembered as it is (`localStorage`); CSS shows `min(width, 90vw)` and never less
 than 360 px, so a wide panel set on a big screen shrinks on a laptop's and comes back on the big one.
@@ -144,5 +160,6 @@ Esc leaves the mode.
 | `src/sprint-store.ts` | State, loading, optimistic writes with undo, shared menus |
 | `src/sprint.ts` | Head, standup strip, board, drag and drop, keyboard |
 | `src/sprint-panel.ts` | Story detail, attachments and category list |
+| `src/sprint-dock.ts` | Panel placement across views, pinned story switch |
 | `src/sprint-lightbox.ts` | Full-size view of a story's pictures |
 | `src/sprint-ui.ts` | Popover menu and toasts |

@@ -28,6 +28,7 @@ const PREFS = {
   standupOpen: "zugit:sprintStandupOpen",
   panelWidth: "zugit:sprintPanelWidth",
   standupTime: "zugit:sprintStandupTime",
+  pinned: "zugit:sprintPinned",
 };
 
 function readPref(key: string): string | null {
@@ -69,6 +70,9 @@ export const sp = {
   categories: [] as M.SprintCategory[],
   categoriesLoaded: false,
   panel: null as PanelState | null,
+  /** The story pinned for quick access from any section: the topbar switch
+   *  shows and hides it. It stays pinned until unpinned or replaced. */
+  pinned: readPref(PREFS.pinned),
   /** Category stories that are not in the sprint, read when their panel opens. */
   outside: new Map<string, M.SprintIssue>(),
   standupEvents: null as M.ChangeEvent[] | null,
@@ -150,8 +154,29 @@ export function isMine(issue: M.SprintIssue): boolean {
 }
 
 export function browseUrl(key: string): string {
-  const site = sp.data?.siteUrl || "";
+  // The board's site once read; the settings' URL when only the panel is in use.
+  const site = sp.data?.siteUrl || state.jiraBaseUrl;
   return `${site}/browse/${encodeURIComponent(key)}`;
+}
+
+/** Pins the story (replacing the one pinned before), or unpins it. */
+export function togglePin(key: string) {
+  const before = sp.pinned;
+  sp.pinned = before === key ? null : key;
+  writePref("pinned", sp.pinned);
+  rerender();
+  if (before && sp.pinned) {
+    showToast(`${key} fissata al posto di ${before}`, {
+      action: {
+        label: "Annulla",
+        run: () => {
+          sp.pinned = before;
+          writePref("pinned", before);
+          rerender();
+        },
+      },
+    });
+  }
 }
 
 export function openInJira(key: string) {
@@ -203,6 +228,7 @@ export const ICON = {
   undo: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2 1.5 4.5 4 7"/><path d="M1.5 4.5H7a3 3 0 0 1 0 6H5"/></svg>`,
   flag: `<svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5v9.5H1.5V1h7.2l-1 2.5 1 2.5H2.5z"/></svg>`,
   plus: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 2v8M2 6h8"/></svg>`,
+  pin: `<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 1.5h4M5.6 1.5v3.8L3.5 7.6v1h7v-1L8.4 5.3V1.5M7 8.6v4"/></svg>`,
   refresh: `<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7a5 5 0 1 1-1.5-3.5M12 2v3h-3"/></svg>`,
 };
 

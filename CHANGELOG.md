@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Sprint: pin a story** — the pin in a story's panel keeps it at hand from every section: a
+  switch in the top bar (with the story's key) shows and hides it, in the PR list, Status or
+  Settings too, where the panel docks on the right and the page makes room for it. Hiding it keeps
+  it pinned; opening another story turns the switch off, and turning it back on returns to the
+  pinned one. It stays pinned until you unpin it or pin another (with **Annulla**).
+- **PR list: the Jira key opens the story** — a click on a PR's key opens its story in the side
+  panel, with status, assignee, checklist, description and comments, without leaving the list.
+
 ### Changed
 - **Tiny King: a third of the weight** — his sheets are lossy WebP now (quality 100) instead of PNG:
   12.9 MB down to 4.6 MB, with no difference to see. Same manifest, same cells, same timings.

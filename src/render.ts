@@ -76,6 +76,8 @@ export function setView(view: AppView) {
   });
 
   renderToolbarRepoFilters(state.currentDashboard);
+  // The story panel follows the user across views (see `sprint-dock.ts`).
+  window.dispatchEvent(new Event("zugit:view"));
 }
 
 // ── List loading indicator ────────────────────────────────────────────────────
@@ -226,9 +228,13 @@ export function renderSettings(values: SettingsFormValues) {
   if (!state.staleBranchesEnabled && state.currentView === "stale") setView("list");
   // The sprint board only needs Jira.
   const jiraReady = values.jiraBaseUrl.trim() !== "" && values.jiraEmail.trim() !== "" && values.jiraToken.trim() !== "";
+  state.jiraReady = jiraReady;
+  state.jiraBaseUrl = values.jiraBaseUrl.trim().replace(/\/+$/, "");
   const sprintTab = document.querySelector<HTMLElement>('[data-view-tab="sprint"]');
   if (sprintTab) sprintTab.hidden = !jiraReady;
   if (!jiraReady && state.currentView === "sprint") setView("list");
+  // The pinned story's switch follows Jira being configured.
+  window.dispatchEvent(new Event("zugit:settings"));
   void refreshGoogleStatus();
   syncSettingsSections();
   openUnconfiguredSections();
@@ -489,6 +495,11 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
     : pr.jiraKey
       ? chip("accent chip-key", pr.jiraKey, SVG.gitpr)
       : "";
+  // With Jira set up, the key opens the story in the side panel (sprint-dock.ts).
+  const storyKey = pr.jiraKey && state.jiraReady ? escHtml(pr.jiraKey) : "";
+  const keyCell = storyKey
+    ? `<button class="chip-key-open" data-story-open="${storyKey}" type="button" title="Apri ${storyKey} nel pannello laterale">${keyChip}</button>`
+    : keyChip;
 
   // Author / identity chip
   const dotClass = isDraft ? "chip-dot chip-dot--mute" : "chip-dot";
@@ -564,7 +575,7 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
       <div class="pr-row-bar"></div>
       <div style="min-width:0">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-          ${keyChip}${priorityIcon}${multiReleaseBadge}
+          ${keyCell}${priorityIcon}${multiReleaseBadge}
           <span style="font-size:13.5px;font-weight:${titleWeight};color:${titleColor};letter-spacing:-0.1px;line-height:1.3">${escHtml(pr.title)}</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:${pr.jiraSummary ? "6" : "0"}px">

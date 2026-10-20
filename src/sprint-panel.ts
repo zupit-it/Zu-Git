@@ -2,6 +2,8 @@
  * The Sprint tab's side panel: a story's detail (fields, PRs, checklist,
  * description, sub-tasks, comments) or the stories of a personal category.
  * One panel, two contents — opening a story from a category keeps a way back.
+ * A story also opens from other views (see `sprint-dock.ts`): the panel then
+ * reads what it needs itself, without the Sprint tab having been opened.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -11,14 +13,14 @@ import { openPrDiff } from "./pr-diff";
 import { adfToHtml, type MediaRef } from "./adf";
 import { closeLightbox, openLightbox, type LightboxItem } from "./sprint-lightbox";
 import * as M from "./sprint-model";
-import type { ChecklistItem } from "./state";
+import { state, type ChecklistItem } from "./state";
 import type { PullRequestSummary } from "./shared/pr-model";
 import { MOD_KEY, openMenu, showToast } from "./sprint-ui";
 import {
   sp, ICON, avatar, issueByKey, inSprint, prsFor, columnName, columnCategory, categoryById,
   openInJira, browseUrl, openStatusMenu, openAssignMenu, openCategoryMenu, setPoints,
   fileInCategory, renameCategory, recolorCategory, deleteCategory, addComment, rerender, writePref,
-  flagMeaning, openFlagMenu, dropFromCategory,
+  flagMeaning, openFlagMenu, dropFromCategory, togglePin, loadSprint, loadCategories,
 } from "./sprint-store";
 
 type Load<T> = { status: "loading" } | { status: "ok"; value: T } | { status: "error"; error: string };
@@ -33,6 +35,13 @@ const expandedOutside = new Set<string>();
 /** Reading the outside stories of a category: "ok" lets a missing key mean "not on Jira". */
 const outsideStatus = new Map<string, "loading" | "ok" | "failed">();
 
+/** ↑/↓ through the board's stories: set by the Sprint tab, which owns the order. */
+let stepper: ((delta: number) => void) | null = null;
+
+export function setPanelStepper(step: (delta: number) => void) {
+  stepper = step;
+}
+
 // ── Opening and closing ──────────────────────────────────────────────────────
 
 export function openIssue(key: string, fromCategory: string | null = null) {
@@ -40,6 +49,7 @@ export function openIssue(key: string, fromCategory: string | null = null) {
   editingPoints = null;
   void ensureDetail(key);
   void ensureChecklist(key);
+  void ensureContext(key);
   rerender();
 }
 
@@ -61,6 +71,29 @@ export function forgetDetails() {
   details.clear();
   checklists.clear();
   outsideStatus.clear();
+}
+
+/** Opened from another view, the story may not be on the board, or the board
+ *  may not have been read at all: status, assignee and points come from the
+ *  issue, the points field and Jira's site from the board, the category from
+ *  the local file. The issue is read on its own at once, so the fields do not
+ *  wait for the whole board; once the board is there, its copy wins. */
+async function ensureContext(key: string) {
+  if (!sp.data && !sp.loading && !sp.error) void loadSprint();
+  if (!sp.categoriesLoaded) {
+    void loadCategories().then(() => {
+      if (sp.panel) rerender();
+    });
+  }
+  if (issueByKey(key)) return;
+  try {
+    const found = await invoke<M.SprintIssue[]>("sprint_issues_by_keys", { keys: [key] });
+    for (const issue of found) sp.outside.set(issue.key, issue);
+  } catch {
+    // The detail still shows: only the editable fields are missing.
+    return;
+  }
+  if (sp.panel?.kind === "issue" && sp.panel.key === key) rerender();
 }
 
 async function ensureDetail(key: string, force = false) {
@@ -369,14 +402,20 @@ function renderIssue(key: string, fromCategory: string | null): string {
   const type = issue?.issueType ?? (detail?.status === "ok" ? detail.value.issueType : "");
   const back = fromCategory ? categoryById(fromCategory) : null;
   const category = M.categoryOf(key, sp.categories);
+  const pinned = sp.pinned === key;
+  // Stepping follows the board's order: only where the board is.
+  const canStep = stepper !== null && state.currentView === "sprint";
 
   const top = `<header class="sp-panel-top">
     ${back ? `<button type="button" class="sp-back" data-sp-back title="Torna a ${escHtml(back.name)}">${ICON.back}<span class="sp-dot" style="--dot:${escHtml(back.color)}"></span>${escHtml(back.name)}</button><span class="sp-top-sep"></span>` : ""}
     ${type ? `<span class="sp-type">${escHtml(type)}</span>` : ""}
     <button type="button" class="sp-panel-key" data-sp-copy="${escHtml(key)}" title="Copia la chiave">${escHtml(key)}</button>
     <span class="sp-grow"></span>
-    ${back ? "" : `<button type="button" class="sp-icon-btn" data-sp-step="-1" title="Storia precedente (k)" aria-label="Storia precedente">${ICON.up}</button>
+    ${back || !canStep ? "" : `<button type="button" class="sp-icon-btn" data-sp-step="-1" title="Storia precedente (k)" aria-label="Storia precedente">${ICON.up}</button>
     <button type="button" class="sp-icon-btn" data-sp-step="1" title="Storia successiva (j)" aria-label="Storia successiva">${ICON.down}</button>`}
+    <button type="button" class="sp-icon-btn sp-pin${pinned ? " is-pinned" : ""}" data-sp-pin aria-pressed="${pinned}"
+      title="${pinned ? "Sgancia: non resta più a portata di mano" : sp.pinned ? `Fissa al posto di ${escHtml(sp.pinned)}` : "Fissa: la riapri da ogni sezione con l'interruttore in alto"}"
+      aria-label="${pinned ? "Sgancia la storia" : "Fissa la storia"}">${ICON.pin}</button>
     <button type="button" class="sp-btn" data-sp-jira title="Apri in Jira">Jira ${ICON.external}</button>
     <button type="button" class="sp-icon-btn" data-sp-close title="Chiudi (Esc)" aria-label="Chiudi">${ICON.close}</button>
   </header>`;
@@ -387,7 +426,7 @@ function renderIssue(key: string, fromCategory: string | null): string {
       <span>In «${escHtml(category.name)}»: non compare sulla board.</span>
       <button type="button" class="sp-link" data-sp-restore="${escHtml(key)}">Riporta sulla board</button></div>`);
   }
-  if (issue && !inSprint(key)) {
+  if (issue && sp.data && !inSprint(key)) {
     banners.push(`<div class="sp-banner sp-banner--muted">Non è nello sprint che stai guardando.</div>`);
   }
   const props: string[] = [];
@@ -660,10 +699,6 @@ const PANEL_MIN_WIDTH = 360;
 const PANEL_MAX_SHARE = 0.9;
 const PANEL_KEY_STEP = 32;
 
-function sprintRoot(): HTMLElement | null {
-  return document.querySelector<HTMLElement>("[data-sprint-root]");
-}
-
 function clampPanelWidth(width: number): number {
   const max = Math.max(PANEL_MIN_WIDTH, Math.floor(window.innerWidth * PANEL_MAX_SHARE));
   return Math.round(Math.min(Math.max(width, PANEL_MIN_WIDTH), max));
@@ -674,8 +709,9 @@ function panelWidthNow(): number {
   return host()?.getBoundingClientRect().width || PANEL_DEFAULT_WIDTH;
 }
 
+/** On the root: the panel moves between the Sprint tab and the other views. */
 export function applyPanelWidth() {
-  sprintRoot()?.style.setProperty("--sp-panel-w", `${sp.panelWidth ?? PANEL_DEFAULT_WIDTH}px`);
+  document.documentElement.style.setProperty("--sp-panel-w", `${sp.panelWidth ?? PANEL_DEFAULT_WIDTH}px`);
 }
 
 function setPanelWidth(width: number | null) {
@@ -696,12 +732,12 @@ function startResize(el: HTMLElement, event: PointerEvent) {
   event.preventDefault();
   // The panel is anchored on the right: its width is that edge minus the pointer.
   const right = el.getBoundingClientRect().right;
-  const root = sprintRoot();
+  const root = document.documentElement;
   let width = panelWidthNow();
   document.body.classList.add("sp-is-resizing");
   const onMove = (move: PointerEvent) => {
     width = clampPanelWidth(right - move.clientX);
-    root?.style.setProperty("--sp-panel-w", `${width}px`);
+    root.style.setProperty("--sp-panel-w", `${width}px`);
   };
   const onUp = () => {
     window.removeEventListener("pointermove", onMove);
@@ -727,7 +763,7 @@ export function renderPanel() {
   const panel = sp.panel;
   el.classList.toggle("is-open", panel !== null);
   el.setAttribute("aria-hidden", String(panel === null));
-  document.querySelector("[data-sprint-root]")?.classList.toggle("has-panel", panel !== null);
+  document.querySelector("[data-sprint-root]")?.classList.toggle("has-panel", panel !== null && !!el.closest("[data-sprint-root]"));
   if (!panel) {
     el.innerHTML = "";
     return;
@@ -830,7 +866,7 @@ async function toggleChecklist(key: string, index: number, done: boolean) {
   }
 }
 
-export function initPanelEvents(step: (delta: number) => void) {
+export function initPanelEvents() {
   const el = host();
   if (!el) return;
 
@@ -857,7 +893,7 @@ export function initPanelEvents(step: (delta: number) => void) {
       return openCategory(panel.fromCategory);
     }
     const stepButton = target.closest<HTMLElement>("[data-sp-step]");
-    if (stepButton) return step(Number(stepButton.dataset.spStep));
+    if (stepButton) return stepper?.(Number(stepButton.dataset.spStep));
 
     const restore = target.closest<HTMLElement>("[data-sp-restore]");
     if (restore) {
@@ -913,6 +949,7 @@ export function initPanelEvents(step: (delta: number) => void) {
     }
 
     if (target.closest("[data-sp-jira]")) return openInJira(key);
+    if (target.closest("[data-sp-pin]")) return togglePin(key);
     const flagButton = target.closest<HTMLElement>("[data-sp-flag-meaning]");
     if (flagButton) return openFlagMenu(flagButton);
     const copy = target.closest<HTMLElement>("[data-sp-copy]");
