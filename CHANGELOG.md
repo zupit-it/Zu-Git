@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.0.4] - 2026-10-20
+
 ### Added
 - **Tiny King: click him to open what he came about** — his window still lets clicks through, but
   not over him and his bubble. With the cursor there, a button shows what a click opens:
