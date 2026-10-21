@@ -17,7 +17,9 @@ const ANIMATIONS: [&str; 4] = ["idle", "pr_merged", "ci_failed", "review_wait"];
 const KING_HEIGHT: f64 = 184.0;
 /// The window is wider and taller than him, for the bubble above-left of his head.
 const WIDTH: f64 = 300.0;
-const BUBBLE_HEIGHT: f64 = 112.0;
+/// Room above him for the bubble at its tallest (two lines of title, two of
+/// detail, a note that wraps) and the buttons sticking out over its top edge.
+const BUBBLE_HEIGHT: f64 = 140.0;
 const HEIGHT: f64 = KING_HEIGHT + BUBBLE_HEIGHT;
 /// Where the king's centre sits, as a share of the screen's height from the top.
 const CENTRE: f64 = 0.72;
