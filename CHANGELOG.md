@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.0.5] - 2026-10-21
+
 ### Fixed
 - **Tiny King: his bubble's buttons show whole** — **Apri ZuGit** and **Apri diff** stick out over
   the bubble's top edge, and with a tall bubble (a title and a PR title on two lines, a note that
