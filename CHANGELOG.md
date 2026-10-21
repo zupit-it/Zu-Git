@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Tiny King: his bubble's buttons show whole** — **Apri ZuGit** and **Apri diff** stick out over
+  the bubble's top edge, and with a tall bubble (a title and a PR title on two lines, a note that
+  wraps) they went past the top of his window: only a sliver of them showed. His window has more
+  room above the bubble now; he stands where he did.
+
 ---
 
 ## [3.0.4] - 2026-10-20

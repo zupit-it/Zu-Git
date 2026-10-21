@@ -21,14 +21,18 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
-        title: "Fun — click the Tiny King",
-        body: "With the cursor on him or his bubble, a button shows what a click opens. <strong>Apri ZuGit</strong> brings ZuGit up on the PR list, scrolled to the PR he is talking about and lit up a moment; for a review to do, <strong>Apri diff</strong> opens its diff straight away. A merged PR opens on GitHub, and a page about several PRs opens the list. Then he takes his leave. Everywhere else around him clicks still go to what is underneath.",
+        title: "Fun — the Tiny King's buttons show whole",
+        body: "<strong>Apri ZuGit</strong> and <strong>Apri diff</strong> stick out over his bubble's top edge, and with a tall bubble they went past the top of his window: only a sliver of them showed. His window has more room above the bubble now, and he stands where he did.",
       },
     ],
   },
   {
     label: "Older news",
     entries: [
+      {
+        title: "Fun — click the Tiny King",
+        body: "With the cursor on him or his bubble, a button shows what a click opens. <strong>Apri ZuGit</strong> brings ZuGit up on the PR list, scrolled to the PR he is talking about and lit up a moment; for a review to do, <strong>Apri diff</strong> opens its diff straight away. A merged PR opens on GitHub, and a page about several PRs opens the list. Then he takes his leave. Everywhere else around him clicks still go to what is underneath.",
+      },
       {
         title: "Sprint — pin a story, keep it at hand everywhere",
         body: "The pin in a story's panel keeps it with you in every section, not just the Sprint tab. A switch in the top bar, with the story's key, shows and hides it: in the PR list, Status or Settings the panel docks on the right and the page makes room for it. Hiding it keeps it pinned; opening another story turns the switch off, and turning it back on returns to the pinned one. It stays until you unpin it or pin another — with <strong>Annulla</strong> if that was a slip. In the PR list, a click on a PR's <strong>Jira key</strong> now opens its story in the same panel, with status, assignee, checklist, description and comments, without leaving the list.",
