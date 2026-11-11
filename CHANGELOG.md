@@ -8,6 +8,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Nudge a reviewer on Slack** — on your own PRs, a bell next to a reviewer whose review is
+  still required puts a short message with the PR link on the clipboard and opens your direct
+  message with them in the Slack app: paste and send. ZuGit never writes to Slack itself; if Slack
+  is not installed it says so, and the message is still on the clipboard.
+  - Who is who lives in **Settings → Slack**: the workspace id and one Slack member id per GitHub
+    user. The bell shows only for people listed there.
+  - An assistant can fill the table: in Claude Code, with Slack connected and ZuGit's MCP
+    connector, run `/mcp__zugit__map_slack_users`. It looks the team up on Slack, read-only, and
+    hands ZuGit a proposal (new `slack_get_people` and `slack_propose_people` tools). The proposal
+    shows in Settings → Slack, with the people matched only by name marked to check; nothing is
+    used until you save.
 - **Diff: the PR's conversation** — above the files, a **Conversation** block shows what GitHub's
   Conversation tab says about the PR as a whole: the description (folded), the comments on the PR
   and the reviews with their verdict and text, oldest first. It refreshes when ZuGit regains focus

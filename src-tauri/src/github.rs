@@ -410,6 +410,38 @@ pub async fn fetch_user_avatars(
         .collect()
 }
 
+/// Name and public email per login (`GET /users/{login}`), in parallel; either
+/// may be missing. Logins that fail are left out.
+pub async fn fetch_user_profiles(
+    logins: &[String],
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> HashMap<String, (Option<String>, Option<String>)> {
+    #[derive(Deserialize)]
+    struct GithubUser {
+        name: Option<String>,
+        email: Option<String>,
+    }
+
+    let base = settings.github_api_base_url.trim_end_matches('/');
+    let futures: Vec<_> = logins
+        .iter()
+        .map(|login| {
+            let url = format!("{}/users/{}", base, login);
+            async move {
+                let result: Result<GithubUser, _> = github_request(&url, settings, client).await;
+                result.ok().map(|u| (login.clone(), (u.name, u.email)))
+            }
+        })
+        .collect();
+
+    futures::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 /// Derives the GraphQL endpoint from the REST base URL.
 /// - `https://api.github.com`       → `https://api.github.com/graphql`
 /// - `https://hostname/api/v3`      → `https://hostname/api/graphql`

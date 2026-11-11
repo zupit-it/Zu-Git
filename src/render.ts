@@ -17,6 +17,7 @@ import {
   getAvailableRepos,
 } from "./filters";
 import { computeMyScore } from "./reaction-score";
+import { slackMember } from "./slack-people";
 import { petReactToDashboard } from "./pet-triggers";
 import { clearSettingsSectionsDirty, openUnconfiguredSections, syncSettingsSections } from "./settings-sections";
 import type { MyScore, MyScoreItem } from "./shared/pr-model";
@@ -455,9 +456,13 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string,
 
   const isMyPr = !!viewerLogin && pr.author.toLowerCase() === viewerLogin.toLowerCase();
 
-  const items: Array<{ login: string; avatarUrl?: string; tone: string; label: string; stale?: boolean; canRerequest?: boolean }> = [
+  // A nudge opens the reviewer's Slack DM: only on your PRs, and only for
+  // people Settings → Slack knows.
+  const canNudge = (login: string) => isMyPr && !isDraft && !!slackMember(state.slackDirectory, login);
+
+  const items: Array<{ login: string; avatarUrl?: string; tone: string; label: string; stale?: boolean; canRerequest?: boolean; canNudge?: boolean }> = [
     ...dedup(pr.blockingReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "fail", label: "Changes requested", canRerequest: isMyPr })),
-    ...dedup(pr.pendingReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "warn", label: "Review required" })),
+    ...dedup(pr.pendingReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "warn", label: "Review required", canNudge: canNudge(a.login) })),
     ...dedup(pr.staleApprovers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "ok", label: "Approved", stale: true, canRerequest: isMyPr })),
     ...dedup(pr.currentApprovers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "ok", label: "Approved", stale: false })),
     ...dedup(pr.commentedReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "neutral", label: "Commented", canRerequest: isMyPr })),
@@ -479,7 +484,7 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string,
       (item, i) => {
         const badge = `<div class="review-badge review-badge-${item.tone}${mutedClass}">
           ${avatarSm(item.login, item.avatarUrl, isDraft)}
-          <span class="review-badge-label">${item.label}</span>${item.stale ? `<span class="review-badge-stale-icon">${SVG.clock}</span>` : ""}${item.canRerequest ? `<button class="review-badge-rerequest" title="Re-request review from ${item.login}" data-repo="${pr.repo}" data-pr-number="${pr.id}" data-login="${item.login}">${SVG.rerequest}</button>` : ""}
+          <span class="review-badge-label">${item.label}</span>${item.stale ? `<span class="review-badge-stale-icon">${SVG.clock}</span>` : ""}${item.canRerequest ? `<button class="review-badge-rerequest" title="Re-request review from ${item.login}" data-repo="${pr.repo}" data-pr-number="${pr.id}" data-login="${item.login}">${SVG.rerequest}</button>` : ""}${item.canNudge ? `<button class="review-badge-nudge" type="button" title="Sollecita ${escHtml(item.login)} su Slack: copia il messaggio e apre la vostra chat" data-nudge-login="${escHtml(item.login)}" data-repo="${escHtml(pr.repo)}" data-pr-number="${pr.id}">${SVG.nudge}</button>` : ""}
         </div>`;
         // Wrap the last badge in a flex row so the "+" sits inline to its right
         if (addBtn && i === items.length - 1) {

@@ -1,5 +1,6 @@
 import type { DashboardSnapshot, StaleBranchesResult } from "./shared/rpc";
 import { defaultListFilterPreferences, defaultSettings } from "./shared/settings";
+import type { SlackDirectory } from "./slack-people";
 
 export interface CommitSummary {
   sha: string;
@@ -109,6 +110,10 @@ export const state = {
   // "repo/id" → updatedAtIso at last conflict notification, so the queue-blocked
   // native notification fires once per PR state, not on every auto-refresh tick.
   queueConflictNotifiedFor: new Map<string, string>(),
+
+  // ── Slack nudges ───────────────────────────────────────────────────────────
+  /** Who is who on Slack, as saved in Settings → Slack; null until loaded. */
+  slackDirectory: null as SlackDirectory | null,
 
   // ── Settings form ──────────────────────────────────────────────────────────
   settingsDirty: false,

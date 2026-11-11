@@ -540,6 +540,67 @@
                     </div>
                   </div>
                 </details>
+                <!-- Slack nudges card: its fields are not settings, they save on their own -->
+                <details class="settings-card" data-settings-section="slack">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5a3 3 0 0 1 6 0c0 2.2.8 3.2 1.2 3.6H1.8C2.2 8.2 3 7.2 3 5Z"/><path d="M5 10.5a1.1 1.1 0 0 0 2 0"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Slack</div>
+                      <div class="settings-card-title">Solleciti ai reviewer</div>
+                    </div>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid" data-slack-card>
+                    <div class="settings-field settings-field-wide">
+                      <p class="field-hint">
+                        Sulle tue PR, accanto a un reviewer in attesa compare la campanella: copia negli appunti un
+                        messaggio con il link alla PR e apre la vostra chat diretta nell'app Slack. Tu incolli e invii:
+                        ZuGit non scrive mai su Slack. Serve sapere chi è chi su Slack, nella tabella qui sotto.
+                      </p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <div class="field-header">
+                        <label class="field-label">Compila la tabella con l'AI</label>
+                        <button class="field-action-button" data-slack-copy-prompt type="button">Copia</button>
+                      </div>
+                      <code class="mcp-command">/mcp__zugit__map_slack_users</code>
+                      <p class="field-hint">
+                        In Claude Code, con Slack collegato e il connettore MCP di ZuGit (card <em>Assistenti AI</em>):
+                        l'assistente cerca il team su Slack, in sola lettura, e ti propone la tabella. La proposta compare
+                        qui: controlla le righe trovate solo per nome, poi salva.
+                      </p>
+                    </div>
+                    <div class="settings-field settings-field-wide slack-proposal" data-slack-proposal hidden>
+                      <div class="slack-proposal-head">
+                        <span class="token-store-badge token-store-badge-warn">Proposta da rivedere</span>
+                        <span class="slack-proposal-meta" data-slack-proposal-meta></span>
+                        <button class="field-action-button slack-discard" data-slack-discard type="button">Scarta</button>
+                      </div>
+                      <p class="field-hint" data-slack-proposal-note hidden></p>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="slackTeamId">ID del workspace</label>
+                      <input id="slackTeamId" form="slack-people" type="text" placeholder="T01AB2CD3EF" autocomplete="off" spellcheck="false" data-slack-team-id />
+                      <p class="field-hint" data-slack-team-name></p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Persone</label>
+                      <div class="slack-people" data-slack-people></div>
+                      <p class="field-hint">
+                        L'ID membro inizia con U: in Slack, profilo della persona → ⋮ → <em>Copia ID membro</em>.
+                        Chi non ha un ID non mostra la campanella.
+                      </p>
+                    </div>
+                    <div class="settings-field settings-field-wide slack-save-row">
+                      <span class="field-hint" data-slack-save-status></span>
+                      <button class="field-action-button" data-slack-save type="button">Salva tabella</button>
+                    </div>
+                  </div>
+                </details>
               </div>
 
               <div class="settings-group">

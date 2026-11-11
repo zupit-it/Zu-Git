@@ -2781,9 +2781,11 @@ img.avatar { object-fit: cover; }
 
 .review-badge-stale-icon { display: inline-flex; align-items: center; opacity: 0.7; }
 
-.review-badge-rerequest svg { pointer-events: none; }
+.review-badge-rerequest svg,
+.review-badge-nudge svg { pointer-events: none; }
 
-.review-badge-rerequest {
+.review-badge-rerequest,
+.review-badge-nudge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2797,8 +2799,10 @@ img.avatar { object-fit: cover; }
   border-radius: 3px;
   flex-shrink: 0;
 }
-.review-badge-rerequest:hover { opacity: 1; }
-.review-badge-rerequest:disabled { cursor: default; opacity: 0.3; }
+.review-badge-rerequest:hover,
+.review-badge-nudge:hover { opacity: 1; }
+.review-badge-rerequest:disabled,
+.review-badge-nudge:disabled { cursor: default; opacity: 0.3; }
 .review-badge-rerequest--loading { animation: spin 0.7s linear infinite; }
 .review-badge-rerequest--done { opacity: 1; }
 
@@ -6339,6 +6343,66 @@ ul.field-hint {
 
 .mcp-status { margin-left: 6px; vertical-align: 1px; }
 .mcp-status-note { overflow-wrap: anywhere; }
+
+/* ── Slack nudges: who is who (Settings) ── */
+
+.slack-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.slack-proposal-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+/* One grid for the whole table, so the columns line up from row to row. */
+.slack-people {
+  display: grid;
+  grid-template-columns: minmax(90px, 1.1fr) minmax(90px, 1.2fr) minmax(90px, 1fr) auto;
+  align-items: center;
+  gap: 6px 8px;
+}
+.slack-people > .field-hint { grid-column: 1 / -1; }
+.slack-person { display: contents; }
+.slack-person-login {
+  font: 500 12px/1.3 var(--font-mono);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-form .slack-person input {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.settings-form .slack-person input[data-field="memberId"] { font-family: var(--font-mono); }
+.slack-person-tag { min-width: 0; justify-self: end; white-space: nowrap; }
+.slack-person-note {
+  grid-column: 2 / -1;
+  margin-top: -2px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.slack-save-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.slack-save-row .field-hint { margin: 0; flex: 1; text-align: right; }
+.slack-save-error { color: var(--fail); }
+
+@media (max-width: 560px) {
+  .slack-people { grid-template-columns: 1fr 1fr; }
+  .slack-person-login { grid-column: 1 / -1; }
+  .slack-person-tag { justify-self: start; }
+  .slack-person-note { grid-column: 1 / -1; }
+}
 
 /* ── Zupit bot rules: what the morning check would flag ── */
 

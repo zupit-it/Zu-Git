@@ -25,6 +25,7 @@ import {
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
 import { initSettingsSections } from "./settings-sections";
+import { initSlack, nudgeReviewer } from "./slack";
 import { installSadReviewer } from "./meme";
 import { installPetReminder, petTry } from "./pet-triggers";
 import type { PetPrLink } from "./pet-lines";
@@ -150,6 +151,7 @@ window.addEventListener("DOMContentLoaded", () => {
       if (button instanceof HTMLButtonElement) void testTogglConnection(button);
     });
   void initMcpSetup();
+  initSlack();
 
   // ── Search ──────────────────────────────────────────────────────────────────
   document
@@ -326,6 +328,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const jiraButton = target.closest<HTMLElement>("[data-jira-link]");
     const jiraUrl = jiraButton?.dataset.jiraLink;
     if (jiraUrl) { void openExternal(jiraUrl); return; }
+
+    const nudgeButton = target.closest<HTMLButtonElement>(".review-badge-nudge");
+    if (nudgeButton) { void nudgeReviewer(nudgeButton); return; }
 
     const rerequestButton = target.closest<HTMLButtonElement>(".review-badge-rerequest");
     if (rerequestButton) { void rerequestReview(rerequestButton); return; }
