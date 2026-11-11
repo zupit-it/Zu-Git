@@ -6346,6 +6346,13 @@ ul.field-hint {
 
 /* ── Slack nudges: who is who (Settings) ── */
 
+.slack-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.slack-share-status { overflow-wrap: anywhere; }
+
 .slack-proposal-head {
   display: flex;
   align-items: center;

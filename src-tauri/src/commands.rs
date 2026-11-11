@@ -2019,6 +2019,38 @@ pub async fn slack_people_discard_proposal(app: tauri::AppHandle) -> Result<(), 
     storage::delete_slack_proposal(&storage::data_dir(&app)?)
 }
 
+/// Saves the table to the Downloads folder (home when there is none), shows it
+/// in the file manager and says where it is: what a colleague imports.
+#[tauri::command]
+pub async fn slack_people_export(app: tauri::AppHandle) -> Result<String, String> {
+    let directory = storage::load_slack_directory(&storage::data_dir(&app)?);
+    let file = crate::slack::export_file(&directory)?;
+    let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+    let folder = dirs::download_dir()
+        .or_else(dirs::home_dir)
+        .ok_or("Nessuna cartella Download in cui salvare.")?;
+    let path = crate::pet_pack::free_name(&folder, crate::slack::EXPORT_FILE);
+    std::fs::write(&path, json).map_err(|e| format!("Impossibile salvare {}: {e}", path.display()))?;
+    {
+        use tauri_plugin_opener::OpenerExt;
+        let _ = app.opener().reveal_item_in_dir(&path);
+    }
+    Ok(path.display().to_string())
+}
+
+/// A colleague's exported table, kept as the proposal to review: nothing is
+/// used until the user saves it.
+#[tauri::command]
+pub async fn slack_people_import(
+    app: tauri::AppHandle,
+    content: String,
+    file_name: String,
+) -> Result<crate::slack::SlackProposal, String> {
+    let proposal = crate::slack::import_proposal(&content, &file_name)?;
+    storage::save_slack_proposal(&storage::data_dir(&app)?, &proposal)?;
+    Ok(proposal)
+}
+
 /// Opens the Slack desktop app on the DM with that GitHub login's member.
 #[tauri::command]
 pub async fn slack_open_dm(app: tauri::AppHandle, login: String) -> Result<(), String> {

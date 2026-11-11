@@ -67,7 +67,10 @@ function rowTag(row: ReviewRow): { label: string; tone: string } | null {
   if (row.unmatched !== undefined) return { label: "Non trovato", tone: "warn" };
   if (row.change === "changed") return { label: "Cambiato", tone: "warn" };
   if (row.change && row.match === "name") return { label: "Solo nome: controlla", tone: "warn" };
-  if (row.change === "new") return { label: "Nuovo · email", tone: "ok" };
+  if (row.change === "new") {
+    if (row.match === "email") return { label: "Nuovo · email", tone: "ok" };
+    return { label: row.match === "manual" ? "Nuovo · a mano" : "Nuovo", tone: "neutral" };
+  }
   if (row.change === "same") return { label: "Confermato", tone: "neutral" };
   if (!row.memberId) return null;
   if (row.match === "email") return { label: "Email", tone: "ok" };
@@ -105,12 +108,13 @@ function renderSlackCard() {
   if (banner) banner.hidden = !proposal;
   if (proposal) {
     const found = proposal.people.length;
-    const toCheck = proposal.people.filter((p) => p.match !== "email").length;
+    // Rows typed by hand were checked by whoever typed them; a name match was not.
+    const toCheck = proposal.people.filter((p) => p.match === "name").length;
     const meta = one("[data-slack-proposal-meta]");
     if (meta) {
       meta.textContent = [
         `${proposal.source} · ${formatDate(proposal.createdAt)}`,
-        `${found} trovat${found === 1 ? "o" : "i"}`,
+        `${found} person${found === 1 ? "a" : "e"}`,
         toCheck ? `${toCheck} da controllare` : "",
         proposal.unmatched.length ? `${proposal.unmatched.length} non trovat${proposal.unmatched.length === 1 ? "o" : "i"}` : "",
       ].filter(Boolean).join(" · ");
@@ -158,6 +162,45 @@ async function saveTable(button: HTMLButtonElement) {
     setSaveStatus(`Salvata: ${count} person${count === 1 ? "a" : "e"} su Slack.`);
   } catch (error) {
     setSaveStatus(errorMessage(error, "Salvataggio non riuscito."), "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function setShareStatus(message: string, tone: "neutral" | "danger" = "neutral") {
+  const target = one("[data-slack-share-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.hidden = !message;
+  target.classList.add("slack-share-status");
+  target.classList.toggle("slack-save-error", tone === "danger");
+}
+
+async function exportTable(button: HTMLButtonElement) {
+  button.disabled = true;
+  try {
+    const path = await invoke<string>("slack_people_export");
+    setShareStatus(
+      `Salvata in ${path}${tableDirty ? " (la tabella salvata: le modifiche non salvate restano fuori)" : ""}. Mandala ai colleghi.`,
+    );
+  } catch (error) {
+    setShareStatus(errorMessage(error, "Esportazione non riuscita."), "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function importTable(file: File, button: HTMLButtonElement) {
+  button.disabled = true;
+  try {
+    proposal = await invoke<SlackProposal>("slack_people_import", { content: await file.text(), fileName: file.name });
+    // The file is the proposal now: edits left unsaved give way to it.
+    tableDirty = false;
+    renderSlackCard();
+    syncSettingsSections();
+    setShareStatus(`Importata da ${file.name}: controlla le righe qui sotto, poi salva.`);
+  } catch (error) {
+    setShareStatus(errorMessage(error, "Importazione non riuscita."), "danger");
   } finally {
     button.disabled = false;
   }
@@ -230,6 +273,17 @@ export function initSlack() {
   });
 
   const body = card();
+  // Picked outside the settings form: choosing a file is not a setting to save.
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = ".json,application/json";
+  picker.addEventListener("change", () => {
+    const file = picker.files?.[0];
+    picker.value = "";
+    const button = one<HTMLButtonElement>("[data-slack-import]");
+    if (file && button) void importTable(file, button);
+  });
+
   body?.addEventListener("input", onCardInput);
   body?.addEventListener("change", (event) => event.stopPropagation());
   body?.addEventListener("click", (event) => {
@@ -238,6 +292,9 @@ export function initSlack() {
     if (save) { void saveTable(save); return; }
     const discard = target?.closest<HTMLButtonElement>("[data-slack-discard]");
     if (discard) { void discardProposal(discard); return; }
+    const exportButton = target?.closest<HTMLButtonElement>("[data-slack-export]");
+    if (exportButton) { void exportTable(exportButton); return; }
+    if (target?.closest("[data-slack-import]")) { picker.click(); return; }
     const copy = target?.closest<HTMLButtonElement>("[data-slack-copy-prompt]");
     if (copy) {
       void navigator.clipboard.writeText(PROMPT).then(

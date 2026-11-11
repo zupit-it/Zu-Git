@@ -210,6 +210,78 @@ impl SlackDirectory {
     }
 }
 
+// ── Sharing the table ────────────────────────────────────────────────────────
+// One person fills it, the others import their file: it holds GitHub logins,
+// Slack names and ids, nothing secret.
+
+pub const EXPORT_FORMAT: &str = "zugit-slack-people";
+pub const EXPORT_FILE: &str = "zugit-slack-people.json";
+/// A team's table is a few kilobytes; anything far bigger is not one.
+pub const MAX_IMPORT_BYTES: usize = 512 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFile {
+    pub format: String,
+    pub version: u32,
+    #[serde(default)]
+    pub exported_at: String,
+    pub team_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_name: Option<String>,
+    pub people: Vec<SlackPerson>,
+}
+
+pub fn export_file(directory: &SlackDirectory) -> Result<ExportFile, String> {
+    if directory.people.is_empty() || directory.team_id.is_empty() {
+        return Err("La tabella salvata è vuota: compilala e salvala prima di esportarla.".into());
+    }
+    Ok(ExportFile {
+        format: EXPORT_FORMAT.into(),
+        version: 1,
+        exported_at: chrono::Utc::now().to_rfc3339(),
+        team_id: directory.team_id.clone(),
+        team_name: directory.team_name.clone(),
+        people: directory.people.clone(),
+    })
+}
+
+/// A shared file, as a proposal to review: an import is checked like what an
+/// assistant hands over, and used only once the user saves it.
+pub fn import_proposal(content: &str, file_name: &str) -> Result<SlackProposal, String> {
+    if content.len() > MAX_IMPORT_BYTES {
+        return Err("Il file è troppo grande per essere una tabella di ZuGit.".into());
+    }
+    let file: ExportFile = serde_json::from_str(content)
+        .map_err(|_| "Il file non è una tabella Slack esportata da ZuGit.".to_string())?;
+    if file.format != EXPORT_FORMAT {
+        return Err("Il file non è una tabella Slack esportata da ZuGit.".into());
+    }
+    if file.version != 1 {
+        return Err(format!(
+            "Il file è della versione {} della tabella: aggiorna ZuGit per importarlo.",
+            file.version
+        ));
+    }
+    let name: String = file_name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(80)
+        .collect();
+    clean_proposal(SlackProposal {
+        created_at: chrono::Utc::now().to_rfc3339(),
+        source: if name.is_empty() { "file".into() } else { format!("file {name}") },
+        team_id: file.team_id,
+        team_name: file.team_name,
+        people: file.people,
+        unmatched: vec![],
+        note: None,
+    })
+}
+
 /// The DM with that member in the Slack desktop app. Both ids are checked, so
 /// nothing else can be smuggled into the URL.
 pub fn dm_url(team_id: &str, member_id: &str) -> Result<String, String> {
@@ -332,6 +404,35 @@ mod tests {
         assert_eq!(name_hint("mario-rossi-zupit", "-zupit"), "mario rossi");
         assert_eq!(name_hint("anna.bianchi", "-zupit"), "anna bianchi");
         assert_eq!(name_hint("luca", ""), "luca");
+    }
+
+    #[test]
+    fn an_exported_table_comes_back_as_a_proposal() {
+        let directory = SlackDirectory {
+            team_id: "T0ZUPIT".into(),
+            team_name: Some("Zupit".into()),
+            people: vec![person("anna", "U0ANNA"), SlackPerson { match_kind: Some(MatchKind::Manual), ..person("luca", "U0LUCA") }],
+            updated_at: None,
+        };
+        let content = serde_json::to_string(&export_file(&directory).unwrap()).unwrap();
+        let proposal = import_proposal(&content, "/Users/x/Downloads/zugit-slack-people.json").unwrap();
+        assert_eq!(proposal.source, "file zugit-slack-people.json");
+        assert_eq!(proposal.team_id, "T0ZUPIT");
+        assert_eq!(proposal.team_name.as_deref(), Some("Zupit"));
+        assert_eq!(proposal.people, directory.people);
+        assert!(proposal.unmatched.is_empty());
+    }
+
+    #[test]
+    fn only_zugit_tables_with_valid_ids_are_imported() {
+        assert!(export_file(&SlackDirectory::default()).is_err());
+        assert!(import_proposal("not json", "x.json").is_err());
+        assert!(import_proposal(r#"{"format":"other","version":1,"teamId":"T0","people":[]}"#, "x.json").is_err());
+        let newer = r#"{"format":"zugit-slack-people","version":2,"teamId":"T0ZUPIT","people":[{"login":"anna","memberId":"U0ANNA"}]}"#;
+        assert!(import_proposal(newer, "x.json").unwrap_err().contains("versione 2"));
+        let channel = r#"{"format":"zugit-slack-people","version":1,"teamId":"T0ZUPIT","people":[{"login":"anna","memberId":"C0CHAN"}]}"#;
+        assert!(import_proposal(channel, "x.json").is_err());
+        assert!(import_proposal(&" ".repeat(MAX_IMPORT_BYTES + 1), "x.json").is_err());
     }
 
     #[test]

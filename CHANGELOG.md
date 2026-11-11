@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Slack: who is who, filled once for the team** — in **Settings → Slack**, **Esporta tabella**
+  saves the GitHub → Slack table to Downloads; a colleague's **Importa…** shows it as a proposal
+  to review and save, so only one person needs Claude Code and the Slack connector. The file holds
+  GitHub logins, Slack names and ids, no token; ZuGit imports only its own tables, every id
+  checked.
+
 ---
 
 ## [3.1.0] - 2026-11-11

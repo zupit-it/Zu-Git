@@ -571,8 +571,20 @@
                       <p class="field-hint">
                         In Claude Code, con Slack collegato e il connettore MCP di ZuGit (card <em>Assistenti AI</em>):
                         l'assistente cerca il team su Slack, in sola lettura, e ti propone la tabella. La proposta compare
-                        qui: controlla le righe trovate solo per nome, poi salva.
+                        qui: controlla le righe trovate solo per nome, poi salva. Basta che lo faccia una persona del team.
                       </p>
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <label class="field-label">Condividi con il team</label>
+                      <div class="slack-share">
+                        <button class="secondary-button" type="button" data-slack-export>Esporta tabella</button>
+                        <button class="secondary-button" type="button" data-slack-import>Importa…</button>
+                      </div>
+                      <p class="field-hint">
+                        Chi ha compilato la tabella la esporta in Download e manda il file ai colleghi. Importato, compare qui
+                        come proposta da rivedere e salvare. Il file contiene solo login GitHub, nomi e ID Slack, nessun token.
+                      </p>
+                      <p class="field-hint" data-slack-share-status hidden></p>
                     </div>
                     <div class="settings-field settings-field-wide slack-proposal" data-slack-proposal hidden>
                       <div class="slack-proposal-head">

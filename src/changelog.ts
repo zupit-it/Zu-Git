@@ -21,6 +21,15 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Slack — fill who is who once for the team",
+        body: "In <strong>Settings → Slack</strong>, <strong>Esporta tabella</strong> saves the GitHub → Slack table to your Downloads folder. Send it to your colleagues: their <strong>Importa…</strong> shows it as a proposal to review and save, so only one person needs Claude Code with Slack connected. The file holds GitHub logins, Slack names and ids, no token.",
+      },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
+      {
         title: "PR list — nudge a reviewer on Slack",
         body: "On your own PRs, a <strong>bell</strong> next to a reviewer whose review is still required puts a short message with the PR's link on the clipboard and opens your direct message with them in the Slack app: paste and send. ZuGit never writes to Slack. It needs to know who is who: <strong>Settings → Slack</strong> holds the workspace id and a Slack member id per GitHub user, and the bell shows only for the people listed there. To fill it, run <code>/mcp__zugit__map_slack_users</code> in Claude Code with Slack connected: the assistant looks the team up, read-only, and its proposal waits in Settings, with whoever was matched only by name marked to check. Nothing is used until you save.",
       },
@@ -44,11 +53,6 @@ const VERSIONS: VersionBlock[] = [
         title: "CI status — no more FAILED when GitHub is green",
         body: "A failed run GitHub no longer counts — a job retried and passed, a rerun just queued, a job with the same name in another workflow — turned the PR red even after the pipeline had ended green. Once the pipeline settles, GitHub's verdict wins; while it runs, a job that already failed still turns it red early.",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "Fun — the Tiny King's buttons show whole",
         body: "<strong>Apri ZuGit</strong> and <strong>Apri diff</strong> stick out over his bubble's top edge, and with a tall bubble they went past the top of his window: only a sliver of them showed. His window has more room above the bubble now, and he stands where he did.",

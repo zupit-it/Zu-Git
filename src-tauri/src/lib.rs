@@ -194,6 +194,8 @@ pub fn run() {
             commands::slack_people_load,
             commands::slack_people_save,
             commands::slack_people_discard_proposal,
+            commands::slack_people_export,
+            commands::slack_people_import,
             commands::slack_open_dm,
         ])
         .run(tauri::generate_context!())

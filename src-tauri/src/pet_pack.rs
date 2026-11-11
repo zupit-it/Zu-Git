@@ -440,7 +440,7 @@ fn built_in_zip(file: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<u8>, Strin
 
 /// `file` in `folder`, or `name (2).zip` and on when it is taken: a file of the
 /// user's is never written over.
-fn free_name(folder: &Path, file: &str) -> PathBuf {
+pub(crate) fn free_name(folder: &Path, file: &str) -> PathBuf {
     let (stem, ext) = file.rsplit_once('.').unwrap_or((file, ""));
     (1..)
         .map(|n| folder.join(if n == 1 { file.to_string() } else { format!("{stem} ({n}).{ext}") }))
