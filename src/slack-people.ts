@@ -129,10 +129,18 @@ export interface NudgedPr {
   url: string;
 }
 
-/** What a nudge puts on the clipboard, to paste in the reviewer's DM. */
+/** The PR's diff in ZuGit (see `links.rs`): Slack makes it clickable. */
+export function zugitPrLink(pr: Pick<NudgedPr, "repo" | "id">): string {
+  return `zugit://pr/${pr.repo}/${pr.id}`;
+}
+
+/**
+ * What a nudge puts on the clipboard, to paste in the reviewer's DM: the PR on
+ * GitHub for anyone, its diff in ZuGit for whoever has it.
+ */
 export function nudgeMessage(pr: NudgedPr, slackName?: string): string {
   const name = firstName(slackName);
   const title = pr.title.trim() || `${pr.repo}#${pr.id}`;
   return `Ciao${name ? ` ${name}` : ""}! Quando hai un attimo, riusciresti a dare un'occhiata alla mia PR ` +
-    `“${title}”? ${pr.url}\nGrazie!`;
+    `“${title}”? ${pr.url}\nIn ZuGit: ${zugitPrLink(pr)}\nGrazie!`;
 }

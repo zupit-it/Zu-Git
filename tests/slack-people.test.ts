@@ -71,7 +71,8 @@ test("the nudge greets by first name only when Slack has a real one", () => {
   const pr = { repo: "org/app", id: 12, title: "Login page", url: "https://github.com/org/app/pull/12" };
   assert.equal(
     nudgeMessage(pr, "Anna Bianchi"),
-    "Ciao Anna! Quando hai un attimo, riusciresti a dare un'occhiata alla mia PR “Login page”? https://github.com/org/app/pull/12\nGrazie!",
+    "Ciao Anna! Quando hai un attimo, riusciresti a dare un'occhiata alla mia PR “Login page”? https://github.com/org/app/pull/12\n" +
+      "In ZuGit: zugit://pr/org/app/12\nGrazie!",
   );
   assert.ok(nudgeMessage(pr).startsWith("Ciao! "));
   assert.ok(nudgeMessage({ ...pr, title: " " }).includes("“org/app#12”"));

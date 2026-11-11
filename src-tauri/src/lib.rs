@@ -4,6 +4,7 @@ mod dashboard;
 mod github;
 mod google;
 mod jira;
+mod links;
 mod mcp;
 mod mcp_setup;
 mod models;
@@ -53,11 +54,20 @@ pub fn run_mcp() {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // First of the plugins, as its docs ask: a second launch, or a zugit://
+    // link on Windows and Linux, goes to the window already open.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        links::focus_main(app);
+    }));
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            links::listen(app);
             // On macOS the menu bar lives at the top of the screen (system-wide),
             // so we keep it. On Windows/Linux it would render as an in-window bar,
             // which we don't want.
@@ -96,6 +106,7 @@ pub fn run() {
             }
             Ok(())
         })
+        .manage(links::PendingLink::default())
         .manage(AppState {
             jira_cache: Mutex::new(HashMap::new()),
             http_client: reqwest::Client::new(),
@@ -197,6 +208,7 @@ pub fn run() {
             commands::slack_people_export,
             commands::slack_people_import,
             commands::slack_open_dm,
+            links::deep_link_take,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

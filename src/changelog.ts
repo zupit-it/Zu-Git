@@ -21,6 +21,15 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Links that open a PR's diff in ZuGit",
+        body: "A <code>zugit://pr/owner/repo/123</code> link — Slack makes it clickable — brings ZuGit up on that PR's diff, or on its GitHub page when the PR is not in your list. The Slack nudge now carries one under the GitHub link, so a reviewer with ZuGit lands straight in the diff. A link only ever opens a PR, nothing else.",
+      },
+    ],
+  },
+  {
+    label: "Older news",
+    entries: [
+      {
         title: "PR diff — the conversation in its own section",
         body: "What is said on the PR as a whole no longer stands as a wall of text above the code. <strong>Conversation</strong>, first in the file list with its count, shows the description, the comments on the PR and the reviews in place of the files, in a column short enough to read; a file in the list brings the diff back. Above the files one line stands for it, with what is there and who spoke last. Comments from apps such as CI or Nx Cloud fold to one line, and the hidden markers they leave stay hidden, as on GitHub.",
       },
@@ -28,11 +37,6 @@ const VERSIONS: VersionBlock[] = [
         title: "Slack — fill who is who once for the team",
         body: "In <strong>Settings → Slack</strong>, <strong>Esporta tabella</strong> saves the GitHub → Slack table to your Downloads folder. Send it to your colleagues: their <strong>Importa…</strong> shows it as a proposal to review and save, so only one person needs Claude Code with Slack connected. The file holds GitHub logins, Slack names and ids, no token.",
       },
-    ],
-  },
-  {
-    label: "Older news",
-    entries: [
       {
         title: "PR list — nudge a reviewer on Slack",
         body: "On your own PRs, a <strong>bell</strong> next to a reviewer whose review is still required puts a short message with the PR's link on the clipboard and opens your direct message with them in the Slack app: paste and send. ZuGit never writes to Slack. It needs to know who is who: <strong>Settings → Slack</strong> holds the workspace id and a Slack member id per GitHub user, and the bell shows only for the people listed there. To fill it, run <code>/mcp__zugit__map_slack_users</code> in Claude Code with Slack connected: the assistant looks the team up, read-only, and its proposal waits in Settings, with whoever was matched only by name marked to check. Nothing is used until you save.",

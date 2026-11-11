@@ -20,6 +20,8 @@ tauri = { version = "2", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
+# zugit:// links (a PR's diff, from a Slack nudge) open in ZuGit.
+tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
@@ -48,6 +50,12 @@ flate2 = "1"
 # setsid(2) when handing secrets to the `security` CLI over stdin.
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+
+# On Windows and Linux a zugit:// link starts a second process: this hands
+# it to the window already open. macOS sends links to the running app itself,
+# and a lock there would stop a dev build running next to the installed one.
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [profile.dev]
 incremental = true

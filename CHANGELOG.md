@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`zugit://` links open a PR's diff** — `zugit://pr/<owner>/<repo>/<number>` brings ZuGit up on
+  that PR's diff, or on its GitHub page when the PR is not in your list; launched by the link,
+  ZuGit waits for the list first. The Slack nudge now carries one under the GitHub link, so a
+  reviewer with ZuGit lands straight in the diff. A link only ever opens: any other shape is
+  ignored. On Windows and Linux a link, or launching ZuGit again, goes to the window already open.
+
 ---
 
 ## [3.1.1] - 2026-11-11

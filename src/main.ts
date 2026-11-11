@@ -62,14 +62,13 @@ window.addEventListener("DOMContentLoaded", () => {
       if (state.currentView !== "settings") setView("list");
       return;
     }
-    const pr = state.currentDashboard?.prs.find((p) => p.repo === link.repo && p.id === link.id);
-    if (!pr) { void openExternal(`https://github.com/${link.repo}/pull/${link.id}`); return; }
-    if (!diff) {
-      setView("list");
-      if (flashPrRow(pr.repo, pr.id)) return;
-    }
-    void openPrDiff(pr);
+    openPrLink(link, diff);
   });
+
+  // A zugit:// link (from a Slack nudge, say): the PR's diff, once the list is
+  // there to find it in. The backend keeps the link until the window takes it.
+  void listen("zugit-link", () => void openPendingLink());
+  void openPendingLink();
   installPetPackControls();
   document.querySelectorAll<HTMLButtonElement>("[data-pet-try]").forEach((button) =>
     button.addEventListener("click", () => {
@@ -504,6 +503,39 @@ const DEMO_STAGE_LABELS: Record<number, string> = {
 
 let _demoToastTimer: number | null = null;
 let _demoToastEl: HTMLElement | null = null;
+
+/**
+ * A PR asked for from outside the list (the Tiny King, a zugit:// link): its
+ * row lit up a moment, or its diff when asked or when the filters hide the
+ * row; its page on GitHub when it is not in the list (merged, another repo).
+ */
+function openPrLink(link: PetPrLink, diff: boolean) {
+  const pr = state.currentDashboard?.prs.find((p) => p.repo.toLowerCase() === link.repo.toLowerCase() && p.id === link.id);
+  if (!pr) { void openExternal(`https://github.com/${link.repo}/pull/${link.id}`); return; }
+  if (!diff) {
+    setView("list");
+    if (flashPrRow(pr.repo, pr.id)) return;
+  }
+  void openPrDiff(pr);
+}
+
+/** How long a zugit:// link waits for the first PR list before going to GitHub. */
+const LINK_WAIT_MS = 20_000;
+
+async function openPendingLink() {
+  let link: { repo: string; number: number } | null;
+  try {
+    link = await invoke<{ repo: string; number: number } | null>("deep_link_take");
+  } catch {
+    return;
+  }
+  if (!link) return;
+  // Launched by the link: the list is still on its way.
+  for (let waited = 0; !state.currentDashboard && waited < LINK_WAIT_MS; waited += 250) {
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+  openPrLink({ repo: link.repo, id: link.number }, true);
+}
 
 function showDemoToast(stage: number) {
   if (_demoToastEl) {
