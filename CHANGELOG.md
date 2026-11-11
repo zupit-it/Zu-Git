@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.1.1] - 2026-11-11
+
 ### Added
 - **Slack: who is who, filled once for the team** — in **Settings → Slack**, **Esporta tabella**
   saves the GitHub → Slack table to Downloads; a colleague's **Importa…** shows it as a proposal
