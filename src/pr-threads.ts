@@ -39,6 +39,34 @@ export interface GhThread {
   moreComments: number;
 }
 
+/** One entry of the PR's Conversation tab: its description, a comment on the PR, a review's verdict and text. */
+export interface GhConversationItem {
+  kind: "description" | "comment" | "review";
+  author: string;
+  avatarUrl: string;
+  body: string;
+  createdAt: string;
+  url: string;
+  state: "approved" | "changes_requested" | "commented" | "dismissed" | null;
+  minimized: string | null;
+}
+
+export interface GhConversation {
+  /** Oldest first, the description at the top. */
+  items: GhConversationItem[];
+  /** Older comments left to read on GitHub. */
+  moreComments: number;
+}
+
+export function getPrConversation(repo: string, number: number): Promise<GhConversation> {
+  return invoke<GhConversation>("fetch_pr_conversation", { repo, number });
+}
+
+/** Changes whenever something in it does: a new comment, an edit, one hidden. */
+export function conversationSignature(c: GhConversation): string {
+  return JSON.stringify(c);
+}
+
 export function getPrThreads(repo: string, number: number): Promise<GhThread[]> {
   return invoke<GhThread[]>("fetch_pr_threads", { repo, number });
 }

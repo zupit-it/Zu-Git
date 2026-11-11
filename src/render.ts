@@ -11,7 +11,7 @@ import {
   personLoadLevel, teamLoadLevel, loginInitials, errorMessage,
 } from "./utils";
 import {
-  applyListFilters,
+  activeFilters, applyListFilters, draftsMatching, listBase,
   countPendingReviewsForViewer, countMyChangesRequested,
   getMyPendingReviewIds, getMyChangesRequestedIds,
   getAvailableRepos,
@@ -359,55 +359,91 @@ export function renderToolbarRepoFilters(snapshot: DashboardSnapshot | null) {
 
 export function renderListFilters(snapshot: DashboardSnapshot) {
   const searchInput = document.querySelector<HTMLInputElement>("[data-list-search]");
-  const myReviewToggle = document.querySelector<HTMLInputElement>("[data-filter-my-review-pending]");
-  const myPrsToggle = document.querySelector<HTMLInputElement>("[data-filter-my-prs]");
-  const internalToggle = document.querySelector<HTMLInputElement>("[data-filter-internal]");
-  const teamToggle = document.querySelector<HTMLInputElement>("[data-filter-team]");
-  const collaboratorToggle = document.querySelector<HTMLInputElement>("[data-filter-collaborator]");
-  const groupByReleaseToggle = document.querySelector<HTMLInputElement>("[data-filter-group-by-release]");
-  const showDraftToggle = document.querySelector<HTMLInputElement>("[data-filter-show-draft]");
-  const myReviewCountBadge = document.querySelector<HTMLElement>("[data-filter-my-review-count]");
-  const myPrsCountBadge = document.querySelector<HTMLElement>("[data-filter-my-prs-count]");
-  const myPendingReviewCount = countPendingReviewsForViewer(snapshot);
-  const myChangesRequestedCount = countMyChangesRequested(snapshot);
-
   if (searchInput && searchInput.value !== state.listSearchQuery) {
     searchInput.value = state.listSearchQuery;
   }
 
-  if (myReviewToggle) {
-    myReviewToggle.checked = state.onlyMyPendingReviews;
-    myReviewToggle.disabled = !snapshot.viewerLogin;
-    myReviewToggle.title = snapshot.viewerLogin
-      ? `Filter using ${snapshot.viewerLogin}`
-      : "Unavailable until GitHub viewer info is loaded";
+  // Show: one of All, To review, Mine.
+  const scope = state.onlyMyPendingReviews ? "review" : state.onlyMyPullRequests ? "mine" : "all";
+  const viewer = snapshot.viewerLogin?.toLowerCase();
+  document.querySelectorAll<HTMLButtonElement>("[data-scope]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.scope === scope));
+    if (button.dataset.scope === "all") return;
+    button.disabled = !viewer;
+    button.title = !viewer
+      ? "Unavailable until GitHub viewer info is loaded"
+      : button.dataset.scope === "review"
+        ? `Pull requests waiting for a review from ${snapshot.viewerLogin}`
+        : `Pull requests opened by ${snapshot.viewerLogin}`;
+  });
+  const toReview = countPendingReviewsForViewer(snapshot);
+  const reviewCount = document.querySelector<HTMLElement>("[data-scope-count-review]");
+  if (reviewCount) {
+    reviewCount.textContent = String(toReview);
+    reviewCount.hidden = toReview === 0;
+  }
+  const mine = viewer
+    ? snapshot.prs.filter((pr) => pr.author.toLowerCase() === viewer && (state.showDraft || !pr.isDraft)).length
+    : 0;
+  const mineCount = document.querySelector<HTMLElement>("[data-scope-count-mine]");
+  if (mineCount) {
+    mineCount.textContent = String(mine);
+    mineCount.hidden = mine === 0;
+  }
+  const changesRequested = countMyChangesRequested(snapshot);
+  const mineAttn = document.querySelector<HTMLElement>("[data-scope-attn-mine]");
+  if (mineAttn) {
+    mineAttn.hidden = changesRequested === 0;
+    mineAttn.title = `${changesRequested} with changes requested`;
   }
 
-  if (myReviewCountBadge) {
-    myReviewCountBadge.textContent = `· ${myPendingReviewCount} need action`;
-    myReviewCountBadge.toggleAttribute("hidden", myPendingReviewCount === 0);
-  }
+  // Authors: a set, at least one on.
+  const authors: Record<string, boolean> = {
+    internal: state.showInternalOnly,
+    team: state.showTeamOnly,
+    collaborator: state.showCollaboratorOnly,
+  };
+  const on = Object.values(authors).filter(Boolean).length;
+  document.querySelectorAll<HTMLButtonElement>("[data-author]").forEach((button) => {
+    const pressed = authors[button.dataset.author ?? ""] ?? false;
+    const last = pressed && on === 1;
+    button.setAttribute("aria-pressed", String(pressed));
+    if (last) button.setAttribute("aria-disabled", "true");
+    else button.removeAttribute("aria-disabled");
+    button.title = last ? "At least one author type stays on" : "";
+  });
+  const authorsLabel = document.querySelector<HTMLElement>("[data-authors-label]");
+  if (authorsLabel) authorsLabel.textContent = on === 3 ? "all" : `${on} of 3`;
 
-  if (myPrsToggle) {
-    myPrsToggle.checked = state.onlyMyPullRequests;
-    myPrsToggle.disabled = !snapshot.viewerLogin;
-    myPrsToggle.title = snapshot.viewerLogin
-      ? `Filter using ${snapshot.viewerLogin}`
-      : "Unavailable until GitHub viewer info is loaded";
-  }
-
-  if (myPrsCountBadge) {
-    myPrsCountBadge.textContent = `· ${myChangesRequestedCount} need action`;
-    myPrsCountBadge.toggleAttribute("hidden", myChangesRequestedCount === 0);
-  }
-
-  if (internalToggle) internalToggle.checked = state.showInternalOnly;
-  if (teamToggle) teamToggle.checked = state.showTeamOnly;
-  if (collaboratorToggle) collaboratorToggle.checked = state.showCollaboratorOnly;
-  if (groupByReleaseToggle) groupByReleaseToggle.checked = state.groupByRelease;
-  if (showDraftToggle) showDraftToggle.checked = state.showDraft;
+  document.querySelector<HTMLElement>("[data-filter-show-draft]")
+    ?.setAttribute("aria-checked", String(state.showDraft));
+  const group = document.querySelector<HTMLSelectElement>("[data-filter-group]");
+  if (group) group.value = state.groupByRelease ? "release" : "none";
 
   renderToolbarRepoFilters(snapshot);
+}
+
+/**
+ * The line under the toolbar: how many PRs show of those the Drafts switch
+ * lets through, and one chip per filter on, each with its own ×.
+ */
+export function renderActiveFilters(shown: PullRequestSummary[]) {
+  const target = document.querySelector<HTMLElement>("[data-active-filters-items]");
+  const snapshot = state.currentDashboard;
+  if (!target || !snapshot) return;
+  const filters = activeFilters(snapshot);
+  const plural = (n: number) => `PR${n === 1 ? "" : "s"}`;
+  if (filters.length === 0) {
+    target.innerHTML = `<span class="laf-count"><strong>${shown.length}</strong> ${plural(shown.length)}</span>` +
+      `<span class="laf-none">· no filters on</span>`;
+    return;
+  }
+  const base = listBase(snapshot);
+  target.innerHTML = `<span class="laf-count"><strong>${shown.length}</strong> of ${base} ${plural(base)}</span>` +
+    filters.map((f) =>
+      `<span class="laf-chip">${escHtml(f.label)}${f.value ? ` <strong>${escHtml(f.value)}</strong>` : ""}` +
+      `<button type="button" data-clear-filter="${f.key}" aria-label="Remove this filter" title="Remove only this filter">×</button></span>`,
+    ).join("");
 }
 
 // ── PR row rendering ──────────────────────────────────────────────────────────
@@ -422,9 +458,9 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string,
   const items: Array<{ login: string; avatarUrl?: string; tone: string; label: string; stale?: boolean; canRerequest?: boolean }> = [
     ...dedup(pr.blockingReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "fail", label: "Changes requested", canRerequest: isMyPr })),
     ...dedup(pr.pendingReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "warn", label: "Review required" })),
-    ...dedup(pr.staleApprovers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "ok", label: "Approved", stale: true })),
+    ...dedup(pr.staleApprovers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "ok", label: "Approved", stale: true, canRerequest: isMyPr })),
     ...dedup(pr.currentApprovers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "ok", label: "Approved", stale: false })),
-    ...dedup(pr.commentedReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "neutral", label: "Commented" })),
+    ...dedup(pr.commentedReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "neutral", label: "Commented", canRerequest: isMyPr })),
   ];
 
   const mutedClass = isDraft ? " review-badge--muted" : "";
@@ -620,7 +656,19 @@ export function renderListTable(prs: PullRequestSummary[]) {
   const viewerLogin = state.currentDashboard?.viewerLogin;
 
   if (prs.length === 0) {
-    target.innerHTML = `<div class="list-empty">No pull requests available.</div>`;
+    const snapshot = state.currentDashboard;
+    if (!snapshot || activeFilters(snapshot).length === 0) {
+      target.innerHTML = `<div class="list-empty">No pull requests available.</div>`;
+      return;
+    }
+    // A draft the filters let through is told, with its own switch: nothing else moves.
+    const drafts = draftsMatching(snapshot);
+    target.innerHTML = `<div class="list-empty">No pull requests match these filters: remove one above.` +
+      (drafts
+        ? `<div class="list-empty-hint">${drafts} draft${drafts === 1 ? " matches" : "s match"} · ` +
+          `<button type="button" class="list-empty-link" data-show-drafts>Show drafts</button></div>`
+        : "") +
+      `</div>`;
     return;
   }
 
@@ -684,6 +732,42 @@ export function renderListTable(prs: PullRequestSummary[]) {
 
 export function renderListBoard(prs: PullRequestSummary[]) {
   renderListTable(prs);
+  renderActiveFilters(prs);
+  flashPendingRow();
+}
+
+/** Scrolls the list to a PR's row and lights it up a moment; false when the
+ *  list's filters hide it. */
+export function flashPrRow(repo: string, id: number): boolean {
+  const row = document.querySelector<HTMLElement>(`[data-pr-id="${CSS.escape(`${repo}/${id}`)}"]`);
+  if (!row) return false;
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  row.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+  row.classList.remove("pr-row--flash");
+  void row.offsetWidth;
+  row.classList.add("pr-row--flash");
+  row.addEventListener("animationend", () => row.classList.remove("pr-row--flash"), { once: true });
+  return true;
+}
+
+/**
+ * A PR to light up once a refreshed list has its row — one just opened. The
+ * list on screen is not enough: a draft just promoted is there already, in its
+ * old state, and the refresh redraws its row.
+ */
+let pendingFlash: { repo: string; id: number; until: number; before: DashboardSnapshot | null } | null = null;
+const PENDING_FLASH_MS = 60_000;
+
+export function flashPrRowWhenListed(repo: string, id: number) {
+  pendingFlash = { repo, id, until: Date.now() + PENDING_FLASH_MS, before: state.currentDashboard };
+}
+
+function flashPendingRow() {
+  if (!pendingFlash) return;
+  if (Date.now() > pendingFlash.until) { pendingFlash = null; return; }
+  if (state.currentView !== "list" || state.currentDashboard === pendingFlash.before) return;
+  // Hidden by the list's filters: it lights up if they let it through, until it expires.
+  if (flashPrRow(pendingFlash.repo, pendingFlash.id)) pendingFlash = null;
 }
 
 // ── Reviewer load bar ─────────────────────────────────────────────────────────

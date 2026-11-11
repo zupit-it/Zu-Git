@@ -38,7 +38,7 @@ query($owner: String!, $repo: String!, $cursor: String) {
             }
           }
         }
-        reviews(first: 100) {
+        reviews(last: 100) {
           nodes {
             state
             submittedAt
@@ -71,6 +71,10 @@ query($owner: String!, $repo: String!, $cursor: String) {
                       conclusion
                       startedAt
                       completedAt
+                      checkSuite {
+                        app { slug }
+                        workflowRun { event workflow { name } }
+                      }
                     }
                     ... on StatusContext {
                       context
@@ -246,10 +250,36 @@ struct GqlStatusContext {
     conclusion: Option<String>,
     started_at: Option<String>,
     completed_at: Option<String>,
+    check_suite: Option<GqlCheckSuite>,
     // StatusContext fields (legacy): aggregated via rollup.state, named in failed_check_names
     context: Option<String>,
     #[serde(default, deserialize_with = "lowercase")]
     state: Option<String>,
+}
+
+/// Where a check run comes from: the workflow and event for GitHub Actions, the
+/// app otherwise. Two jobs named alike in different workflows are different checks.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GqlCheckSuite {
+    app: Option<GqlCheckApp>,
+    workflow_run: Option<GqlWorkflowRun>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct GqlCheckApp {
+    slug: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct GqlWorkflowRun {
+    event: String,
+    workflow: GqlWorkflow,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct GqlWorkflow {
+    name: String,
 }
 
 fn lowercase<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
@@ -679,14 +709,19 @@ fn build_pr_details(pr: &GqlPr, _head_sha: &str) -> PrDetails {
         .filter_map(|rr| rr.requested_reviewer.as_ref()?.login.clone())
         .collect();
 
-    let review_summary = summarize_reviews(&pr.reviews.nodes, &requested_logins);
+    let author = pr.author.as_ref().map(|a| a.login.as_str()).unwrap_or("");
+    let review_summary = summarize_reviews(&pr.reviews.nodes, &requested_logins, author);
     let rollup = pr
         .commits
         .nodes
         .first()
         .and_then(|c| c.commit.status_check_rollup.as_ref());
     let pipeline_state = summarize_pipeline_state(rollup);
-    let failed_checks = failed_check_names(rollup);
+    let failed_checks = if pipeline_state == PipelineState::Failure {
+        failed_check_names(rollup)
+    } else {
+        vec![]
+    };
 
     let auto_merge_method = pr.auto_merge_request.as_ref().map(|r| r.merge_method.clone());
     let unresolved_threads = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved).count() as u32;
@@ -724,7 +759,18 @@ fn summarize_merge_status(mergeable: Option<&str>, merge_state_status: Option<&s
 
 // ── Review summary ────────────────────────────────────────────────────────────
 
-fn summarize_reviews(reviews: &[GqlReview], requested_reviewers: &[String]) -> GithubReviewSummary {
+/// Each reviewer's state as GitHub's Reviewers list shows it:
+/// - their latest approval, change request or dismissed review stands; a comment
+///   after it — a reply in a conversation is one — does not take its place;
+/// - a reviewer asked for a review again is awaiting one, whatever they said
+///   before: they are left out here and read as pending;
+/// - the PR's author is no reviewer (their replies are reviews too), nor are
+///   unsubmitted reviews.
+fn summarize_reviews(reviews: &[GqlReview], requested_reviewers: &[String], author: &str) -> GithubReviewSummary {
+    fn opinionated(state: &str) -> bool {
+        matches!(state, "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED")
+    }
+
     let mut latest: HashMap<String, &GqlReview> = HashMap::new();
 
     for review in reviews {
@@ -732,11 +778,20 @@ fn summarize_reviews(reviews: &[GqlReview], requested_reviewers: &[String]) -> G
             Some(u) => &u.login,
             None => continue,
         };
-        let next_ts = parse_ts(review.submitted_at.as_deref());
-        let better = latest
-            .get(login.as_str())
-            .map(|cur| next_ts >= parse_ts(cur.submitted_at.as_deref()))
-            .unwrap_or(true);
+        if review.state == "PENDING"
+            || login.eq_ignore_ascii_case(author)
+            || requested_reviewers.iter().any(|r| r.eq_ignore_ascii_case(login))
+        {
+            continue;
+        }
+        let better = match latest.get(login.as_str()) {
+            None => true,
+            Some(cur) => match (opinionated(&cur.state), opinionated(&review.state)) {
+                (true, false) => false,
+                (false, true) => true,
+                _ => parse_ts(review.submitted_at.as_deref()) >= parse_ts(cur.submitted_at.as_deref()),
+            },
+        };
         if better {
             latest.insert(login.clone(), review);
         }
@@ -751,12 +806,13 @@ fn summarize_reviews(reviews: &[GqlReview], requested_reviewers: &[String]) -> G
         match review.state.as_str() {
             "APPROVED" => current_approvers.push(login.clone()),
             "DISMISSED" => stale_approvers.push(login.clone()),
-            "CHANGES_REQUESTED" if !requested_reviewers.contains(login) => {
-                blocking_reviewers.push(login.clone());
-            }
+            "CHANGES_REQUESTED" => blocking_reviewers.push(login.clone()),
             "COMMENTED" => commented_reviewers.push(login.clone()),
             _ => {}
         }
+    }
+    for list in [&mut current_approvers, &mut stale_approvers, &mut blocking_reviewers, &mut commented_reviewers] {
+        list.sort();
     }
 
     GithubReviewSummary {
@@ -787,9 +843,25 @@ fn summarize_pipeline_state(rollup: Option<&GqlStatusCheckRollup>) -> PipelineSt
         .filter(|c| c.typename == "CheckRun")
         .collect();
 
-    // Deduplicate check runs by name, keeping the most recent execution.
+    // Deduplicate check runs by workflow and name, keeping the most recent execution.
     let latest = keep_latest_check_runs(&check_runs);
 
+    let has_action_required = latest.iter().any(|cr| {
+        cr.status.as_deref() == Some("completed")
+            && cr.conclusion.as_deref() == Some("action_required")
+    });
+
+    // rollup.state is GitHub's own verdict over CheckRuns and legacy StatusContexts,
+    // reruns and superseded runs included: once it settles it wins over our reading
+    // of the single runs, which can still hold an old failure.
+    match rollup.state.as_str() {
+        "FAILURE" | "ERROR" => return PipelineState::Failure,
+        "SUCCESS" if has_action_required => return PipelineState::ActionRequired,
+        "SUCCESS" => return PipelineState::Success,
+        _ => {}
+    }
+
+    // Still running: a job that already failed turns the pipeline red early.
     let has_failed = latest.iter().any(|cr| {
         cr.status.as_deref() == Some("completed")
             && matches!(
@@ -800,18 +872,8 @@ fn summarize_pipeline_state(rollup: Option<&GqlStatusCheckRollup>) -> PipelineSt
     if has_failed {
         return PipelineState::Failure;
     }
-
-    let has_action_required = latest.iter().any(|cr| {
-        cr.status.as_deref() == Some("completed")
-            && cr.conclusion.as_deref() == Some("action_required")
-    });
-
-    // rollup.state aggregates both CheckRun and legacy StatusContext results.
-    match rollup.state.as_str() {
-        "FAILURE" | "ERROR" => return PipelineState::Failure,
-        "SUCCESS" if !has_action_required => return PipelineState::Success,
-        "PENDING" => return PipelineState::Pending,
-        _ => {}
+    if rollup.state == "PENDING" {
+        return PipelineState::Pending;
     }
 
     let has_pending = latest.iter().any(|cr| {
@@ -1351,6 +1413,132 @@ fn parse_review_thread(t: &serde_json::Value) -> ReviewThread {
     }
 }
 
+/// One entry of a PR's Conversation tab: its description, a comment on the PR
+/// as a whole, or a review's verdict and text.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationItem {
+    /// "description", "comment" or "review".
+    pub kind: String,
+    pub author: String,
+    pub avatar_url: String,
+    pub body: String,
+    pub created_at: String,
+    pub url: String,
+    /// A review's verdict: "approved", "changes_requested", "commented" or "dismissed".
+    pub state: Option<String>,
+    /// Why GitHub hides it ("outdated", "spam"…); null when shown.
+    pub minimized: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrConversation {
+    /// Oldest first, the description at the top, as GitHub lists them.
+    pub items: Vec<ConversationItem>,
+    /// Older comments left to read on GitHub.
+    pub more_comments: u64,
+}
+
+const CONVERSATION_QUERY: &str = r#"
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      body createdAt url
+      author { login avatarUrl(size: 40) }
+      comments(last: 100) {
+        totalCount
+        nodes {
+          author { login avatarUrl(size: 40) }
+          body createdAt url isMinimized minimizedReason
+        }
+      }
+      reviews(last: 100) {
+        nodes {
+          author { login avatarUrl(size: 40) }
+          body state submittedAt url
+        }
+      }
+    }
+  }
+}
+"#;
+
+/// The PR's Conversation tab, for the diff view: what is said about the PR as a
+/// whole rather than on a line. Not cached: it changes whenever someone comments.
+pub async fn fetch_pr_conversation(
+    repo: &str,
+    number: u64,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<PrConversation, ApiError> {
+    let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+    let data = graphql_data(
+        CONVERSATION_QUERY,
+        serde_json::json!({ "owner": owner, "name": name, "number": number }),
+        settings,
+        client,
+    )
+    .await?;
+    Ok(parse_conversation(&data["repository"]["pullRequest"]))
+}
+
+fn parse_conversation(pr: &serde_json::Value) -> PrConversation {
+    let text = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+    let author = |v: &serde_json::Value| v["author"]["login"].as_str().unwrap_or("ghost").to_string();
+    let mut items = Vec::new();
+
+    let comments = pr["comments"]["nodes"].as_array().cloned().unwrap_or_default();
+    for c in &comments {
+        items.push(ConversationItem {
+            kind: "comment".into(),
+            author: author(c),
+            avatar_url: text(&c["author"]["avatarUrl"]),
+            body: text(&c["body"]),
+            created_at: text(&c["createdAt"]),
+            url: text(&c["url"]),
+            state: None,
+            minimized: (c["isMinimized"].as_bool() == Some(true)).then(|| text(&c["minimizedReason"]).to_lowercase()),
+        });
+    }
+    for r in pr["reviews"]["nodes"].as_array().into_iter().flatten() {
+        let state = text(&r["state"]).to_lowercase();
+        let body = text(&r["body"]);
+        // Unsubmitted, or only the wrapper of comments on lines: those are in the diff.
+        if state == "pending" || (state == "commented" && body.trim().is_empty()) {
+            continue;
+        }
+        items.push(ConversationItem {
+            kind: "review".into(),
+            author: author(r),
+            avatar_url: text(&r["author"]["avatarUrl"]),
+            body,
+            created_at: text(&r["submittedAt"]),
+            url: text(&r["url"]),
+            state: Some(state),
+            minimized: None,
+        });
+    }
+    items.sort_by_key(|i| parse_ts(Some(&i.created_at)));
+
+    let description = text(&pr["body"]);
+    if !description.trim().is_empty() {
+        items.insert(0, ConversationItem {
+            kind: "description".into(),
+            author: author(pr),
+            avatar_url: text(&pr["author"]["avatarUrl"]),
+            body: description,
+            created_at: text(&pr["createdAt"]),
+            url: text(&pr["url"]),
+            state: None,
+            minimized: None,
+        });
+    }
+
+    let total = pr["comments"]["totalCount"].as_u64().unwrap_or(comments.len() as u64);
+    PrConversation { items, more_comments: total.saturating_sub(comments.len() as u64) }
+}
+
 /// What changed between two commits of a PR, file by file: what carries a
 /// comment written on the older one over to the newer.
 pub async fn fetch_commit_compare(
@@ -1869,12 +2057,13 @@ fn keep_latest_check_runs<'a>(runs: &[&'a GqlStatusContext]) -> Vec<&'a GqlStatu
     let mut latest: HashMap<String, &'a GqlStatusContext> = HashMap::new();
 
     for cr in runs {
-        let key = cr
+        let name = cr
             .name
             .as_deref()
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| format!("__unnamed__:{}", cr.database_id.unwrap_or(0)));
+        let key = format!("{}\u{0}{name}", check_source(cr));
 
         let should_replace = match latest.get(&key) {
             None => true,
@@ -1897,13 +2086,27 @@ fn keep_latest_check_runs<'a>(runs: &[&'a GqlStatusContext]) -> Vec<&'a GqlStatu
     latest.into_values().collect()
 }
 
+/// The workflow and event (or app) a check run belongs to, "" when GitHub doesn't say.
+fn check_source(cr: &GqlStatusContext) -> String {
+    let Some(suite) = &cr.check_suite else {
+        return String::new();
+    };
+    match (&suite.workflow_run, &suite.app) {
+        (Some(run), _) => format!("{} ({})", run.workflow.name, run.event),
+        (None, Some(app)) => app.slug.clone(),
+        (None, None) => String::new(),
+    }
+}
+
+/// When a run last moved. A run with neither time has not started yet: it is a
+/// rerun just queued, newer than any attempt before it.
 fn ctx_timestamp(cr: &GqlStatusContext) -> i64 {
     cr.completed_at
         .as_deref()
         .or(cr.started_at.as_deref())
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.timestamp_millis())
-        .unwrap_or(i64::MIN)
+        .unwrap_or(i64::MAX)
 }
 
 fn tag_ref_timestamp_ms(tag_ref: &serde_json::Value) -> Option<i64> {
@@ -2674,6 +2877,56 @@ mod tests {
 
     const T1: &str = "2026-10-15T08:00:00Z";
     const T2: &str = "2026-10-15T09:00:00Z";
+    const T3: &str = "2026-10-15T10:00:00Z";
+
+    fn reviews(list: &[(&str, &str, Option<&str>)]) -> Vec<GqlReview> {
+        list.iter()
+            .map(|(login, state, at)| serde_json::from_value(serde_json::json!({
+                "state": state, "submittedAt": at, "author": { "login": login, "avatarUrl": null },
+            })).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_comment_after_a_verdict_leaves_the_verdict_standing() {
+        let r = reviews(&[
+            ("anna", "APPROVED", Some(T1)), ("anna", "COMMENTED", Some(T2)),
+            ("bea", "CHANGES_REQUESTED", Some(T1)), ("bea", "COMMENTED", Some(T3)),
+            ("carl", "COMMENTED", Some(T1)),
+        ]);
+        let s = summarize_reviews(&r, &[], "dev");
+        assert_eq!(s.current_approvers, vec!["anna"]);
+        assert_eq!(s.blocking_reviewers, vec!["bea"]);
+        assert_eq!(s.commented_reviewers, vec!["carl"]);
+    }
+
+    #[test]
+    fn the_latest_verdict_wins() {
+        let r = reviews(&[("anna", "CHANGES_REQUESTED", Some(T1)), ("anna", "APPROVED", Some(T2))]);
+        assert_eq!(summarize_reviews(&r, &[], "dev").current_approvers, vec!["anna"]);
+        let r = reviews(&[("anna", "APPROVED", Some(T1)), ("anna", "DISMISSED", Some(T2))]);
+        assert_eq!(summarize_reviews(&r, &[], "dev").stale_approvers, vec!["anna"]);
+    }
+
+    #[test]
+    fn a_reviewer_asked_again_awaits_a_review_whatever_they_said_before() {
+        let r = reviews(&[
+            ("anna", "COMMENTED", Some(T1)), ("bea", "APPROVED", Some(T1)),
+            ("carl", "CHANGES_REQUESTED", Some(T1)), ("dino", "DISMISSED", Some(T1)),
+        ]);
+        let requested = ["Anna", "bea", "carl", "dino"].map(String::from);
+        let s = summarize_reviews(&r, &requested, "dev");
+        assert!(s.commented_reviewers.is_empty() && s.current_approvers.is_empty());
+        assert!(s.blocking_reviewers.is_empty() && s.stale_approvers.is_empty());
+    }
+
+    #[test]
+    fn the_author_and_unsubmitted_reviews_are_no_reviewers() {
+        let r = reviews(&[("dev", "COMMENTED", Some(T2)), ("anna", "APPROVED", Some(T1)), ("anna", "PENDING", None)]);
+        let s = summarize_reviews(&r, &[], "Dev");
+        assert!(s.commented_reviewers.is_empty());
+        assert_eq!(s.current_approvers, vec!["anna"]);
+    }
 
     #[test]
     fn a_failed_check_run_makes_the_pipeline_fail_while_others_still_run() {
@@ -2702,6 +2955,48 @@ mod tests {
         let r = rollup("SUCCESS", &[("build", "COMPLETED", Some("SUCCESS"), T1)]);
         assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Success);
         assert_eq!(summarize_pipeline_state(None), PipelineState::Unknown);
+    }
+
+    /// A check run of the GitHub Actions workflow `workflow`, as GraphQL sends it.
+    fn workflow_run(id: u64, workflow: &str, name: &str, status: &str, conclusion: Option<&str>, at: Option<&str>) -> serde_json::Value {
+        serde_json::json!({
+            "__typename": "CheckRun", "databaseId": id, "name": name, "status": status,
+            "conclusion": conclusion, "startedAt": at, "completedAt": if status == "COMPLETED" { at } else { None },
+            "checkSuite": { "app": { "slug": "github-actions" },
+                            "workflowRun": { "event": "pull_request", "workflow": { "name": workflow } } },
+        })
+    }
+
+    fn rollup_of(state: &str, nodes: Vec<serde_json::Value>) -> GqlStatusCheckRollup {
+        serde_json::from_value(serde_json::json!({ "state": state, "contexts": { "nodes": nodes } })).unwrap()
+    }
+
+    #[test]
+    fn github_green_wins_over_an_old_failure_among_the_runs() {
+        // GitHub settled on green: a failed run it no longer counts doesn't turn us red.
+        let r = rollup("SUCCESS", &[("build", "COMPLETED", Some("SUCCESS"), T1), ("build", "COMPLETED", Some("FAILURE"), T2)]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Success);
+    }
+
+    #[test]
+    fn a_queued_rerun_replaces_the_failure_it_retries() {
+        let r = rollup_of("PENDING", vec![
+            workflow_run(1, "CI", "build", "COMPLETED", Some("FAILURE"), Some(T1)),
+            workflow_run(2, "CI", "build", "QUEUED", None, None),
+        ]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Pending);
+    }
+
+    #[test]
+    fn jobs_named_alike_in_two_workflows_are_two_checks() {
+        // Deploy's `build` failed before CI's `build` finished: still a red pipeline.
+        let r = rollup_of("PENDING", vec![
+            workflow_run(1, "Deploy", "build", "COMPLETED", Some("FAILURE"), Some(T1)),
+            workflow_run(2, "CI", "build", "COMPLETED", Some("SUCCESS"), Some(T2)),
+            workflow_run(3, "CI", "e2e", "IN_PROGRESS", None, Some(T2)),
+        ]);
+        assert_eq!(summarize_pipeline_state(Some(&r)), PipelineState::Failure);
+        assert_eq!(failed_check_names(Some(&r)), vec!["build"]);
     }
 
     #[test]
@@ -2808,6 +3103,29 @@ mod tests {
         );
         assert_eq!(github_error(r#"{"message":"Not Found"}"#), "Not Found");
         assert_eq!(github_error("Bad gateway"), "Bad gateway");
+    }
+
+    #[test]
+    fn the_conversation_reads_as_github_lists_it() {
+        let pr = serde_json::json!({
+            "body": "Adds the thing", "createdAt": "2026-10-15T07:00:00Z", "url": "https://github.com/o/r/pull/1",
+            "author": { "login": "dev", "avatarUrl": "https://a/dev" },
+            "comments": { "totalCount": 3, "nodes": [
+                { "author": { "login": "anna", "avatarUrl": "" }, "body": "Why?", "createdAt": T3, "url": "u1", "isMinimized": false },
+                { "author": null, "body": "spam", "createdAt": T1, "url": "u2", "isMinimized": true, "minimizedReason": "SPAM" },
+            ] },
+            "reviews": { "nodes": [
+                { "author": { "login": "bea" }, "body": "", "state": "APPROVED", "submittedAt": T2, "url": "u3" },
+                { "author": { "login": "bea" }, "body": "", "state": "COMMENTED", "submittedAt": T2, "url": "u4" },
+                { "author": { "login": "carl" }, "body": "Draft", "state": "PENDING", "submittedAt": null, "url": "u5" },
+            ] },
+        });
+        let c = parse_conversation(&pr);
+        let kinds: Vec<_> = c.items.iter().map(|i| (i.kind.as_str(), i.author.as_str())).collect();
+        assert_eq!(kinds, vec![("description", "dev"), ("comment", "ghost"), ("review", "bea"), ("comment", "anna")]);
+        assert_eq!(c.items[1].minimized.as_deref(), Some("spam"));
+        assert_eq!(c.items[2].state.as_deref(), Some("approved"));
+        assert_eq!(c.more_comments, 1);
     }
 
     #[test]

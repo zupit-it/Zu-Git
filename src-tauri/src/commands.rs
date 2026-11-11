@@ -248,6 +248,22 @@ pub async fn fetch_pr_threads(
     Ok(crate::github::fetch_review_threads(&repo, number, &settings, &state.http_client).await?)
 }
 
+/// What is said on a PR as a whole — its description, comments, the text of
+/// reviews — for the diff view. Not cached.
+#[tauri::command]
+pub async fn fetch_pr_conversation(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+) -> Result<crate::github::PrConversation, String> {
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let settings = storage::load_settings(&app).await?;
+    Ok(crate::github::fetch_pr_conversation(&repo, number, &settings, &state.http_client).await?)
+}
+
 /// Files and patches of a pull request at its latest commit, together with
 /// that commit: comments on them are anchored to it. The files are read
 /// alongside a first look at the PR's head and checked against a second one

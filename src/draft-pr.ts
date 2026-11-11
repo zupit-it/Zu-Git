@@ -1,9 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { state, type ChecklistItem, type DraftPrInfo, type BranchStats } from "./state";
 import { escHtml, avatarColor, loginInitials, errorMessage} from "./utils";
-import { setStatus, setView } from "./render";
+import { flashPrRowWhenListed, setStatus, setView } from "./render";
 import { getAvailableRepos } from "./filters";
-import { refreshDashboard } from "./api";
+import { openExternal, refreshDashboard } from "./api";
+import { showToast } from "./sprint-ui";
 import type { PullRequestSummary } from "./shared/pr-model";
 
 // ── Module-level SVG constants (reused in DOM patches) ────────────────────────
@@ -505,6 +506,7 @@ export async function openExistingDraftPr(pr: PullRequestSummary, triggerBtn?: H
 export async function publishNewPr(draft: boolean) {
   if (!state.draftPrInfo) return;
   if (checklistBlocking() && !draft) return; // keyboard shortcut guard
+  const repo = state.draftPrInfo.repo;
   const container = document.querySelector<HTMLElement>("[data-new-pr-container]");
   const titleInput = container?.querySelector<HTMLInputElement>("[data-new-pr-title]");
   const title = titleInput?.value.trim() ?? state.draftPrInfo.suggestedTitle;
@@ -543,8 +545,20 @@ export async function publishNewPr(draft: boolean) {
     const wasPromotion = state.draftPrNumber !== null;
     closeDraftPrCard();
     setStatus(wasPromotion ? "PR promoted successfully." : "PR created successfully.", "neutral");
-    void refreshDashboard("auto");
-    void invoke("open_external", { url: prUrl });
+    const number = Number(/\/pull\/(\d+)/.exec(prUrl)?.[1] ?? 0);
+    if (number) flashPrRowWhenListed(repo, number);
+    // A refresh already running, or GitHub not listing it yet: a few more looks.
+    const refreshUntilListed = async (looks: number) => {
+      await refreshDashboard("auto");
+      const listed = state.currentDashboard?.prs.some((pr) => pr.repo === repo && pr.id === number);
+      if (number && !listed && looks > 1) window.setTimeout(() => void refreshUntilListed(looks - 1), 3000);
+    };
+    void refreshUntilListed(3);
+    // The PR shows up in the list: GitHub opens only on request.
+    showToast(wasPromotion ? "PR pronta per la review" : draft ? "Draft PR aperta" : "PR aperta", {
+      tone: "success",
+      action: prUrl.startsWith("https://") ? { label: "Apri su GitHub", run: () => void openExternal(prUrl) } : undefined,
+    });
     if (jiraKey) {
       if (draft) {
         if (checklist.length > 0) {

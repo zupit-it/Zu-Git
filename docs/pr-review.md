@@ -145,6 +145,22 @@ The review comments already on the PR show as GitHub shows them:
   suggested change, inline code, bold and links. Everything is escaped first, and a link opens in the
   browser through `open_external`, which takes http(s) only.
 
+## The PR's conversation (`fetch_pr_conversation`, `renderConversationPanel`)
+
+What is said on the PR as a whole, as GitHub's Conversation tab shows it, sits above the files, after
+the reviewer's own block and before the conversations on lines:
+
+- The description, folded (its author knows it), then the comments on the PR (`comments`, the last
+  100; older ones are counted as *N older comments on GitHub*) and the reviews (`reviews`, the last
+  100) with their verdict — *Approved*, *Changes requested*, *Dismissed*, *Reviewed* — and text,
+  oldest first. A review with no text is a verdict on one line; a *commented* review with no text is
+  only the wrapper of comments on lines and is left out, as are unsubmitted ones. Comments GitHub
+  hides show as *Hidden on GitHub*.
+- Read-only: the time of each entry links to it on GitHub.
+- Fetched with the diff (and warmed up with it), again when ZuGit regains focus — at most once a
+  minute, with the conversations — after a review is published and on Reload. It hangs on no line,
+  so a push since the diff opened does not hold it back. Not cached.
+
 ## Your comments (`pr_review.rs` `UserReview`, `pr_comment_*` commands)
 
 - A click on a line number opens an editor under that line; pressing on one and dragging over more

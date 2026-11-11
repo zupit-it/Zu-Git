@@ -134,6 +134,7 @@ pub fn run() {
             pet_pack::pet_pack_info,
             pet_pack::pet_pack_export,
             commands::fetch_pr_threads,
+            commands::fetch_pr_conversation,
             commands::ai_review_list,
             commands::ai_review_get,
             commands::ai_review_set_status,

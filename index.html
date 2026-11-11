@@ -153,46 +153,46 @@
               <span class="list-search-kbd" data-search-kbd></span>
             </div>
 
+            <!-- Which PRs: one choice at a time, as the segments show. -->
+            <div class="lf-seg" role="group" aria-label="Show">
+              <span class="lf-label">Show</span>
+              <button type="button" data-scope="all" aria-pressed="true">All</button>
+              <button type="button" data-scope="review">To review<span class="lf-count lf-count--attn" data-scope-count-review hidden></span></button>
+              <button type="button" data-scope="mine">Mine<span class="lf-count" data-scope-count-mine hidden></span><span class="lf-dot" data-scope-attn-mine hidden></span></button>
+            </div>
+
             <div style="flex:1"></div>
 
-            <label class="filter-pill">
-              <input data-filter-my-review-pending type="checkbox" />
-              <span>Review request</span>
-              <span class="filter-pill-action-hint" data-filter-my-review-count hidden></span>
-            </label>
-            <label class="filter-pill">
-              <input data-filter-my-prs type="checkbox" />
-              <span>My PRs</span>
-              <span class="filter-pill-action-hint" data-filter-my-prs-count hidden></span>
-            </label>
+            <div class="lf-group" role="group" aria-label="Authors">
+              <span class="lf-label">Authors<em data-authors-label></em></span>
+              <button type="button" data-author="internal">Internal</button>
+              <button type="button" data-author="team">Team</button>
+              <button type="button" data-author="collaborator">Collaborator</button>
+            </div>
+            <!-- How the list is seen, not which PRs: never among the active filters. -->
+            <button type="button" class="lf-switch" data-filter-show-draft role="switch" aria-checked="true">
+              <span class="lf-switch__track" aria-hidden="true"></span>Drafts
+            </button>
             <div class="filter-divider"></div>
-            <label class="filter-pill">
-              <input data-filter-internal type="checkbox" />
-              <span>Internal</span>
+            <label class="lf-view" title="How the list is laid out: it hides no pull request">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5h10M4 7h8M4 10.5h8M2 7v3.5"/></svg>
+              <select data-filter-group aria-label="Group pull requests">
+                <option value="none">Plain list</option>
+                <option value="release">By release</option>
+              </select>
             </label>
-            <label class="filter-pill">
-              <input data-filter-team type="checkbox" />
-              <span>Team</span>
-            </label>
-            <label class="filter-pill">
-              <input data-filter-collaborator type="checkbox" />
-              <span>Collaborator</span>
-            </label>
-            <label class="filter-pill">
-              <input data-filter-group-by-release type="checkbox" />
-              <span>Group by release</span>
-            </label>
-            <label class="filter-pill">
-              <input data-filter-show-draft type="checkbox" />
-              <span>Show draft</span>
-            </label>
+          </div>
 
-            <!-- Loading hairline: absolutely positioned over the toolbar's bottom
+          <!-- The filters on, each with its own ×: always there and one line high,
+               so turning one on or off never moves the list. -->
+          <div class="list-active-filters" data-active-filters aria-live="polite">
+            <!-- Loading hairline: absolutely positioned over the row's bottom
                  border, so showing it cannot move a single row of the list. -->
             <div class="list-progress" data-list-loading hidden role="progressbar"
                  aria-label="Loading pull requests">
               <span class="sr-only" data-list-loading-label>Loading pull requests…</span>
             </div>
+            <div class="list-active-filters__items" data-active-filters-items></div>
           </div>
 
           <!-- Scrollable content -->
