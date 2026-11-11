@@ -1118,20 +1118,25 @@ html, body {
   text-transform: none;
   color: var(--ink-faint);
 }
+/* A small count after the label: the UI's own figures, centred, the ring drawn inside. */
 .lf-count {
-  min-width: 16px;
-  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
   padding: 0 4px;
-  border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-alt);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--ink-muted);
-  font: 700 10px/14px var(--font-mono);
-  text-align: center;
+  font: 600 9px/1 var(--font);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 /* Reviews waiting for you */
-.lf-count--attn { background: var(--accent); border-color: var(--accent); color: #fff; }
-.lf-seg button[aria-pressed="true"] .lf-count:not(.lf-count--attn) { background: var(--surface); border-color: var(--accent-bd); color: var(--accent-ink); }
+.lf-count--attn { background: var(--accent); box-shadow: none; color: #fff; }
+.lf-seg button[aria-pressed="true"] .lf-count:not(.lf-count--attn) { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent-bd); color: var(--accent-ink); }
 /* My PRs with changes requested: the red of their "Changes requested" badge */
 .lf-dot { width: 6px; height: 6px; margin-left: -2px; border-radius: 50%; background: var(--fail); }
 
