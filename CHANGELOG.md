@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.1.2] - 2026-11-11
+
 ### Added
 - **`zugit://` links open a PR's diff** — `zugit://pr/<owner>/<repo>/<number>` brings ZuGit up on
   that PR's diff, or on its GitHub page when the PR is not in your list; launched by the link,
