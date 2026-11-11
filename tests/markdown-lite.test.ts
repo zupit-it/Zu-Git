@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { renderMarkdown } from "../src/markdown-lite.ts";
+import { renderMarkdown, stripHtmlComments } from "../src/markdown-lite.ts";
 
 test("comment text is escaped: no tag or attribute gets through", () => {
   const html = renderMarkdown(`<img src=x onerror="alert(1)"> & <script>x</script>`);
@@ -71,4 +71,12 @@ test("lists, numbered or not, and task lists", () => {
 
 test("a heading is a line of its own, escaped like the rest", () => {
   assert.equal(renderMarkdown("## Note <b>\ntext"), `<div class="pd-md-h">Note &lt;b&gt;</div><div class="pd-md-p">text</div>`);
+});
+
+test("HTML comments are hidden as on GitHub, except in code", () => {
+  assert.equal(stripHtmlComments("View the run.\n<!-- NX_CLOUD_APP_COMMENT_END -->"), "View the run.\n");
+  assert.equal(stripHtmlComments("a <!-- one\nline two --> b"), "a  b");
+  const code = "```html\n<!-- kept -->\n```";
+  assert.equal(stripHtmlComments(`${code}\n<!-- gone -->`), `${code}\n`);
+  assert.equal(stripHtmlComments("<!-- never closed"), "<!-- never closed");
 });

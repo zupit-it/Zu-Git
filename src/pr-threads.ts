@@ -49,6 +49,8 @@ export interface GhConversationItem {
   url: string;
   state: "approved" | "changes_requested" | "commented" | "dismissed" | null;
   minimized: string | null;
+  /** Written by an app (CI, coverage, Nx Cloud…), not by a person. */
+  bot: boolean;
 }
 
 export interface GhConversation {

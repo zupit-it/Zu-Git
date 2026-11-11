@@ -21,6 +21,10 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "PR diff — the conversation in its own section",
+        body: "What is said on the PR as a whole no longer stands as a wall of text above the code. <strong>Conversation</strong>, first in the file list with its count, shows the description, the comments on the PR and the reviews in place of the files, in a column short enough to read; a file in the list brings the diff back. Above the files one line stands for it, with what is there and who spoke last. Comments from apps such as CI or Nx Cloud fold to one line, and the hidden markers they leave stay hidden, as on GitHub.",
+      },
+      {
         title: "Slack — fill who is who once for the team",
         body: "In <strong>Settings → Slack</strong>, <strong>Esporta tabella</strong> saves the GitHub → Slack table to your Downloads folder. Send it to your colleagues: their <strong>Importa…</strong> shows it as a proposal to review and save, so only one person needs Claude Code with Slack connected. The file holds GitHub logins, Slack names and ids, no token.",
       },

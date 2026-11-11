@@ -17,6 +17,34 @@ const FENCE_CLOSE = /^\s*```\s*$/;
 /** [label](https://…) or a bare https://… — run on escaped text, so quotes are entities already. */
 const LINK = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<)]+/g;
 
+/**
+ * GitHub hides `<!-- … -->` (bots leave their markers in them); inside fenced
+ * code they are code, and stay. An unclosed one is left as written.
+ */
+export function stripHtmlComments(text: string): string {
+  const out: string[] = [];
+  let prose: string[] = [];
+  const flush = () => {
+    if (prose.length) out.push(prose.join("\n").replace(/<!--[\s\S]*?-->/g, ""));
+    prose = [];
+  };
+  let inCode = false;
+  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
+    if (inCode) {
+      out.push(line);
+      if (FENCE_CLOSE.test(line)) inCode = false;
+    } else if (FENCE_OPEN.test(line)) {
+      flush();
+      out.push(line);
+      inCode = true;
+    } else {
+      prose.push(line);
+    }
+  }
+  flush();
+  return out.join("\n");
+}
+
 export function suggestionBlock(code: string): string {
   return `<div class="pd-ai-suggestion"><div class="pd-ai-suggestion__label">Suggested change</div><pre>${esc(code)}</pre></div>`;
 }

@@ -14,6 +14,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   GitHub logins, Slack names and ids, no token; ZuGit imports only its own tables, every id
   checked.
 
+### Changed
+- **Diff: the PR's conversation has a section of its own** — it no longer stands as a wall of text
+  above the code. **Conversation**, first in the file list with its count, shows the description,
+  the comments on the PR and the reviews in place of the files, in a column short enough to read;
+  a file in the list brings the diff back. Above the files a single line stands for it, with what
+  is there and who spoke last. Comments from apps (CI, Nx Cloud…) fold to one line, and the
+  `<!-- … -->` markers they leave are hidden, as on GitHub.
+
 ---
 
 ## [3.1.0] - 2026-11-11

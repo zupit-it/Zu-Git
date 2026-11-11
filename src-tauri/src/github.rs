@@ -1461,6 +1461,8 @@ pub struct ConversationItem {
     pub state: Option<String>,
     /// Why GitHub hides it ("outdated", "spam"…); null when shown.
     pub minimized: Option<String>,
+    /// Written by an app (CI, coverage, Nx Cloud…), not by a person.
+    pub bot: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1477,17 +1479,17 @@ query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       body createdAt url
-      author { login avatarUrl(size: 40) }
+      author { __typename login avatarUrl(size: 40) }
       comments(last: 100) {
         totalCount
         nodes {
-          author { login avatarUrl(size: 40) }
+          author { __typename login avatarUrl(size: 40) }
           body createdAt url isMinimized minimizedReason
         }
       }
       reviews(last: 100) {
         nodes {
-          author { login avatarUrl(size: 40) }
+          author { __typename login avatarUrl(size: 40) }
           body state submittedAt url
         }
       }
@@ -1518,6 +1520,11 @@ pub async fn fetch_pr_conversation(
 fn parse_conversation(pr: &serde_json::Value) -> PrConversation {
     let text = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
     let author = |v: &serde_json::Value| v["author"]["login"].as_str().unwrap_or("ghost").to_string();
+    // GraphQL names an app's account a Bot, and its login loses the "[bot]" REST shows.
+    let bot = |v: &serde_json::Value| {
+        v["author"]["__typename"].as_str() == Some("Bot")
+            || v["author"]["login"].as_str().is_some_and(|login| login.ends_with("[bot]"))
+    };
     let mut items = Vec::new();
 
     let comments = pr["comments"]["nodes"].as_array().cloned().unwrap_or_default();
@@ -1531,6 +1538,7 @@ fn parse_conversation(pr: &serde_json::Value) -> PrConversation {
             url: text(&c["url"]),
             state: None,
             minimized: (c["isMinimized"].as_bool() == Some(true)).then(|| text(&c["minimizedReason"]).to_lowercase()),
+            bot: bot(c),
         });
     }
     for r in pr["reviews"]["nodes"].as_array().into_iter().flatten() {
@@ -1549,6 +1557,7 @@ fn parse_conversation(pr: &serde_json::Value) -> PrConversation {
             url: text(&r["url"]),
             state: Some(state),
             minimized: None,
+            bot: bot(r),
         });
     }
     items.sort_by_key(|i| parse_ts(Some(&i.created_at)));
@@ -1564,6 +1573,7 @@ fn parse_conversation(pr: &serde_json::Value) -> PrConversation {
             url: text(&pr["url"]),
             state: None,
             minimized: None,
+            bot: bot(pr),
         });
     }
 
@@ -2910,6 +2920,7 @@ mod tests {
     const T1: &str = "2026-10-15T08:00:00Z";
     const T2: &str = "2026-10-15T09:00:00Z";
     const T3: &str = "2026-10-15T10:00:00Z";
+    const T4: &str = "2026-10-15T11:00:00Z";
 
     fn reviews(list: &[(&str, &str, Option<&str>)]) -> Vec<GqlReview> {
         list.iter()
@@ -3142,8 +3153,9 @@ mod tests {
         let pr = serde_json::json!({
             "body": "Adds the thing", "createdAt": "2026-10-15T07:00:00Z", "url": "https://github.com/o/r/pull/1",
             "author": { "login": "dev", "avatarUrl": "https://a/dev" },
-            "comments": { "totalCount": 3, "nodes": [
+            "comments": { "totalCount": 4, "nodes": [
                 { "author": { "login": "anna", "avatarUrl": "" }, "body": "Why?", "createdAt": T3, "url": "u1", "isMinimized": false },
+                { "author": { "__typename": "Bot", "login": "nx-cloud" }, "body": "CI", "createdAt": T4, "url": "u6", "isMinimized": false },
                 { "author": null, "body": "spam", "createdAt": T1, "url": "u2", "isMinimized": true, "minimizedReason": "SPAM" },
             ] },
             "reviews": { "nodes": [
@@ -3154,7 +3166,12 @@ mod tests {
         });
         let c = parse_conversation(&pr);
         let kinds: Vec<_> = c.items.iter().map(|i| (i.kind.as_str(), i.author.as_str())).collect();
-        assert_eq!(kinds, vec![("description", "dev"), ("comment", "ghost"), ("review", "bea"), ("comment", "anna")]);
+        assert_eq!(
+            kinds,
+            vec![("description", "dev"), ("comment", "ghost"), ("review", "bea"), ("comment", "anna"), ("comment", "nx-cloud")]
+        );
+        let bots: Vec<bool> = c.items.iter().map(|i| i.bot).collect();
+        assert_eq!(bots, vec![false, false, false, false, true]);
         assert_eq!(c.items[1].minimized.as_deref(), Some("spam"));
         assert_eq!(c.items[2].state.as_deref(), Some("approved"));
         assert_eq!(c.more_comments, 1);
