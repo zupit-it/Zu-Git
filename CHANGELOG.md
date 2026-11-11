@@ -11,14 +11,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Nudge a reviewer on Slack** — on your own PRs, a bell next to a reviewer whose review is
   still required puts a short message with the PR link on the clipboard and opens your direct
   message with them in the Slack app: paste and send. ZuGit never writes to Slack itself; if Slack
-  is not installed it says so, and the message is still on the clipboard.
-  - Who is who lives in **Settings → Slack**: the workspace id and one Slack member id per GitHub
-    user. The bell shows only for people listed there.
-  - An assistant can fill the table: in Claude Code, with Slack connected and ZuGit's MCP
-    connector, run `/mcp__zugit__map_slack_users`. It looks the team up on Slack, read-only, and
-    hands ZuGit a proposal (new `slack_get_people` and `slack_propose_people` tools). The proposal
-    shows in Settings → Slack, with the people matched only by name marked to check; nothing is
-    used until you save.
+  is not installed it says so, and the message is still on the clipboard. Who is who lives in
+  **Settings → Slack** — the workspace id and one Slack member id per GitHub user — and the bell
+  shows only for people listed there. An assistant can fill the table: in Claude Code, with Slack
+  connected and ZuGit's MCP connector, run `/mcp__zugit__map_slack_users`. It looks the team up on
+  Slack, read-only, and hands ZuGit a proposal through the new `slack_get_people` and
+  `slack_propose_people` tools; Settings → Slack shows it with the people matched only by name
+  marked to check, and nothing is used until you save.
 - **Diff: the PR's conversation** — above the files, a **Conversation** block shows what GitHub's
   Conversation tab says about the PR as a whole: the description (folded), the comments on the PR
   and the reviews with their verdict and text, oldest first. It refreshes when ZuGit regains focus
@@ -29,19 +28,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - **List filters that say what they do** — the toolbar was a row of look-alike checkboxes that
-  turned each other off unseen. Now:
-  - **Show: All · To review · Mine** is one choice, as its segments show. *To review* counts the
-    reviews waiting for you; a red dot on *Mine* means one of your PRs has changes requested.
-  - **Authors** (Internal, Team, Collaborator) is a set labelled *all* or *2 of 3*; the last one on
-    stays on, and its tooltip says why.
-  - **Drafts** is a switch and grouping (**Plain list** / **By release**) a menu on the right: they
-    change how the list is seen, not which PRs, and no filter touches them.
-  - Under the toolbar, a thin line always there — so the list never jumps — counts the PRs shown
-    ("2 of 5 PRs") and holds one chip per filter on: *To review*, *Reviewer: luca*, *Authors*,
-    *Repos: 2 of 3*, *Search*. Its × removes only that filter. A reviewer picked in the Review load
-    strip is now a filter of its own: it no longer turns *To review* or *Mine* off, nor they it.
-  - An empty list says the filters hide everything, and when a draft would match, offers **Show
-    drafts**.
+  turned each other off unseen. **Show: All · To review · Mine** is now one choice, as its
+  segments show: *To review* counts the reviews waiting for you, and a red dot on *Mine* means one
+  of your PRs has changes requested. **Authors** (Internal, Team, Collaborator) is a set labelled
+  *all* or *2 of 3*; the last one on stays on, and its tooltip says why. **Drafts** is a switch and
+  grouping (**Plain list** / **By release**) a menu on the right: they change how the list is
+  seen, not which PRs, and no filter touches them. Under the toolbar, a thin line always there —
+  so the list never jumps — counts the PRs shown ("2 of 5 PRs") and holds one chip per filter on:
+  *To review*, *Reviewer: luca*, *Authors*, *Repos: 2 of 3*, *Search*; its × removes only that
+  filter. A reviewer picked in the Review load strip is now a filter of its own: it no longer
+  turns *To review* or *Mine* off, nor they it. An empty list says the filters hide everything,
+  and when a draft would match, offers **Show drafts**.
 - **Opening a PR no longer opens the browser** — the list scrolls to the new PR and lights its row
   up a moment, as soon as the refresh brings it (a draft just promoted too), and a toast offers
   **Apri su GitHub** for when you want it. Hidden by the list's filters, it lights up if they let it

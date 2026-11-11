@@ -21,14 +21,38 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
-        title: "Fun — the Tiny King's buttons show whole",
-        body: "<strong>Apri ZuGit</strong> and <strong>Apri diff</strong> stick out over his bubble's top edge, and with a tall bubble they went past the top of his window: only a sliver of them showed. His window has more room above the bubble now, and he stands where he did.",
+        title: "PR list — nudge a reviewer on Slack",
+        body: "On your own PRs, a <strong>bell</strong> next to a reviewer whose review is still required puts a short message with the PR's link on the clipboard and opens your direct message with them in the Slack app: paste and send. ZuGit never writes to Slack. It needs to know who is who: <strong>Settings → Slack</strong> holds the workspace id and a Slack member id per GitHub user, and the bell shows only for the people listed there. To fill it, run <code>/mcp__zugit__map_slack_users</code> in Claude Code with Slack connected: the assistant looks the team up, read-only, and its proposal waits in Settings, with whoever was matched only by name marked to check. Nothing is used until you save.",
+      },
+      {
+        title: "PR diff — the PR's conversation",
+        body: "Above the files, a <strong>Conversation</strong> block shows what GitHub's Conversation tab says about the PR as a whole: the description (folded), the comments on the PR and the reviews with their verdict and text, oldest first. It refreshes when ZuGit comes back into focus and after you publish a review.",
+      },
+      {
+        title: "PR list — filters that say what they do",
+        body: "<strong>Show: All · To review · Mine</strong> is one choice: <em>To review</em> counts the reviews waiting for you, and a red dot on <em>Mine</em> means one of your PRs has changes requested. <strong>Authors</strong> is a set labelled <em>all</em> or <em>2 of 3</em>, whose last one stays on. <strong>Drafts</strong> is a switch and grouping a menu on the right: they change how the list is seen, not which PRs. A thin line under the toolbar counts the PRs shown and holds a chip per filter on, each with its own ×. A reviewer picked in the Review load strip is a filter of its own and no longer turns <em>To review</em> or <em>Mine</em> off. An empty list says the filters hide everything, and offers <strong>Show drafts</strong> when a draft would match.",
+      },
+      {
+        title: "PR list — a new PR lights up instead of opening the browser",
+        body: "After you open a PR, the list scrolls to it and lights its row up a moment as soon as the refresh brings it — a draft just promoted too — and a toast offers <strong>Apri su GitHub</strong> for when you want it. If the list's filters hide it, it lights up when they let it through within a minute.",
+      },
+      {
+        title: "Reviewers — as GitHub's Reviewers list shows them",
+        body: "A reviewer asked again reads <strong>Review required</strong>, whatever they said before. An approval or a change request stands when its reviewer comments afterwards, the PR's author no longer shows among the reviewers, and on PRs with over 100 reviews the latest are read rather than the oldest. On your own PRs the re-request button now shows on <strong>Commented</strong> and on a dismissed <strong>Approved</strong> too, not only on <strong>Changes requested</strong>.",
+      },
+      {
+        title: "CI status — no more FAILED when GitHub is green",
+        body: "A failed run GitHub no longer counts — a job retried and passed, a rerun just queued, a job with the same name in another workflow — turned the PR red even after the pipeline had ended green. Once the pipeline settles, GitHub's verdict wins; while it runs, a job that already failed still turns it red early.",
       },
     ],
   },
   {
     label: "Older news",
     entries: [
+      {
+        title: "Fun — the Tiny King's buttons show whole",
+        body: "<strong>Apri ZuGit</strong> and <strong>Apri diff</strong> stick out over his bubble's top edge, and with a tall bubble they went past the top of his window: only a sliver of them showed. His window has more room above the bubble now, and he stands where he did.",
+      },
       {
         title: "Fun — click the Tiny King",
         body: "With the cursor on him or his bubble, a button shows what a click opens. <strong>Apri ZuGit</strong> brings ZuGit up on the PR list, scrolled to the PR he is talking about and lit up a moment; for a review to do, <strong>Apri diff</strong> opens its diff straight away. A merged PR opens on GitHub, and a page about several PRs opens the list. Then he takes his leave. Everywhere else around him clicks still go to what is underneath.",
