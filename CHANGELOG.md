@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.1.0] - 2026-11-11
+
 ### Added
 - **Nudge a reviewer on Slack** — on your own PRs, a bell next to a reviewer whose review is
   still required puts a short message with the PR link on the clipboard and opens your direct
