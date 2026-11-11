@@ -4,7 +4,7 @@
 
 const OPEN_SECTIONS_KEY = "zugit.settings.openSections";
 
-type SectionStatus = { label: string; tone: "ok" | "warn" | "neutral" } | null;
+export type SectionStatus = { label: string; tone: "ok" | "warn" | "neutral" } | null;
 
 function formValue(form: HTMLFormElement, name: string): string {
   const field = form.elements.namedItem(name);
@@ -34,6 +34,11 @@ const statusBySection: Record<string, (form: HTMLFormElement) => SectionStatus> 
   accessibility: (form) => toggle(form, "colorBlindMode"),
   fun: (form) => toggle(form, "memeMode"),
 };
+
+/** For a section whose state lives outside the settings form (Slack). */
+export function registerSectionStatus(key: string, status: () => SectionStatus) {
+  statusBySection[key] = status;
+}
 
 function sections(): HTMLDetailsElement[] {
   return [...document.querySelectorAll<HTMLDetailsElement>("details[data-settings-section]")];

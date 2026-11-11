@@ -11,7 +11,7 @@ import {
 } from "./ai-review";
 import { renderMarkdown, suggestionBlock } from "./markdown-lite";
 import { hunkTail } from "./pr-diff-parse";
-import type { GhComment, GhThread } from "./pr-threads";
+import type { GhComment, GhConversation, GhConversationItem, GhThread } from "./pr-threads";
 import { escHtml, relativeTime } from "./utils";
 import { commentBox } from "./comment-box";
 
@@ -398,6 +398,79 @@ export function renderGhPanel(
     `</div>`;
 }
 
+const VERDICTS: Record<string, { tag: string; kind: string }> = {
+  approved: { tag: "Approved", kind: "approved" },
+  changes_requested: { tag: "Changes requested", kind: "changes" },
+  dismissed: { tag: "Dismissed", kind: "outdated" },
+  commented: { tag: "Reviewed", kind: "file" },
+};
+
+/** An entry of the Conversation tab: a comment, a review's verdict with its text, the description. */
+function conversationEntry(item: GhConversationItem): string {
+  const avatar = item.avatarUrl.startsWith("https://")
+    ? `<img class="pd-gh-avatar" src="${escHtml(item.avatarUrl)}" alt="" loading="lazy">`
+    : `<span class="pd-gh-avatar"></span>`;
+  const verdict = item.kind === "review" ? VERDICTS[item.state ?? "commented"] ?? VERDICTS.commented : null;
+  const when = item.createdAt ? relativeTime(item.createdAt) : "";
+  const at = item.url.startsWith("https://")
+    ? `<a class="pd-md-link" href="#" data-pd-link="${escHtml(item.url)}">${escHtml(when)}</a>`
+    : `<span>${escHtml(when)}</span>`;
+  const meta = `<div class="pd-gh-meta"><span class="pd-gh-author">${escHtml(item.author)}</span>` +
+    (verdict ? ghTag(verdict.tag, verdict.kind) : "") +
+    at + `</div>`;
+  const body = item.minimized !== null
+    ? `<div class="pd-gh-hidden">Hidden on GitHub${item.minimized ? ` as ${escHtml(item.minimized)}` : ""}.</div>`
+    : item.body.trim() ? `<div class="pd-ai-card__body">${renderMarkdown(item.body)}</div>` : "";
+  return `<div class="pd-gh-comment">${avatar}<div class="pd-gh-main">${meta}${body}</div></div>`;
+}
+
+/**
+ * Above the files, before the conversations on lines: what is said on the PR as
+ * a whole, as on GitHub's Conversation tab. The description folds — its author
+ * knows it — the comments and reviews read in full, oldest first.
+ */
+export function renderConversationPanel(
+  conversation: GhConversation | null, notice: string | null, prUrl: string, isOpen: (id: string) => boolean,
+): string {
+  const warning = notice ? `<div class="pd-ai-outdated">${escHtml(notice)}</div>` : "";
+  const items = conversation?.items ?? [];
+  const description = items.find(i => i.kind === "description");
+  const said = items.filter(i => i.kind !== "description");
+  if (!description && said.length === 0) {
+    return warning ? `<div class="pd-ai-panel pd-ai-panel--gh">${warning}</div>` : "";
+  }
+  const comments = said.filter(i => i.kind === "comment").length;
+  const reviews = said.length - comments;
+  const meta = [
+    comments ? `${comments} comment${comments === 1 ? "" : "s"} on the PR` : "No comments on the PR",
+    reviews ? `${reviews} review${reviews === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" · ");
+  const open = prUrl.startsWith("https://")
+    ? `<a class="pd-md-link" href="#" data-pd-link="${escHtml(prUrl)}">Open on GitHub</a>`
+    : "";
+  const more = conversation?.moreComments
+    ? `${conversation.moreComments} older comment${conversation.moreComments === 1 ? "" : "s"} on GitHub · `
+    : "";
+  const gist = description ? description.body.replace(/\s+/g, " ").trim().slice(0, 90) : "";
+  return `<div class="pd-ai-panel pd-ai-panel--gh">` +
+    `<div class="pd-ai-panel__head"><span class="pd-gh-badge">Conversation</span><span class="pd-ai-panel__meta">${meta}</span></div>` +
+    warning +
+    `<div class="pd-ai-general">` +
+      (description
+        ? `<details class="pd-gh-thread" data-pd-gh="conv:description"${isOpen("conv:description") ? " open" : ""}>` +
+            `<summary class="pd-gh-summary">${ghTag("Description", "file")}<span class="pd-gh-gist"><strong>${escHtml(description.author)}</strong> ${escHtml(gist)}</span></summary>` +
+            conversationEntry(description) +
+          `</details>`
+        : "") +
+      (said.length
+        ? `<div class="pd-gh-thread">${said.map(conversationEntry).join("")}` +
+            `<div class="pd-gh-foot"><span class="pd-gh-foot__more">${more}${open}</span></div>` +
+          `</div>`
+        : "") +
+    `</div>` +
+    `</div>`;
+}
+
 function counts(review: AiReview): string {
   const by = (s: AiComment["status"]) => review.comments.filter(c => c.status === s).length;
   const parts = [`${review.comments.length} comment${review.comments.length === 1 ? "" : "s"}`];
@@ -415,6 +488,8 @@ export interface PanelInput {
   armedDiscard: string | null;
   /** Why the user's comments could not be read, if they could not. */
   notice: string | null;
+  /** The PR's Conversation tab, drawn by renderConversationPanel. */
+  conversation: string;
   /** The GitHub block, drawn by renderGhPanel. */
   github: string;
   /** Editors whose lines changed after a reload, drawn by renderDraft. */
@@ -426,7 +501,7 @@ export interface PanelInput {
 
 /**
  * Above the files: the user's comments first, with those that have no line to
- * hang under, then GitHub's conversations without a line in this diff, then
+ * hang under, then the PR's Conversation tab, then GitHub's conversations without a line in this diff, then
  * one block per agent with its summary and its comments without a line.
  */
 export interface PublishState {
@@ -572,13 +647,13 @@ export function renderPanel(p: PanelInput): string {
     : own.length ? "" : `<div class="pd-hint">Click a line number to comment on that line, or drag across line numbers to comment on a block.</div>`;
 
   if (p.reviews.length === 0) {
-    return yours + p.github +
+    return yours + p.conversation + p.github +
       `<div class="pd-ai-panel pd-ai-panel--empty">` +
       `<span>No AI review yet. Ask an agent with the ZuGit MCP to review this PR — its comments land here, and nothing is posted to GitHub. ${escHtml(READ_ONLY_HINT)}</span>` +
       `<button class="pd-ai-btn pd-ai-btn--primary" type="button" data-pd-copy-prompt>Copy review prompt</button>` +
       `</div>`;
   }
-  return yours + p.github + p.reviews.map(review => {
+  return yours + p.conversation + p.github + p.reviews.map(review => {
     const here = review.comments
       .filter(c => c.status !== "kept")
       .map((comment): CardRef => ({ kind: "ai", review, comment }))

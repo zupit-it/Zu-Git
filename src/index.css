@@ -1071,6 +1071,204 @@ html, body {
   margin: 0 2px;
 }
 
+/* ── List filters: Show, Authors, Drafts, grouping ───────────── */
+.lf-seg, .lf-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.lf-seg button, .lf-group button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: 550 12px/1 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.lf-seg button:hover:not([aria-pressed="true"]):not(:disabled),
+.lf-group button:hover:not([aria-pressed="true"]) { background: var(--surface-alt); }
+.lf-seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-bd); }
+.lf-seg button:disabled { color: var(--ink-faint); cursor: default; }
+.lf-label {
+  padding: 0 6px 0 4px;
+  font: 600 10.5px var(--font);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.lf-label em {
+  margin-left: 3px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-faint);
+}
+.lf-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--ink-muted);
+  font: 700 10px/14px var(--font-mono);
+  text-align: center;
+}
+/* Reviews waiting for you */
+.lf-count--attn { background: var(--accent); border-color: var(--accent); color: #fff; }
+.lf-seg button[aria-pressed="true"] .lf-count:not(.lf-count--attn) { background: var(--surface); border-color: var(--accent-bd); color: var(--accent-ink); }
+/* My PRs with changes requested: the red of their "Changes requested" badge */
+.lf-dot { width: 6px; height: 6px; margin-left: -2px; border-radius: 50%; background: var(--fail); }
+
+.lf-group button { color: var(--ink-muted); }
+.lf-group button::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+}
+.lf-group button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+.lf-group button[aria-pressed="true"]::before { background: var(--accent); border-color: var(--accent); }
+/* The last author type on: it stays on, its tooltip says why */
+.lf-group button[aria-disabled="true"] { cursor: not-allowed; }
+
+.lf-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font: 550 12px/1 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.lf-switch__track {
+  position: relative;
+  width: 22px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 120ms;
+}
+.lf-switch__track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 120ms;
+}
+.lf-switch[aria-checked="true"] { border-color: var(--accent-bd); background: var(--accent-soft); color: var(--accent-ink); }
+.lf-switch[aria-checked="true"] .lf-switch__track { background: var(--accent); }
+.lf-switch[aria-checked="true"] .lf-switch__track::after { left: 12px; }
+
+.lf-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-muted);
+  flex-shrink: 0;
+}
+.lf-view select {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font: 550 12px var(--font);
+  cursor: pointer;
+}
+
+/* A narrow window: the search gives way first, then the toolbar wraps */
+.view-panel-list .list-toolbar { flex-wrap: wrap; row-gap: 8px; }
+/* Lines break on a 180px search; free room goes to it first, up to its 320px. */
+.view-panel-list .list-toolbar > .list-search { flex: 10 1 180px; width: auto; min-width: 160px; max-width: 320px; }
+
+/* The filters on, under the toolbar: one thin line, always there */
+.list-active-filters {
+  position: relative;
+  flex-shrink: 0;
+  min-height: 25px;
+  padding: 3px 20px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt);
+  font-size: 11px;
+  line-height: 1;
+}
+.list-active-filters__items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  row-gap: 3px;
+}
+.laf-count { margin-right: 4px; color: var(--ink-muted); }
+.laf-count strong { color: var(--ink-soft); }
+.laf-none { color: var(--ink-faint); }
+.laf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 1px 0 7px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font: 550 11px/1 var(--font);
+  white-space: nowrap;
+}
+.laf-chip button {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent-ink);
+  font: 12px/15px var(--font);
+  cursor: pointer;
+}
+.laf-chip button:hover { background: var(--accent-bd); }
+
+.list-empty-hint { margin-top: 6px; color: var(--ink-faint); }
+.list-empty-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 600 12px var(--font);
+  cursor: pointer;
+}
+.list-empty-link:hover { text-decoration: underline; }
+
 /* ── Reviewer load bar ───────────────────────────────────────── */
 .rlb {
   display: flex;
@@ -1521,7 +1719,7 @@ body[data-view]:not([data-view="list"]) .rlb { display: none; }
   padding: 18px 20px 40px;
 }
 
-/* Loading hairline — sits on the toolbar's bottom border, never in the flow, so
+/* Loading hairline — sits on the active-filters row's bottom border, never in the flow, so
    a refresh cannot shift the rows underneath it. */
 .list-progress {
   position: absolute;
@@ -2583,9 +2781,11 @@ img.avatar { object-fit: cover; }
 
 .review-badge-stale-icon { display: inline-flex; align-items: center; opacity: 0.7; }
 
-.review-badge-rerequest svg { pointer-events: none; }
+.review-badge-rerequest svg,
+.review-badge-nudge svg { pointer-events: none; }
 
-.review-badge-rerequest {
+.review-badge-rerequest,
+.review-badge-nudge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2599,8 +2799,10 @@ img.avatar { object-fit: cover; }
   border-radius: 3px;
   flex-shrink: 0;
 }
-.review-badge-rerequest:hover { opacity: 1; }
-.review-badge-rerequest:disabled { cursor: default; opacity: 0.3; }
+.review-badge-rerequest:hover,
+.review-badge-nudge:hover { opacity: 1; }
+.review-badge-rerequest:disabled,
+.review-badge-nudge:disabled { cursor: default; opacity: 0.3; }
 .review-badge-rerequest--loading { animation: spin 0.7s linear infinite; }
 .review-badge-rerequest--done { opacity: 1; }
 
@@ -6142,6 +6344,66 @@ ul.field-hint {
 .mcp-status { margin-left: 6px; vertical-align: 1px; }
 .mcp-status-note { overflow-wrap: anywhere; }
 
+/* ── Slack nudges: who is who (Settings) ── */
+
+.slack-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.slack-proposal-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+/* One grid for the whole table, so the columns line up from row to row. */
+.slack-people {
+  display: grid;
+  grid-template-columns: minmax(90px, 1.1fr) minmax(90px, 1.2fr) minmax(90px, 1fr) auto;
+  align-items: center;
+  gap: 6px 8px;
+}
+.slack-people > .field-hint { grid-column: 1 / -1; }
+.slack-person { display: contents; }
+.slack-person-login {
+  font: 500 12px/1.3 var(--font-mono);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-form .slack-person input {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.settings-form .slack-person input[data-field="memberId"] { font-family: var(--font-mono); }
+.slack-person-tag { min-width: 0; justify-self: end; white-space: nowrap; }
+.slack-person-note {
+  grid-column: 2 / -1;
+  margin-top: -2px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.slack-save-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.slack-save-row .field-hint { margin: 0; flex: 1; text-align: right; }
+.slack-save-error { color: var(--fail); }
+
+@media (max-width: 560px) {
+  .slack-people { grid-template-columns: 1fr 1fr; }
+  .slack-person-login { grid-column: 1 / -1; }
+  .slack-person-tag { justify-self: start; }
+  .slack-person-note { grid-column: 1 / -1; }
+}
+
 /* ── Zupit bot rules: what the morning check would flag ── */
 
 .tg-band--advice { border-color: var(--border); color: var(--ink-muted); }
@@ -7012,6 +7274,10 @@ ul.field-hint {
 .pd-gh-tag--outdated { background: var(--warn-soft); color: var(--warn); }
 .pd-gh-tag--pending { background: var(--accent-soft); color: var(--accent-ink); }
 .pd-gh-tag--file { background: var(--surface-alt); color: var(--ink-muted); border: 1px solid var(--border); }
+/* A review's verdict in the PR's Conversation tab */
+.pd-gh-tag--approved { background: var(--ok-soft); color: var(--ok); }
+.pd-gh-tag--changes { background: var(--fail-soft); color: var(--fail); }
+.pd-gh-meta .pd-md-link { color: var(--ink-muted); }
 
 /* Folded: resolved under their line, outdated in the panel — open on click, as on GitHub. */
 .pd-gh-summary {

@@ -26,11 +26,14 @@ import {
   type CommentPosition, type PublishResult, type ReviewEvent, type UserComment, type UserReply, type UserReview,
 } from "./ai-review";
 import {
-  anchorKey, cardKey, draftKey, fileKey, renderCard, renderDraft, renderGhPanel, renderGhThread, renderPanel,
+  anchorKey, cardKey, draftKey, fileKey, renderCard, renderConversationPanel, renderDraft, renderGhPanel, renderGhThread, renderPanel,
   renderPendingReply, renderPublishButtons, renderPublishOpen, renderPublishPanel, renderReplyEditor, verdictWords,
   type CardRef, type Draft, type PublishDone, type PublishState, type ReplyArea, type Side, type ThreadItem,
 } from "./pr-diff-ai";
-import { getPrHead, getPrThreads, resolveThread, threadsSignature, type GhThread } from "./pr-threads";
+import {
+  conversationSignature, getPrConversation, getPrHead, getPrThreads, resolveThread, threadsSignature,
+  type GhConversation, type GhThread,
+} from "./pr-threads";
 import { state as appState } from "./state";
 import { showToast } from "./sprint-ui";
 
@@ -478,7 +481,9 @@ function renderTokens(tokens: Token[] | undefined, fallback: string): string {
 // straight from its cache.
 
 const PREFETCH_TTL_MS = 60_000;
-const prefetched = new Map<string, { at: number; diff: Promise<PrDiff>; threads: Promise<GhThread[]> }>();
+const prefetched = new Map<string, {
+  at: number; diff: Promise<PrDiff>; threads: Promise<GhThread[]>; conversation: Promise<GhConversation>;
+}>();
 
 function loadDiff(repo: string, number: number, expectedHead?: string): Promise<PrDiff> {
   return invoke<PrDiff>("fetch_pr_diff", { repo, number, expectedHead: expectedHead || null });
@@ -492,10 +497,16 @@ export function prefetchPrDiff(pr: PullRequestSummary) {
   const key = prefetchKey(pr);
   const hit = prefetched.get(key);
   if (hit && Date.now() - hit.at < PREFETCH_TTL_MS) return;
-  const entry = { at: Date.now(), diff: loadDiff(pr.repo, pr.id, pr.headSha), threads: getPrThreads(pr.repo, pr.id) };
+  const entry = {
+    at: Date.now(),
+    diff: loadDiff(pr.repo, pr.id, pr.headSha),
+    threads: getPrThreads(pr.repo, pr.id),
+    conversation: getPrConversation(pr.repo, pr.id),
+  };
   // A failed warm-up is just forgotten: the click reads again.
   entry.diff.catch(() => prefetched.delete(key));
   entry.threads.catch(() => prefetched.delete(key));
+  entry.conversation.catch(() => prefetched.delete(key));
   prefetched.set(key, entry);
 }
 
@@ -611,6 +622,10 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   let threadsAt = 0;
   /** Folded conversations the user opened: a redraw keeps them open. */
   const openThreads = new Set<string>();
+  /** The PR's Conversation tab: its description, comments and reviews. */
+  let conversation: GhConversation | null = null;
+  let conversationNotice: string | null = null;
+  let conversationSig = "";
 
   /** Open reply editors under GitHub's conversations: thread id → the text typed. */
   const replyEditors = new Map<string, string>();
@@ -1260,6 +1275,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
       reviews, mine, headSha, armedDiscard, notice: mineNotice,
       drafts: [...drafts.values()].filter(isLoose)
         .map(d => renderDraft(d, errors.get(draftKey(d)) ?? null, true)).join(""),
+      conversation: renderConversationPanel(conversation, conversationNotice, pr.url, id => openThreads.has(id)),
       github: renderGhPanel(threads, threads.filter(t => !ghAnchor(t)), threadsNotice, id => openThreads.has(id), replyArea),
       inPanel: ref => !anchorOf(ref),
       card: ref => renderItem(ref, true),
@@ -1943,6 +1959,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
       void refreshDashboard("auto");
     }
     // What GitHub accepted comes back as its own conversations.
+    void loadConversation();
     await loadThreads();
   }
 
@@ -2018,6 +2035,29 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   }
 
   /**
+   * Fetches the PR's Conversation tab again; redraws the panel only when it
+   * changed. It hangs on no line, so a push since the diff opened does not hold it back.
+   */
+  async function loadConversation() {
+    let next: GhConversation;
+    try {
+      next = await getPrConversation(pr.repo, pr.id);
+    } catch (err) {
+      conversationNotice = `The PR's conversation could not be ${conversation ? "refreshed" : "loaded"}: ${errorMessage(err, "unknown error")}`;
+      drawPanel();
+      return;
+    }
+    if (!overlay.isConnected) return;
+    const hadNotice = conversationNotice !== null;
+    conversationNotice = null;
+    const signature = conversationSignature(next);
+    if (signature === conversationSig && !hadNotice) return;
+    conversationSig = signature;
+    conversation = next;
+    drawPanel();
+  }
+
+  /**
    * Asks GitHub for the PR's latest commit, as GitHub's own Refresh does: the
    * diff on screen never changes under the reader's hands, a notice offers to
    * reload. True while the diff is still on the latest commit.
@@ -2048,6 +2088,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   function onWindowFocus() {
     if (Date.now() - threadsAt <= THREADS_REFRESH_MS) return;
     threadsAt = Date.now();
+    void loadConversation();
     // Conversations placed on a newer commit would not line up with the diff on
     // screen: after a push they wait for the reload.
     void checkHead().then(current => { if (current && !newHead) void loadThreads(); });
@@ -2094,6 +2135,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
       ]);
       if (!overlay.isConnected) return;
       applyDiff(diff);
+      void loadConversation();
       // The old ones were placed on the old commit: better none than misplaced.
       threads = next ?? [];
       threadsSig = next ? threadsSignature(next) : "";
@@ -2378,7 +2420,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   try {
     threadsAt = Date.now();
     const warm = takePrefetch(pr);
-    const [diff, initialReviews, initialMine, initialThreads] = await Promise.all([
+    const [diff, initialReviews, initialMine, initialThreads, initialConversation] = await Promise.all([
       // A failed warm-up falls back to a fresh read.
       warm ? warm.diff.catch(() => fetchDiff()) : fetchDiff(pr.headSha),
       getAiReviews(pr.repo, pr.id).catch(() => [] as AiReview[]),
@@ -2392,6 +2434,11 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
         threadsNotice = `GitHub conversations could not be loaded: ${errorMessage(err, "unknown error")}`;
         return [] as GhThread[];
       }),
+      // Nor the PR's Conversation tab.
+      (warm?.conversation.catch(() => getPrConversation(pr.repo, pr.id)) ?? getPrConversation(pr.repo, pr.id)).catch((err: unknown) => {
+        conversationNotice = `The PR's conversation could not be loaded: ${errorMessage(err, "unknown error")}`;
+        return null;
+      }),
     ]);
     if (!overlay.isConnected) return;
     applyDiff(diff);
@@ -2400,6 +2447,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     summaryText = mine.summary ?? "";
     threads = initialThreads;
     threadsSig = threadsNotice ? "" : threadsSignature(threads);
+    conversation = initialConversation;
+    conversationSig = initialConversation ? conversationSignature(initialConversation) : "";
     reviewSignature = reviews.map(r => `${r.source}@${r.createdAt}`).join(",");
     indexComments();
 

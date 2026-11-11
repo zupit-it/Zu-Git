@@ -842,6 +842,42 @@ pub fn save_sprint_categories(dir: &Path, categories: &SprintCategories) -> Resu
     std::fs::rename(&draft, &path).map_err(|e| e.to_string())
 }
 
+// ── Slack directory (who is who, for nudges) ─────────────────────────────────
+
+const SLACK_PEOPLE: &str = "slack-people.json";
+const SLACK_PROPOSAL: &str = "slack-people-proposal.json";
+
+pub fn load_slack_directory(dir: &Path) -> crate::slack::SlackDirectory {
+    read_json(dir.join(SLACK_PEOPLE))
+}
+
+/// Written through a temporary file, like the sprint categories: it is filled
+/// by hand or after a review, and a crash must not lose it.
+pub fn save_slack_directory(dir: &Path, directory: &crate::slack::SlackDirectory) -> Result<(), String> {
+    let path = dir.join(SLACK_PEOPLE);
+    let draft = path.with_extension("json.tmp");
+    write_json(draft.clone(), directory)?;
+    std::fs::rename(&draft, &path).map_err(|e| e.to_string())
+}
+
+pub fn load_slack_proposal(dir: &Path) -> Option<crate::slack::SlackProposal> {
+    let content = std::fs::read_to_string(dir.join(SLACK_PROPOSAL)).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// One proposal at a time: proposing again replaces it.
+pub fn save_slack_proposal(dir: &Path, proposal: &crate::slack::SlackProposal) -> Result<(), String> {
+    write_json(dir.join(SLACK_PROPOSAL), proposal)
+}
+
+pub fn delete_slack_proposal(dir: &Path) -> Result<(), String> {
+    match std::fs::remove_file(dir.join(SLACK_PROPOSAL)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -248,6 +248,22 @@ pub async fn fetch_pr_threads(
     Ok(crate::github::fetch_review_threads(&repo, number, &settings, &state.http_client).await?)
 }
 
+/// What is said on a PR as a whole — its description, comments, the text of
+/// reviews — for the diff view. Not cached.
+#[tauri::command]
+pub async fn fetch_pr_conversation(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+) -> Result<crate::github::PrConversation, String> {
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let settings = storage::load_settings(&app).await?;
+    Ok(crate::github::fetch_pr_conversation(&repo, number, &settings, &state.http_client).await?)
+}
+
 /// Files and patches of a pull request at its latest commit, together with
 /// that commit: comments on them are anchored to it. The files are read
 /// alongside a first look at the PR's head and checked against a second one
@@ -1964,4 +1980,74 @@ pub async fn sprint_attachment(
         .await
         .map(tauri::ipc::Response::new)
         .map_err(String::from)
+}
+
+// ── Slack nudges ──────────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlackPeopleState {
+    directory: crate::slack::SlackDirectory,
+    proposal: Option<crate::slack::SlackProposal>,
+}
+
+#[tauri::command]
+pub async fn slack_people_load(app: tauri::AppHandle) -> Result<SlackPeopleState, String> {
+    let dir = storage::data_dir(&app)?;
+    Ok(SlackPeopleState {
+        directory: storage::load_slack_directory(&dir),
+        proposal: storage::load_slack_proposal(&dir),
+    })
+}
+
+/// Saves the table as the user left it. Saving while a proposal waits means it
+/// was reviewed: the proposal goes.
+#[tauri::command]
+pub async fn slack_people_save(
+    app: tauri::AppHandle,
+    directory: crate::slack::SlackDirectory,
+) -> Result<crate::slack::SlackDirectory, String> {
+    let dir = storage::data_dir(&app)?;
+    let directory = crate::slack::clean_directory(directory)?;
+    storage::save_slack_directory(&dir, &directory)?;
+    storage::delete_slack_proposal(&dir)?;
+    Ok(directory)
+}
+
+#[tauri::command]
+pub async fn slack_people_discard_proposal(app: tauri::AppHandle) -> Result<(), String> {
+    storage::delete_slack_proposal(&storage::data_dir(&app)?)
+}
+
+/// Opens the Slack desktop app on the DM with that GitHub login's member.
+#[tauri::command]
+pub async fn slack_open_dm(app: tauri::AppHandle, login: String) -> Result<(), String> {
+    let directory = storage::load_slack_directory(&storage::data_dir(&app)?);
+    let person = directory
+        .member(&login)
+        .ok_or_else(|| format!("{login} non ha un utente Slack: aggiungilo in Impostazioni → Slack."))?;
+    let url = crate::slack::dm_url(&directory.team_id, &person.member_id)?;
+    open_slack_url(&app, &url).await
+}
+
+/// On macOS `open` says when no app handles `slack://`, so a missing Slack is
+/// reported instead of nothing happening.
+#[cfg(target_os = "macos")]
+async fn open_slack_url(_app: &tauri::AppHandle, url: &str) -> Result<(), String> {
+    let output = tokio::process::Command::new("/usr/bin/open")
+        .arg(url)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err("Slack non risulta installato su questo Mac: il messaggio è negli appunti, incollalo a mano.".into())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn open_slack_url(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }

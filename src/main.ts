@@ -5,9 +5,9 @@ import { maybeShowChangelog, showChangelog } from "./changelog";
 import { state } from "./state";
 import {
   setView, setSettingsDirtyState, syncSettingsSaveButton,
-  renderListBoard, renderListFilters, renderToolbarRepoFilters, setStatus,
+  renderListBoard, renderListFilters, renderToolbarRepoFilters, setStatus, flashPrRow,
 } from "./render";
-import { applyListFilters } from "./filters";
+import { applyListFilters, clearFilter, type FilterKey } from "./filters";
 import {
   bootstrap, refreshDashboard, saveSettingsAndRefresh,
   openExternal, rerequestReview, persistListFilters,
@@ -25,6 +25,7 @@ import {
   connectGoogleCalendar, disconnectGoogleCalendar,
 } from "./toggl";
 import { initSettingsSections } from "./settings-sections";
+import { initSlack, nudgeReviewer } from "./slack";
 import { installSadReviewer } from "./meme";
 import { installPetReminder, petTry } from "./pet-triggers";
 import type { PetPrLink } from "./pet-lines";
@@ -150,6 +151,7 @@ window.addEventListener("DOMContentLoaded", () => {
       if (button instanceof HTMLButtonElement) void testTogglConnection(button);
     });
   void initMcpSetup();
+  initSlack();
 
   // ── Search ──────────────────────────────────────────────────────────────────
   document
@@ -162,83 +164,56 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
   // ── List filters ────────────────────────────────────────────────────────────
+  // Show, Authors, Drafts and the × on each active filter: one change each,
+  // nothing else turns off along with it.
+  document.querySelector<HTMLElement>("[data-view-panel=list]")?.addEventListener("click", (event) => {
+    const target = event.target as Element;
+
+    const scope = target.closest<HTMLButtonElement>("[data-scope]");
+    if (scope && !scope.disabled) {
+      state.onlyMyPendingReviews = scope.dataset.scope === "review";
+      state.onlyMyPullRequests = scope.dataset.scope === "mine";
+      filtersChanged();
+      return;
+    }
+
+    const author = target.closest<HTMLButtonElement>("[data-author]");
+    if (author) {
+      if (author.getAttribute("aria-disabled") === "true") return; // the last one stays on
+      if (author.dataset.author === "internal") state.showInternalOnly = !state.showInternalOnly;
+      if (author.dataset.author === "team") state.showTeamOnly = !state.showTeamOnly;
+      if (author.dataset.author === "collaborator") state.showCollaboratorOnly = !state.showCollaboratorOnly;
+      filtersChanged();
+      return;
+    }
+
+    if (target.closest("[data-filter-show-draft]")) {
+      state.showDraft = !state.showDraft;
+      filtersChanged();
+      return;
+    }
+    // On an empty list, when a draft would match: the only other way drafts turn on.
+    if (target.closest("[data-show-drafts]")) {
+      state.showDraft = true;
+      filtersChanged();
+      return;
+    }
+
+    const clear = target.closest<HTMLElement>("[data-clear-filter]")?.dataset.clearFilter as FilterKey | undefined;
+    if (clear) {
+      clearFilter(clear);
+      filtersChanged();
+      // The stale-branch view sees the repo selection change when it opens next.
+      if (clear === "search") document.querySelector<HTMLInputElement>("[data-list-search]")?.focus();
+    }
+  });
   document
-    .querySelector<HTMLInputElement>("[data-filter-my-review-pending]")
+    .querySelector<HTMLSelectElement>("[data-filter-group]")
     ?.addEventListener("change", (event) => {
       const target = event.currentTarget;
-      if (!(target instanceof HTMLInputElement)) return;
-      state.onlyMyPendingReviews = target.checked;
-      if (target.checked) { state.onlyMyPullRequests = false; state.filteredReviewer = null; }
-      document.querySelectorAll<HTMLButtonElement>("[data-reviewer-filter]")
-        .forEach(btn => btn.classList.remove("rlb__chip--active"));
-      if (state.currentDashboard) {
-        renderListFilters(state.currentDashboard);
-        renderListBoard(applyListFilters(state.currentDashboard));
-      }
-      void persistListFilters();
-    });
-  document
-    .querySelector<HTMLInputElement>("[data-filter-my-prs]")
-    ?.addEventListener("change", (event) => {
-      const target = event.currentTarget;
-      if (!(target instanceof HTMLInputElement)) return;
-      state.onlyMyPullRequests = target.checked;
-      if (target.checked) { state.onlyMyPendingReviews = false; state.filteredReviewer = null; }
-      document.querySelectorAll<HTMLButtonElement>("[data-reviewer-filter]")
-        .forEach(btn => btn.classList.remove("rlb__chip--active"));
-      if (state.currentDashboard) {
-        renderListFilters(state.currentDashboard);
-        renderListBoard(applyListFilters(state.currentDashboard));
-      }
-      void persistListFilters();
-    });
-  document
-    .querySelector<HTMLInputElement>("[data-filter-internal]")
-    ?.addEventListener("change", (event) => {
-      const target = event.currentTarget;
-      if (!(target instanceof HTMLInputElement)) return;
-      if (!target.checked && !state.showTeamOnly && !state.showCollaboratorOnly) { target.checked = true; return; }
-      state.showInternalOnly = target.checked;
-      if (state.currentDashboard) renderListBoard(applyListFilters(state.currentDashboard));
-      void persistListFilters();
-    });
-  document
-    .querySelector<HTMLInputElement>("[data-filter-team]")
-    ?.addEventListener("change", (event) => {
-      const target = event.currentTarget;
-      if (!(target instanceof HTMLInputElement)) return;
-      if (!target.checked && !state.showInternalOnly && !state.showCollaboratorOnly) { target.checked = true; return; }
-      state.showTeamOnly = target.checked;
-      if (state.currentDashboard) renderListBoard(applyListFilters(state.currentDashboard));
-      void persistListFilters();
-    });
-  document
-    .querySelector<HTMLInputElement>("[data-filter-collaborator]")
-    ?.addEventListener("change", (event) => {
-      const target = event.currentTarget;
-      if (!(target instanceof HTMLInputElement)) return;
-      if (!target.checked && !state.showInternalOnly && !state.showTeamOnly) { target.checked = true; return; }
-      state.showCollaboratorOnly = target.checked;
-      if (state.currentDashboard) renderListBoard(applyListFilters(state.currentDashboard));
-      void persistListFilters();
-    });
-  document
-    .querySelector<HTMLInputElement>("[data-filter-group-by-release]")
-    ?.addEventListener("change", (event) => {
-      const target = event.currentTarget;
-      if (!(target instanceof HTMLInputElement)) return;
-      state.groupByRelease = target.checked;
-      if (state.currentDashboard) renderListBoard(applyListFilters(state.currentDashboard));
-      void persistListFilters();
-    });
-  document
-    .querySelector<HTMLInputElement>("[data-filter-show-draft]")
-    ?.addEventListener("change", (event) => {
-      const target = event.currentTarget;
-      if (!(target instanceof HTMLInputElement)) return;
-      state.showDraft = target.checked;
-      if (state.currentDashboard) renderListBoard(applyListFilters(state.currentDashboard));
-      void persistListFilters();
+      if (!(target instanceof HTMLSelectElement)) return;
+      state.groupByRelease = target.value === "release";
+      filtersChanged();
     });
   // Repos selector — search filter (input event on the container)
   document
@@ -354,6 +329,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const jiraUrl = jiraButton?.dataset.jiraLink;
     if (jiraUrl) { void openExternal(jiraUrl); return; }
 
+    const nudgeButton = target.closest<HTMLButtonElement>(".review-badge-nudge");
+    if (nudgeButton) { void nudgeReviewer(nudgeButton); return; }
+
     const rerequestButton = target.closest<HTMLButtonElement>(".review-badge-rerequest");
     if (rerequestButton) { void rerequestReview(rerequestButton); return; }
 
@@ -421,21 +399,12 @@ window.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    // A reviewer is a filter of its own, beside Show: nothing else turns off.
     const reviewerChip = target.closest<HTMLButtonElement>("[data-reviewer-filter]");
     if (reviewerChip && state.currentDashboard) {
       const login = reviewerChip.dataset.reviewerFilter ?? null;
       state.filteredReviewer = state.filteredReviewer?.toLowerCase() === login?.toLowerCase() ? null : login;
-      if (state.filteredReviewer) {
-        state.onlyMyPendingReviews = false;
-        state.onlyMyPullRequests = false;
-        renderListFilters(state.currentDashboard);
-      }
-      document.querySelectorAll<HTMLButtonElement>("[data-reviewer-filter]").forEach(btn => {
-        const isActive = state.filteredReviewer !== null &&
-          btn.dataset.reviewerFilter?.toLowerCase() === state.filteredReviewer.toLowerCase();
-        btn.classList.toggle("rlb__chip--active", isActive);
-      });
-      renderListBoard(applyListFilters(state.currentDashboard));
+      filtersChanged(false);
     }
   });
 
@@ -565,6 +534,24 @@ function showDemoToast(stage: number) {
 let _arvPopover: HTMLElement | null = null;
 let _arvOutsideListener: ((e: MouseEvent) => void) | null = null;
 
+/**
+ * After a filter changed: the toolbar, the reviewer chips and the list follow
+ * the state, and the choice is saved — the reviewer filter is not saved.
+ */
+function filtersChanged(persist = true) {
+  const snapshot = state.currentDashboard;
+  if (snapshot) {
+    renderListFilters(snapshot);
+    renderListBoard(applyListFilters(snapshot));
+  }
+  document.querySelectorAll<HTMLButtonElement>("[data-reviewer-filter]").forEach((chip) => {
+    const active = state.filteredReviewer !== null &&
+      chip.dataset.reviewerFilter?.toLowerCase() === state.filteredReviewer.toLowerCase();
+    chip.classList.toggle("rlb__chip--active", active);
+  });
+  if (persist) void persistListFilters();
+}
+
 function closeAddReviewerPopover() {
   if (_arvPopover) { _arvPopover.remove(); _arvPopover = null; }
   if (_arvOutsideListener) {
@@ -669,16 +656,3 @@ function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
   }, 0);
 }
 
-/** Scrolls the list to a PR's row and lights it up a moment; false when the
- *  list's filters hide it. */
-function flashPrRow(repo: string, id: number): boolean {
-  const row = document.querySelector<HTMLElement>(`[data-pr-id="${CSS.escape(`${repo}/${id}`)}"]`);
-  if (!row) return false;
-  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  row.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
-  row.classList.remove("pr-row--flash");
-  void row.offsetWidth;
-  row.classList.add("pr-row--flash");
-  row.addEventListener("animationend", () => row.classList.remove("pr-row--flash"), { once: true });
-  return true;
-}

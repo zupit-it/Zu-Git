@@ -44,6 +44,9 @@ Toggl: use toggl_get_day to see a working day (booked entries, meetings, candida
 which story was worked on when, free time, learned project/tag suggestions). Use toggl_propose_day \
 to hand ZuGit a plan for that day: it is NOT written to Toggl — the user reviews and submits it in \
 ZuGit. Use toggl_get_entries to read what was booked over a period (stand-ups, weekly reviews). \
+Slack: slack_get_people lists the team's GitHub logins with their names and emails; look each person \
+up with your Slack connector, read-only, and hand the GitHub → Slack table to ZuGit with \
+slack_propose_people — the user reviews it in ZuGit's Settings. Never send Slack messages for this. \
 Credentials stay inside ZuGit; never ask the user for tokens.";
 
 /// Past this, patches are left out of get_pr_review_context: the agent should
@@ -184,6 +187,8 @@ impl Server {
                     "toggl_get_entries" => self.get_entries(&arguments).await,
                     "get_pr_review_context" => self.review_context(&arguments).await,
                     "propose_review" => self.propose_review(&arguments).await,
+                    "slack_get_people" => self.slack_people(&arguments).await,
+                    "slack_propose_people" => self.propose_slack_people(&arguments),
                     other => {
                         return Some(rpc_error(id, -32602, &format!("Unknown tool '{other}'.")));
                     }
@@ -577,6 +582,115 @@ impl Server {
             "upToDate": up_to_date,
             "notes": notes,
             "next": "Nothing was posted to GitHub. ZuGit shows these comments in the PR's diff view, where the user keeps, edits or discards each one. Calling this tool again replaces your previous proposal for this PR.",
+        })))
+    }
+
+    async fn slack_people(&mut self, arguments: &Value) -> Result<Value, String> {
+        let settings = crate::storage::load_settings_from(&self.data_dir);
+        let mut logins: Vec<String> = settings
+            .team_member_github_users
+            .iter()
+            .map(|login| login.trim().to_string())
+            .filter(|login| crate::slack::valid_login(login))
+            .collect();
+        if let Some(extra) = arguments.get("logins").and_then(Value::as_array) {
+            for login in extra.iter().filter_map(Value::as_str).map(str::trim) {
+                if !crate::slack::valid_login(login) {
+                    return Err(format!("'{login}' is not a GitHub login."));
+                }
+                if !logins.iter().any(|l| l.eq_ignore_ascii_case(login)) {
+                    logins.push(login.to_string());
+                }
+            }
+        }
+        if logins.is_empty() {
+            return Err("ZuGit lists no team members: add their GitHub logins in ZuGit Settings → GitHub (Team members GitHub usernames), or pass logins.".into());
+        }
+        if logins.len() > 100 {
+            return Err("At most 100 people per call.".into());
+        }
+
+        let mut warnings = Vec::new();
+        let profiles = if settings.github_token.is_empty() {
+            warnings.push("GitHub is not set up in ZuGit: names and emails unavailable, use nameHint.".to_string());
+            HashMap::new()
+        } else {
+            crate::github::fetch_user_profiles(&logins, &settings, &self.client).await
+        };
+        let directory = crate::storage::load_slack_directory(&self.data_dir);
+        let pending = crate::storage::load_slack_proposal(&self.data_dir);
+
+        let people: Vec<Value> = logins
+            .iter()
+            .map(|login| {
+                let (name, email) = profiles.get(login).cloned().unwrap_or((None, None));
+                let current = directory.member(login).map(|p| {
+                    json!({ "memberId": p.member_id, "slackName": p.slack_name })
+                });
+                json!({
+                    "login": login,
+                    "githubName": name,
+                    "githubEmail": email,
+                    "nameHint": crate::slack::name_hint(login, &settings.internal_author_marker),
+                    "current": current,
+                })
+            })
+            .collect();
+
+        Ok(tool_text(&json!({
+            "people": people,
+            "workspace": if directory.team_id.is_empty() {
+                Value::Null
+            } else {
+                json!({ "teamId": directory.team_id, "teamName": directory.team_name })
+            },
+            "pendingProposal": pending.map(|p| json!({ "createdAt": p.created_at, "source": p.source })),
+            "warnings": warnings,
+            "howToMatch": {
+                "lookup": "With your Slack connector, read-only: find each person by githubEmail first (an exact email is match 'email'), else by githubName or nameHint among the workspace's members (match 'name'). Never send, post or react on Slack for this.",
+                "ids": "memberId is the Slack user id (U… or W…), teamId the workspace id (T…), both as Slack's API returns them. Never invent an id: who you cannot find goes in unmatched with the reason.",
+                "doubt": "Several candidates, a deactivated account, a bot or a guest from another company: leave the person out and say why in unmatched.",
+                "current": "People with a current memberId are already saved: propose them again only if Slack says otherwise.",
+                "deliver": "Call slack_propose_people with teamId, people and unmatched.",
+            },
+        })))
+    }
+
+    fn propose_slack_people(&mut self, arguments: &Value) -> Result<Value, String> {
+        let people: Vec<crate::slack::SlackPerson> = serde_json::from_value(
+            arguments.get("people").cloned().unwrap_or_else(|| json!([])),
+        )
+        .map_err(|e| format!("Invalid people: {e}"))?;
+        let unmatched: Vec<crate::slack::Unmatched> = serde_json::from_value(
+            arguments.get("unmatched").cloned().unwrap_or_else(|| json!([])),
+        )
+        .map_err(|e| format!("Invalid unmatched: {e}"))?;
+        if people.iter().any(|p| p.match_kind == Some(crate::slack::MatchKind::Manual)) {
+            return Err("match is 'email' or 'name'; 'manual' is for the user's own edits.".into());
+        }
+        let text = |key: &str| arguments.get(key).and_then(Value::as_str).map(str::to_string);
+        let proposal = crate::slack::clean_proposal(crate::slack::SlackProposal {
+            created_at: Utc::now().to_rfc3339(),
+            source: self.client_name.clone(),
+            team_id: text("teamId").unwrap_or_default(),
+            team_name: text("teamName"),
+            people,
+            unmatched,
+            note: text("note"),
+        })?;
+        crate::storage::save_slack_proposal(&self.data_dir, &proposal)?;
+
+        let by_name = proposal
+            .people
+            .iter()
+            .filter(|p| p.match_kind != Some(crate::slack::MatchKind::Email))
+            .count();
+        Ok(tool_text(&json!({
+            "saved": true,
+            "people": proposal.people.len(),
+            "toCheck": by_name,
+            "unmatched": proposal.unmatched.len(),
+            "next": "Nothing was saved to ZuGit's table yet. ZuGit shows this proposal in Settings → Slack, where the user checks each row (those matched by name first) and saves. Calling this tool again replaces the proposal.",
         })))
     }
 
@@ -1095,6 +1209,62 @@ fn tool_definitions() -> Value {
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
         },
         {
+            "name": "slack_get_people",
+            "title": "List the team to find on Slack",
+            "description": "The team's GitHub logins as ZuGit knows them, each with the GitHub name and public email when there is one, a name guessed from the login, and the Slack member already saved for it. Use it to look the people up on Slack (read-only) before slack_propose_people.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "logins": { "type": "array", "items": { "type": "string" }, "description": "More GitHub logins to include besides the team (e.g. a reviewer from outside it)" }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "readOnlyHint": true, "openWorldHint": true }
+        },
+        {
+            "name": "slack_propose_people",
+            "title": "Propose who is who on Slack",
+            "description": "Hands ZuGit the GitHub → Slack table it uses to open a reviewer's direct message. Nothing is sent to Slack and nothing is saved until the user reviews the proposal in ZuGit's Settings. Only ids as Slack returned them; who you could not find goes in unmatched. Calling it again replaces the previous proposal.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "teamId": { "type": "string", "description": "Slack workspace id, T…" },
+                    "teamName": { "type": "string", "description": "Workspace name, shown to the user" },
+                    "note": { "type": "string", "description": "One sentence for the user on how people were found" },
+                    "people": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "login": { "type": "string", "description": "GitHub login from slack_get_people" },
+                                "memberId": { "type": "string", "description": "Slack user id, U… or W…" },
+                                "slackName": { "type": "string", "description": "The person's Slack name, as shown in Slack" },
+                                "match": { "type": "string", "enum": ["email", "name"], "description": "'email' when the GitHub email is the Slack email, else 'name'" },
+                                "note": { "type": "string", "description": "Short evidence, e.g. 'same email' or 'only Mario Rossi in the workspace'" }
+                            },
+                            "required": ["login", "memberId", "match"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "unmatched": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "login": { "type": "string" },
+                                "reason": { "type": "string", "description": "Why: not found, several candidates…" }
+                            },
+                            "required": ["login", "reason"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["teamId", "people"],
+                "additionalProperties": false
+            },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
+        },
+        {
             "name": "toggl_get_day",
             "title": "Read a Toggl day",
             "description": "Everything needed to fill one working day on Toggl: entries already booked, calendar meetings (with the project/description used for them before), candidate Jira stories, evidence of which story was worked on when (AI sessions, commits, Jira status changes), the free time left, and the Toggl projects and tags. Times are local HH:MM.",
@@ -1177,6 +1347,12 @@ fn prompt_definitions() -> Value {
             "arguments": [
                 { "name": "date", "description": "YYYY-MM-DD; today when omitted", "required": false }
             ]
+        },
+        {
+            "name": "map_slack_users",
+            "title": "Find the team on Slack",
+            "description": "Look the team's GitHub users up on Slack and hand ZuGit the table it uses for nudges; you review it in ZuGit's Settings.",
+            "arguments": []
         }
     ])
 }
@@ -1185,6 +1361,7 @@ fn prompt(params: &Value) -> Result<Value, String> {
     match params.get("name").and_then(Value::as_str).unwrap_or("") {
         "fill_toggl_day" => fill_toggl_day_prompt(params),
         "review_pr" => review_pr_prompt(params),
+        "map_slack_users" => Ok(map_slack_users_prompt()),
         name => Err(format!("Unknown prompt '{name}'.")),
     }
 }
@@ -1217,6 +1394,26 @@ comments that matter: bugs first, then real suggestions; few nits.\n\
         "description": format!("Review {repo}#{number} and hand the comments to ZuGit"),
         "messages": [{ "role": "user", "content": { "type": "text", "text": text } }]
     }))
+}
+
+fn map_slack_users_prompt() -> Value {
+    let text = "Find my team on Slack for ZuGit's nudges.\n\n\
+1. Call slack_get_people.\n\
+2. With the Slack connector or MCP you have, read-only, look each person up: by githubEmail first, \
+else by githubName or nameHint among the workspace's members. Take memberId (U… or W…) and the \
+workspace teamId (T…) exactly as Slack returns them; never invent or guess an id. If I have no Slack \
+connector, tell me and stop.\n\
+3. Several candidates, a deactivated account, a bot or a guest: leave that person out and put them \
+in unmatched with the reason. Ask me only if something stops you from doing the rest.\n\
+4. Never send, post, react or change anything on Slack, and do not write files.\n\
+5. Call slack_propose_people with teamId, teamName, people (match 'email' or 'name', a short note \
+each) and unmatched.\n\
+6. Tell me in two lines how many you found, who needs a look, and that the table waits in ZuGit's \
+Settings → Slack.";
+    json!({
+        "description": "Find the team on Slack and hand the table to ZuGit",
+        "messages": [{ "role": "user", "content": { "type": "text", "text": text } }]
+    })
 }
 
 fn fill_toggl_day_prompt(params: &Value) -> Result<Value, String> {
@@ -1305,7 +1502,15 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["get_pr_review_context", "propose_review", "toggl_get_day", "toggl_propose_day", "toggl_get_entries"]
+            vec![
+                "get_pr_review_context",
+                "propose_review",
+                "slack_get_people",
+                "slack_propose_people",
+                "toggl_get_day",
+                "toggl_propose_day",
+                "toggl_get_entries"
+            ]
         );
         for tool in reply["result"]["tools"].as_array().unwrap() {
             assert_eq!(tool["inputSchema"]["type"], "object", "{}", tool["name"]);
@@ -1324,6 +1529,52 @@ mod tests {
         })))
         .unwrap();
         assert_eq!(reply["result"]["isError"], true);
+    }
+
+    #[test]
+    fn slack_proposals_are_checked_saved_and_only_proposed() {
+        let dir = std::env::temp_dir().join(format!("zugit-mcp-slack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut server = Server { data_dir: dir.clone(), ..server() };
+        let call = |arguments: Value| {
+            json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                    "params": { "name": "slack_propose_people", "arguments": arguments } })
+        };
+
+        // A channel id is no member, and the user's own kind of row is theirs.
+        for people in [
+            json!([{ "login": "anna", "memberId": "C0CHANNEL", "match": "email" }]),
+            json!([{ "login": "anna", "memberId": "U0ANNA", "match": "manual" }]),
+        ] {
+            let reply = block_on(server.handle(call(json!({ "teamId": "T0ZUPIT", "people": people })))).unwrap();
+            assert_eq!(reply["result"]["isError"], true, "{people}");
+        }
+        assert!(crate::storage::load_slack_proposal(&dir).is_none());
+
+        let reply = block_on(server.handle(call(json!({
+            "teamId": "t0zupit",
+            "people": [{ "login": "anna", "memberId": "U0ANNA", "match": "name", "slackName": "Anna B." }],
+            "unmatched": [{ "login": "piero", "reason": "two Piero" }]
+        }))))
+        .unwrap();
+        assert!(reply["result"]["isError"].is_null(), "{reply}");
+        let proposal = crate::storage::load_slack_proposal(&dir).unwrap();
+        assert_eq!(proposal.team_id, "T0ZUPIT");
+        assert_eq!(proposal.source, "test");
+        // Proposed, not saved: nudges keep using the table until the user saves.
+        assert!(crate::storage::load_slack_directory(&dir).people.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_slack_prompt_is_read_only_on_slack() {
+        let result = prompt(&json!({ "name": "map_slack_users" })).unwrap();
+        let text = result["messages"][0]["content"]["text"].as_str().unwrap();
+        assert!(text.contains("slack_get_people"));
+        assert!(text.contains("slack_propose_people"));
+        assert!(text.contains("Never send, post, react or change anything on Slack"));
+        assert!(text.contains("never invent or guess an id"));
     }
 
     #[test]

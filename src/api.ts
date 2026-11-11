@@ -307,11 +307,20 @@ export function applyOptimisticRerequest(repo: string, prNumber: number, login: 
   const pr = state.currentDashboard.prs.find((p) => p.repo === repo && p.id === prNumber);
   if (!pr) return;
 
-  const actor = pr.blockingReviewers.find((a) => a.login === login);
+  // Asked again, they await a review whatever they said before — as GitHub's Reviewers list shows them.
+  const actor = [...pr.blockingReviewers, ...pr.staleApprovers, ...pr.commentedReviewers].find((a) => a.login === login);
   pr.blockingReviewers = pr.blockingReviewers.filter((a) => a.login !== login);
+  pr.staleApprovers = pr.staleApprovers.filter((a) => a.login !== login);
+  pr.commentedReviewers = pr.commentedReviewers.filter((a) => a.login !== login);
   if (actor && !pr.pendingReviewers.some((a) => a.login === login)) {
     pr.pendingReviewers = [...pr.pendingReviewers, actor];
   }
+  pr.hasStaleApproval = pr.staleApprovers.length > 0;
+  // As the backend picks it (choose_review_state).
+  pr.reviewState = pr.blockingReviewers.length ? "changes-requested"
+    : pr.currentApprovers.length ? "approved"
+    : pr.staleApprovers.length ? "approved-stale"
+    : "needs-review";
 
   const row = document.querySelector<HTMLElement>(`[data-pr-id="${repo}/${prNumber}"]`);
   if (!row) return;

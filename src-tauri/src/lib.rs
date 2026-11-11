@@ -12,6 +12,7 @@ mod pet_pack;
 mod pr_review;
 mod release_picks;
 mod secret_store;
+mod slack;
 mod sprint;
 mod storage;
 mod toggl;
@@ -134,6 +135,7 @@ pub fn run() {
             pet_pack::pet_pack_info,
             pet_pack::pet_pack_export,
             commands::fetch_pr_threads,
+            commands::fetch_pr_conversation,
             commands::ai_review_list,
             commands::ai_review_get,
             commands::ai_review_set_status,
@@ -189,6 +191,10 @@ pub fn run() {
             commands::sprint_categories_load,
             commands::sprint_categories_save,
             commands::sprint_attachment,
+            commands::slack_people_load,
+            commands::slack_people_save,
+            commands::slack_people_discard_proposal,
+            commands::slack_open_dm,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
