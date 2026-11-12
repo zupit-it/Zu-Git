@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **The GPU rests when ZuGit does** — on Windows ZuGit kept the GPU busy all day, even with
+  nothing moving. The sync dot pulsed for good, and an animation that never ends has the window
+  drawn again at every refresh of the screen: now it pulses while a sync is on and three more
+  times once it lands, and a window at rest draws nothing. The veil behind the PR diff, the
+  release diff and the Toggl planner no longer blurs the page: it dims it, as behind What's new;
+  with a diff open the GPU went from about 10% to nothing at rest, and from 13% to almost nothing
+  while scrolling. The loading hairline slides without repainting the page.
+
 ---
 
 ## [3.1.3] - 2026-11-12
