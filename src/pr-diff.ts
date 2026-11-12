@@ -554,7 +554,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
       </div>
       <div class="pd-main">
         <aside class="pd-side">
-          <button class="pd-nav-conv" type="button" data-pd-section="conversation" aria-pressed="false"
+          <button class="pd-nav-conv" type="button" data-pd-show="conversation" aria-pressed="false"
             title="What is said on the PR as a whole, as on GitHub's Conversation tab">
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h7A1.5 1.5 0 0 1 12 3.5v5A1.5 1.5 0 0 1 10.5 10H6l-3 2.5V10h0A1.5 1.5 0 0 1 2 8.5Z"/></svg>
             <span class="pd-nav-conv__label">Conversation</span>
@@ -740,8 +740,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     const copy = target.closest<HTMLButtonElement>("[data-pd-copy-prompt]");
     if (copy) { void copyPrompt(copy); return; }
 
-    const sectionButton = target.closest<HTMLElement>("[data-pd-section]");
-    if (sectionButton) { showSection(sectionButton.dataset.pdSection === "conversation" ? "conversation" : "files"); return; }
+    const sectionButton = target.closest<HTMLElement>("[data-pd-show]");
+    if (sectionButton) { showSection(sectionButton.dataset.pdShow === "conversation" ? "conversation" : "files"); return; }
 
     // Links in comments open in the browser (open_external takes http(s) only).
     const link = target.closest<HTMLElement>("[data-pd-link]");
@@ -1315,7 +1315,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     section = next;
     content.hidden = next !== "files";
     conversationView.hidden = next !== "conversation";
-    const nav = $<HTMLElement>("[data-pd-section].pd-nav-conv");
+    const nav = $<HTMLElement>("[data-pd-show].pd-nav-conv");
     nav.classList.toggle("pd-nav-conv--active", next === "conversation");
     nav.setAttribute("aria-pressed", String(next === "conversation"));
     // The file last read stays marked in the list, but it is not what shows.

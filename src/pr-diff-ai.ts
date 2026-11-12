@@ -474,7 +474,7 @@ export function renderConversationStrip(conversation: GhConversation | null, not
     latest ? `latest <strong>${escHtml(latest.author)}</strong>${latest.createdAt ? `, ${escHtml(relativeTime(latest.createdAt))}` : ""}` : "",
     notice && items.length === 0 ? "could not be loaded" : "",
   ].filter(Boolean);
-  return `<button class="pd-conv-strip" type="button" data-pd-section="conversation" title="What is said on the PR as a whole, as on GitHub's Conversation tab">` +
+  return `<button class="pd-conv-strip" type="button" data-pd-show="conversation" title="What is said on the PR as a whole, as on GitHub's Conversation tab">` +
     `<span class="pd-gh-badge">Conversation</span>` +
     `<span class="pd-ai-panel__meta">${parts.join(" · ")}</span>` +
     `<span class="pd-conv-strip__go">Read →</span>` +
@@ -508,7 +508,7 @@ export function renderConversationPanel(
   const more = conversation?.moreComments
     ? `${conversation.moreComments} older comment${conversation.moreComments === 1 ? "" : "s"} on GitHub · `
     : "";
-  const back = `<button class="pd-ai-btn" type="button" data-pd-section="files">← Files</button>`;
+  const back = `<button class="pd-ai-btn" type="button" data-pd-show="files">← Files</button>`;
   const entries = said.map(item => item.bot ? botEntry(item, isOpen(`conv:${item.url || item.createdAt}`)) : `<div class="pd-gh-thread">${conversationEntry(item)}</div>`);
   return `<div class="pd-ai-panel pd-ai-panel--gh pd-conv-panel">` +
     `<div class="pd-ai-panel__head"><span class="pd-gh-badge">Conversation</span><span class="pd-ai-panel__meta">${meta}</span><div class="rd-spacer"></div>${back}</div>` +
