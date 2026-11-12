@@ -1750,15 +1750,19 @@ body[data-view]:not([data-view="list"]) .rlb { display: none; }
   position: absolute;
   top: 0;
   bottom: 0;
+  left: 0;
   width: 32%;
   border-radius: 2px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   animation: list-progress-slide 1.15s ease-in-out infinite;
 }
 
+/* transform rather than left: the compositor slides it, with no layout and no
+   repaint at every frame. In its own widths: from just off the left edge to
+   just off the right one (100% / 32%). */
 @keyframes list-progress-slide {
-  0%   { left: -32%; }
-  100% { left: 100%; }
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(312.5%); }
 }
 
 /* Announced to screen readers, invisible on screen. */
