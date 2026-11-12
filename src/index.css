@@ -255,7 +255,7 @@ html, body {
 .app-toolbar .sync-status { min-width: 0; flex-shrink: 1; }
 .app-toolbar .sync-status-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ── Sync status (pulsing dot + text) ────────────────────── */
+/* ── Sync status (dot + text) ────────────────────────────── */
 .sync-status {
   display: flex;
   align-items: center;
@@ -279,14 +279,21 @@ html, body {
   background: var(--ok);
 }
 
+/* The ring pulses while a sync is on and three more times once it lands, then
+   rests. It used to pulse for good, and an animation that never ends has the
+   window drawn again at every refresh of the screen, for as long as the window
+   shows: 60 frames a second with nothing to say. `data-syncing` comes from
+   setListLoading. The two names hold the same keyframes: the change of name is
+   what starts the three pulses when the sync lands. */
 .sync-dot-ring {
   position: absolute;
   inset: -2px;
   border-radius: 6px;
   background: var(--ok);
-  opacity: 0.25;
-  animation: zpulse 2s ease-out infinite;
+  opacity: 0;
+  animation: zpulse-settle 2s ease-out 3;
 }
+.sync-status[data-syncing] .sync-dot-ring { animation: zpulse 2s ease-out infinite; }
 
 .sync-status[data-tone="danger"] .sync-dot,
 .sync-status[data-tone="danger"] .sync-dot-ring {
@@ -3453,6 +3460,10 @@ ul.field-hint {
 }
 
 @keyframes zpulse {
+  0%   { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes zpulse-settle {
   0%   { transform: scale(0.8); opacity: 0.6; }
   100% { transform: scale(2.4); opacity: 0; }
 }
