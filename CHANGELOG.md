@@ -19,6 +19,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   GitHub does the rebase: with conflicts, or a push since ZuGit last looked, it refuses and nothing
   changes. Never a merge of the base into the branch. The GitHub token needs write access to Pull
   requests and Contents.
+- **What you just did on a PR shows at once, marked as waiting** — after an auto-merge switch, a
+  rebase, a reviewer asked or asked again, the row shows it straight away, dimmed, until GitHub
+  shows it too. ZuGit reads GitHub once for it, as it did, and once more only if that read does
+  not show it yet — also after a review published from the diff — and never more: each read
+  counts against your token's hourly limit. With no sign of it after the second, the row goes back
+  to what GitHub says and the status tells you. The list itself is only ever what GitHub last
+  said: ZuGit no longer works out a PR's state in its place, so a row cannot be left showing a
+  guess.
 
 ---
 

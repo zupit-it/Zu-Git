@@ -3,6 +3,9 @@
 // protection, required reviews and checks): ZuGit never touches a local clone.
 // What the viewer may do comes from GitHub (`mergeActions`), never from a guess.
 //
+// What was just done shows on the row at once, as waiting, until GitHub shows
+// it too (`trackGitHubChange`): the list itself is only ever what GitHub said.
+//
 // Auto-merge waits for those rules and can be turned off until it merges.
 // Rebase rewrites the branch, so it always asks first — more plainly on someone
 // else's PR, whose author may be working on it — and only ever rebases the
@@ -10,11 +13,11 @@
 // GitHub refuses with nothing changed.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { MergeActions, PullRequestSummary } from "./shared/pr-model";
+import type { PullRequestSummary } from "./shared/pr-model";
 import { state } from "./state";
-import { renderListBoard, setStatus } from "./render";
-import { applyListFilters } from "./filters";
-import { refreshDashboard } from "./api";
+import { setStatus } from "./render";
+import { trackGitHubChange } from "./api";
+import { autoMergeIs } from "./pending-changes";
 import { firstName, rebaseNoticeMessage, slackMember } from "./slack-people";
 import { openSlackDm } from "./slack";
 import { closePopover, openPopover } from "./popover";
@@ -26,8 +29,8 @@ const METHOD_LABELS: Record<string, string> = {
   REBASE: "Rebase and merge",
 };
 
-/** GitHub takes a moment to rebase: the list is read again after it. */
-const REBASE_REFRESH_MS = 6000;
+/** GitHub takes a moment to rebase: the read of the list waits for it, so that one is enough. */
+const REBASE_READ_MS = 5000;
 
 /**
  * GitHub refuses auto-merge on a PR it could merge right now ("Pull request is
@@ -68,26 +71,16 @@ function busy(button: HTMLButtonElement | null, on: boolean) {
   button.classList.toggle("is-loading", on);
 }
 
-/** The list shows the change at once; the next refresh confirms it. */
-function redrawList() {
-  const snapshot = state.currentDashboard;
-  if (snapshot) renderListBoard(applyListFilters(snapshot));
-}
-
 // ── Auto-merge ────────────────────────────────────────────────────────────────
 
 /**
- * Auto-merge went on with `method`, or off: the row shows it at once — the
- * flags that make its chip a button follow the method — and GitHub is read
- * again for the truth, even if a refresh is already running.
+ * Auto-merge went on with `method`, or off, and GitHub said so: the row shows
+ * it at once, as waiting. Whether its chip is a button again — what the viewer
+ * may do next — comes with GitHub's next snapshot, not from a guess.
  */
-function autoMergeTurned(pr: PullRequestSummary, actions: MergeActions, method: string | null) {
-  pr.autoMergeMethod = method;
-  actions.canDisableAutoMerge = method !== null;
-  actions.canEnableAutoMerge = method === null;
+function autoMergeTurned(pr: PullRequestSummary, method: string | null) {
   closePopover();
-  redrawList();
-  void refreshDashboard("after-change");
+  trackGitHubChange(pr, "auto-merge", { label: method ? "Auto-merge on" : "Auto-merge off", patch: autoMergeIs(method) });
 }
 
 export function showAutoMergePopover(trigger: HTMLButtonElement) {
@@ -112,7 +105,7 @@ export function showAutoMergePopover(trigger: HTMLButtonElement) {
       try {
         await invoke("set_auto_merge", { repo: pr.repo, prNumber: pr.id, nodeId: pr.nodeId, method: null, headSha: pr.headSha });
         setStatus(`Auto-merge off for ${name}.`);
-        autoMergeTurned(pr, actions, null);
+        autoMergeTurned(pr, null);
       } catch (error) {
         busy(go, false);
         showError(el, refusal(error));
@@ -151,7 +144,7 @@ export function showAutoMergePopover(trigger: HTMLButtonElement) {
         repo: pr.repo, prNumber: pr.id, nodeId: pr.nodeId, method, headSha: pr.headSha,
       });
       setStatus(`Auto-merge on for ${name}: GitHub merges it once reviews and checks allow it.`);
-      autoMergeTurned(pr, actions, on ?? method);
+      autoMergeTurned(pr, on ?? method);
     } catch (error) {
       busy(go, false);
       const message = errorMessage(error, "");
@@ -209,7 +202,8 @@ export function showRebasePopover(trigger: HTMLButtonElement) {
     }
     // The merge queue, if on, does not ask GitHub for the same rebase again.
     state.queueRebaseTriggeredFor.add(key);
-    window.setTimeout(() => void refreshDashboard("after-change"), REBASE_REFRESH_MS);
+    // Nor does the row: it says "Rebasing…" until the branch shows its new head.
+    trackGitHubChange(pr, "rebase", { label: "Rebase", readIn: REBASE_READ_MS });
     const done = `Rebase of ${escHtml(pr.repo)}#${pr.id} on ${escHtml(pr.baseRef)} started: GitHub updates the branch in a few seconds. It was at <code>${escHtml(pr.headSha.slice(0, 7))}</code>.`;
     setStatus(done);
     if (mine) { closePopover(); return; }

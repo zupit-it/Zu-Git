@@ -17,6 +17,7 @@ import {
   getAvailableRepos,
 } from "./filters";
 import { computeMyScore } from "./reaction-score";
+import { givenUpMessage, reconcilePending, shownPr, waitingOn } from "./pending-changes";
 import { slackMember } from "./slack-people";
 import { petReactToDashboard } from "./pet-triggers";
 import { clearSettingsSectionsDirty, openUnconfiguredSections, syncSettingsSections } from "./settings-sections";
@@ -462,6 +463,9 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string,
   // people Settings → Slack knows.
   const canNudge = (login: string) => isMyPr && !isDraft && !!slackMember(state.slackDirectory, login);
 
+  // Asked from ZuGit a moment ago, and GitHub does not show it yet: the badge says so.
+  const waiting = (login: string) => waitingOn(state.pendingChanges, pr, "review-request", login);
+
   const items: Array<{ login: string; avatarUrl?: string; tone: string; label: string; stale?: boolean; canRerequest?: boolean; canNudge?: boolean }> = [
     ...dedup(pr.blockingReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "fail", label: "Changes requested", canRerequest: isMyPr })),
     ...dedup(pr.pendingReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "warn", label: "Review required", canNudge: canNudge(a.login) })),
@@ -484,7 +488,8 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string,
   return items
     .map(
       (item, i) => {
-        const badge = `<div class="review-badge review-badge-${item.tone}${mutedClass}">
+        const asked = waiting(item.login);
+        const badge = `<div class="review-badge review-badge-${item.tone}${mutedClass}${asked ? " review-badge--waiting" : ""}"${asked ? ` aria-busy="true" title="${escHtml(asked.label)} · waiting for GitHub to show it"` : ""}>
           ${avatarSm(item.login, item.avatarUrl, isDraft)}
           <span class="review-badge-label">${item.label}</span>${item.stale ? `<span class="review-badge-stale-icon">${SVG.clock}</span>` : ""}${item.canRerequest ? `<button class="review-badge-rerequest" title="Re-request review from ${item.login}" data-repo="${pr.repo}" data-pr-number="${pr.id}" data-login="${item.login}">${SVG.rerequest}</button>` : ""}${item.canNudge ? `<button class="review-badge-nudge" type="button" title="Sollecita ${escHtml(item.login)} su Slack: copia il messaggio e apre la vostra chat" data-nudge-login="${escHtml(item.login)}" data-repo="${escHtml(pr.repo)}" data-pr-number="${pr.id}">${SVG.nudge}</button>` : ""}
         </div>`;
@@ -520,7 +525,20 @@ function actionChip(chipHtml: string, attr: "data-auto-merge" | "data-rebase", p
   return `<button class="chip-btn${offer ? " chip-btn--offer" : ""}" ${attr}="${prKey}" type="button" title="${title}">${chipHtml}</button>`;
 }
 
-export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin?: string): string {
+/**
+ * A chip that says what ZuGit just did on GitHub, until GitHub shows it too
+ * (pending-changes.ts): it looks it, and is no button meanwhile.
+ */
+function waitingChip(chipHtml: string, label: string): string {
+  return `<span class="chip-wait" aria-busy="true" title="${escHtml(label)} · waiting for GitHub to show it">${chipHtml}</span>`;
+}
+
+/**
+ * `fromGitHub` is the PR as the snapshot has it; the row draws it with the
+ * changes made from ZuGit that GitHub does not show yet over it.
+ */
+export function renderPRRow(fromGitHub: PullRequestSummary, isLast: boolean, viewerLogin?: string): string {
+  const pr = shownPr(state.pendingChanges, fromGitHub);
   const isDraft = !!pr.isDraft;
   const isAging = Date.now() - Date.parse(pr.createdAtIso) > 14 * 24 * 60 * 60 * 1000;
 
@@ -584,13 +602,17 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
   const actions = pr.mergeActions;
   const actionKey = `${escHtml(pr.repo)}/${pr.id}`;
   let autoMergeChip = "";
+  // Just switched from ZuGit: what the viewer may do next is GitHub's to say, with its next snapshot.
+  const autoMergeWait = waitingOn(state.pendingChanges, pr, "auto-merge");
   if (pr.autoMergeMethod) {
     const on = chip(isDraft ? "mute" : "ok", `Auto-merge (${pr.autoMergeMethod.toLowerCase()})`, SVG.autoMerge);
-    autoMergeChip = actions?.canDisableAutoMerge
-      ? actionChip(on, "data-auto-merge", actionKey, "Auto-merge is on · click to turn it off")
-      : on;
+    autoMergeChip = autoMergeWait
+      ? waitingChip(on, autoMergeWait.label)
+      : actions?.canDisableAutoMerge
+        ? actionChip(on, "data-auto-merge", actionKey, "Auto-merge is on · click to turn it off")
+        : on;
   } else if (
-    actions?.canEnableAutoMerge && actions.autoMergeMethods.length > 0 && !isDraft
+    !autoMergeWait && actions?.canEnableAutoMerge && actions.autoMergeMethods.length > 0 && !isDraft
     // Mergeable right now: auto-merge would have nothing to wait for, and GitHub refuses it.
     && pr.mergeStatus !== "clean"
   ) {
@@ -604,12 +626,16 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
     ? chip(isDraft ? "mute" : "warn", `${pr.unresolvedThreads} unresolved`, SVG.threads)
     : "";
 
-  const behindChip = chip(isDraft ? "mute" : "warn", "Needs rebase", SVG.behind);
+  // A rebase asked from ZuGit: GitHub is at it until the branch shows a new head.
+  const rebaseWait = waitingOn(state.pendingChanges, pr, "rebase");
+  const behindChip = chip(isDraft ? "mute" : "warn", rebaseWait ? "Rebasing…" : "Needs rebase", SVG.behind);
   const mergeStatusChip =
     pr.mergeStatus === "behind"
-      ? actions?.canUpdateBranch
-        ? actionChip(behindChip, "data-rebase", actionKey, `Rebase on ${escHtml(pr.baseRef)}, as GitHub's “Update with rebase”`)
-        : behindChip
+      ? rebaseWait
+        ? waitingChip(behindChip, rebaseWait.label)
+        : actions?.canUpdateBranch
+          ? actionChip(behindChip, "data-rebase", actionKey, `Rebase on ${escHtml(pr.baseRef)}, as GitHub's “Update with rebase”`)
+          : behindChip
       : pr.mergeStatus === "conflicting"
         ? chip(isDraft ? "mute" : "fail", "Conflicts", SVG.conflict)
         : "";
@@ -1366,9 +1392,29 @@ export async function notifyQueueConflictBlocked(pr: PullRequestSummary) {
 
 // ── Full dashboard render ─────────────────────────────────────────────────────
 
+/** The list again, from the snapshot as it is: after a filter, or a change still waiting for GitHub. */
+export function redrawList() {
+  const snapshot = state.currentDashboard;
+  if (snapshot) renderListBoard(applyListFilters(snapshot));
+}
+
+/**
+ * Lets go of the changes made from ZuGit that a snapshot asked for at `readAt`
+ * shows, and of those GitHub still does not show after their time. Returns
+ * whether any went, and what to say of those given up.
+ */
+export function settlePendingChanges(prs: PullRequestSummary[], readAt: number): { changed: boolean; message: string } {
+  const { waiting, expired } = reconcilePending(state.pendingChanges, prs, readAt, Date.now());
+  const changed = waiting.length !== state.pendingChanges.length;
+  state.pendingChanges = waiting;
+  return { changed, message: givenUpMessage(expired) };
+}
+
 export function renderDashboard(snapshot: DashboardSnapshot) {
   void petReactToDashboard(state.currentDashboard, snapshot);
   state.currentDashboard = snapshot;
+  // Before the rows are drawn: what this snapshot shows is no longer waiting.
+  const givenUp = settlePendingChanges(snapshot.prs, state.dashboardReadAt).message;
   const myPendingReviewIds = getMyPendingReviewIds(snapshot);
   const myChangesRequestedIds = getMyChangesRequestedIds(snapshot);
   const filteredPrs = applyListFilters(snapshot);
@@ -1391,6 +1437,7 @@ export function renderDashboard(snapshot: DashboardSnapshot) {
     updateSyncLabel();
     startSyncLabelTicker();
   }
+  if (givenUp) setStatus(givenUp);
 
   if (state.notificationsEnabled) {
     if (state.lastMyPendingReviewIds !== null) {

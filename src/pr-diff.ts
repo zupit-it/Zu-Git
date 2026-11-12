@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { PullRequestSummary } from "./shared/pr-model";
-import { openExternal, refreshDashboard } from "./api";
+import { openExternal, trackGitHubChange } from "./api";
 import { SVG, errorMessage, escHtml, formatDiffNum } from "./utils";
 import {
   EXPAND_STEP, alignSides, diffGaps, expandGap, fileLines, gapLines, gapSize, hunkFor, hunkSides, isGeneratedFile, linesFor,
@@ -667,6 +667,15 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
 
   // ── Close & keyboard ────────────────────────────────────────────────────────
 
+  /**
+   * Something went out to GitHub from here: the list behind is read again until
+   * the PR shows it. Nothing is drawn meanwhile — what a review makes of the
+   * PR's state is GitHub's to say.
+   */
+  function listFollows() {
+    trackGitHubChange(pr, "activity", { label: "", quiet: true });
+  }
+
   function close() {
     observer?.disconnect();
     document.removeEventListener("keydown", onKey, true);
@@ -680,7 +689,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     overlay.remove();
     void refreshAiReviewBadges();
     // The PR's review state and conversations on the list are from before.
-    if (changedOnGitHub) void refreshDashboard("after-change");
+    if (changedOnGitHub) listFollows();
   }
 
   const isMac = navigator.platform.toUpperCase().includes("MAC");
@@ -1996,7 +2005,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     // The list behind shows the PR's review state: brought up to date now, not on close.
     if (result.published.length) {
       changedOnGitHub = false;
-      void refreshDashboard("after-change");
+      listFollows();
     }
     // What GitHub accepted comes back as its own conversations.
     void loadConversation();

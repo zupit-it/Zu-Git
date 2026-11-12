@@ -1,4 +1,5 @@
 import type { DashboardSnapshot, StaleBranchesResult } from "./shared/rpc";
+import type { PendingChange } from "./pending-changes";
 import { defaultListFilterPreferences, defaultSettings } from "./shared/settings";
 import type { SlackDirectory } from "./slack-people";
 
@@ -122,6 +123,10 @@ export const state = {
   // ── Refresh ────────────────────────────────────────────────────────────────
   refreshInProgress: false,
   refreshRequestId: 0,
+  /** When the read that gave `currentDashboard` was asked for: a snapshot asked for before a change cannot confirm it. */
+  dashboardReadAt: 0,
+  /** What ZuGit just changed on GitHub and `currentDashboard` does not show yet (pending-changes.ts). */
+  pendingChanges: [] as PendingChange[],
 
   // ── Timers ─────────────────────────────────────────────────────────────────
   autoRefreshIntervalId: null as number | null,

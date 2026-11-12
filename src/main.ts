@@ -10,8 +10,9 @@ import {
 import { applyListFilters, clearFilter, type FilterKey } from "./filters";
 import {
   bootstrap, refreshDashboard, saveSettingsAndRefresh,
-  openExternal, rerequestReview, persistListFilters,
+  openExternal, rerequestReview, persistListFilters, trackGitHubChange,
 } from "./api";
+import { reviewAskedOf } from "./pending-changes";
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
 import { openPrDiff, prefetchPrDiff } from "./pr-diff";
@@ -653,7 +654,12 @@ function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
       try {
         await invoke("request_review", { repo, prNumber, login });
         closePopover();
-        void refreshDashboard("after-change");
+        // GitHub took the request: the reviewer shows on the row, as waiting, until GitHub lists them.
+        trackGitHubChange({ repo, id: prNumber }, "review-request", {
+          subject: login,
+          label: `Review asked of ${stripMarker(login)}`,
+          patch: reviewAskedOf(login, avatarUrls[login]),
+        });
       } catch (err) {
         setStatus(errorMessage(err, "Failed to add reviewer."), "danger");
         chip.disabled = false;

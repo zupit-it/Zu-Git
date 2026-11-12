@@ -9,9 +9,13 @@ import {
   setSettingsNotice, syncSettingsSaveButton,
   stopSyncLabelTicker,
   renderDashboard, renderSettings, renderSecretStoreInfo,
-  renderPRRow, collectSettingsForm,
+  collectSettingsForm, redrawList, settlePendingChanges,
 } from "./render";
-import { SVG, errorMessage } from "./utils";
+import { errorMessage } from "./utils";
+import {
+  nextPendingRead, pendingChange, reviewAskedOf, withPending,
+  type PendingKind, type PendingOptions,
+} from "./pending-changes";
 import { processMergeQueue } from "./merge-queue";
 
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
@@ -96,10 +100,14 @@ export async function refreshDashboard(mode: "manual" | "auto" | "after-change" 
   }
   setListLoading(true, mode === "auto" ? "Auto-refreshing pull requests…" : "Refreshing pull requests…");
 
+  const readAt = Date.now();
+  let landed = false;
   try {
     const payload = await invoke<DashboardSnapshot>("refresh_dashboard");
     if (myId !== state.refreshRequestId) return;
+    state.dashboardReadAt = readAt;
     renderDashboard(payload);
+    landed = true;
     setListLoading(false);
     if (state.mergeQueueEnabled) void processMergeQueue(payload);
     // The Sprint tab shows PR state on its cards: tell it there is a new snapshot.
@@ -118,9 +126,63 @@ export async function refreshDashboard(mode: "manual" | "auto" | "after-change" 
       if (refreshAgain) {
         refreshAgain = false;
         void refreshDashboard("after-change");
+      } else {
+        followPendingChanges(landed);
       }
     }
   }
+}
+
+// ── Changes made from ZuGit, until GitHub shows them ─────────────────────────
+
+let followUpTimer = 0;
+let giveUpTimer = 0;
+
+/**
+ * ZuGit just changed a PR on GitHub. Its row draws the change at once, as
+ * waiting, over what GitHub last said (pending-changes.ts) — the snapshot
+ * itself is never edited — and GitHub is read for it: now, or in `readIn` ms
+ * when it needs a moment. A read is a whole refresh and counts against the
+ * token's hourly limit, so there is one, as there always was after a change,
+ * and one more only if it does not show the change.
+ */
+export function trackGitHubChange(pr: { repo: string; id: number }, kind: PendingKind, options: PendingOptions) {
+  const known = state.currentDashboard?.prs.find((p) => p.repo === pr.repo && p.id === pr.id);
+  if (known) {
+    state.pendingChanges = withPending(state.pendingChanges, pendingChange(known, kind, options, Date.now()));
+    redrawList();
+    watchPendingTime();
+  }
+  window.clearTimeout(followUpTimer);
+  if (options.readIn) followUpTimer = window.setTimeout(() => void refreshDashboard("after-change"), options.readIn);
+  else void refreshDashboard("after-change");
+}
+
+/**
+ * After a read that landed: a change it did not show gets its second and last
+ * read a while later, and one whose first read is still due keeps its time.
+ * A read that failed is not tried again from here: the next refresh, by the
+ * timer or by hand, takes over.
+ */
+function followPendingChanges(landed: boolean) {
+  watchPendingTime();
+  if (!landed) return;
+  window.clearTimeout(followUpTimer);
+  const wait = nextPendingRead(state.pendingChanges, Date.now());
+  if (wait !== null) followUpTimer = window.setTimeout(() => void refreshDashboard("after-change"), wait);
+}
+
+/** With no read landing at all, a change is still given up when its time is over: a timer, no request. */
+function watchPendingTime() {
+  window.clearTimeout(giveUpTimer);
+  if (state.pendingChanges.length === 0) return;
+  const due = Math.min(...state.pendingChanges.map((change) => change.expiresAt)) - Date.now();
+  giveUpTimer = window.setTimeout(() => {
+    const { changed, message } = settlePendingChanges(state.currentDashboard?.prs ?? [], 0);
+    if (changed) redrawList();
+    if (message) setStatus(message);
+    watchPendingTime();
+  }, Math.max(0, due) + 50);
 }
 
 // ── Settings save ─────────────────────────────────────────────────────────────
@@ -133,6 +195,7 @@ export async function saveSettingsAndRefresh(event: SubmitEvent) {
   setSettingsNotice("Saving settings and refreshing data…", "info");
   setListLoading(true, "Refreshing pull requests…");
 
+  const readAt = Date.now();
   try {
     const payload = await invoke<SaveSettingsResult>("save_settings", {
       params: collectSettingsForm(),
@@ -144,6 +207,7 @@ export async function saveSettingsAndRefresh(event: SubmitEvent) {
       .split("\n").map(s => s.trim()).filter(Boolean);
     configureAutoRefresh();
     renderSettings(payload.settings);
+    state.dashboardReadAt = readAt;
     renderDashboard(payload.dashboard);
     if (state.mergeQueueEnabled) void processMergeQueue(payload.dashboard);
     if (payload.settings.notificationsEnabled === "on") void ensureNotificationPermission();
@@ -304,12 +368,6 @@ export async function rerequestReview(button: HTMLButtonElement) {
 
   try {
     await invoke("request_review", { repo, prNumber: Number(prNumber), login });
-    button.innerHTML = SVG.check;
-    button.classList.remove("review-badge-rerequest--loading");
-    button.classList.add("review-badge-rerequest--done");
-    setTimeout(() => {
-      applyOptimisticRerequest(repo, Number(prNumber), login);
-    }, 2000);
   } catch (error) {
     button.disabled = false;
     button.classList.remove("review-badge-rerequest--loading");
@@ -317,36 +375,13 @@ export async function rerequestReview(button: HTMLButtonElement) {
       errorMessage(error, `Failed to re-request review from ${login}.`),
       "danger",
     );
+    return;
   }
-}
-
-export function applyOptimisticRerequest(repo: string, prNumber: number, login: string) {
-  if (!state.currentDashboard) return;
-
-  const pr = state.currentDashboard.prs.find((p) => p.repo === repo && p.id === prNumber);
-  if (!pr) return;
-
-  // Asked again, they await a review whatever they said before — as GitHub's Reviewers list shows them.
-  const actor = [...pr.blockingReviewers, ...pr.staleApprovers, ...pr.commentedReviewers].find((a) => a.login === login);
-  pr.blockingReviewers = pr.blockingReviewers.filter((a) => a.login !== login);
-  pr.staleApprovers = pr.staleApprovers.filter((a) => a.login !== login);
-  pr.commentedReviewers = pr.commentedReviewers.filter((a) => a.login !== login);
-  if (actor && !pr.pendingReviewers.some((a) => a.login === login)) {
-    pr.pendingReviewers = [...pr.pendingReviewers, actor];
-  }
-  pr.hasStaleApproval = pr.staleApprovers.length > 0;
-  // As the backend picks it (choose_review_state).
-  pr.reviewState = pr.blockingReviewers.length ? "changes-requested"
-    : pr.currentApprovers.length ? "approved"
-    : pr.staleApprovers.length ? "approved-stale"
-    : "needs-review";
-
-  const row = document.querySelector<HTMLElement>(`[data-pr-id="${repo}/${prNumber}"]`);
-  if (!row) return;
-
-  const isLast = row.nextElementSibling === null;
-  const tmp = document.createElement("div");
-  tmp.innerHTML = renderPRRow(pr, isLast, state.currentDashboard.viewerLogin);
-  const newRow = tmp.firstElementChild;
-  if (newRow) row.replaceWith(newRow);
+  // Asked again, they await a review whatever they said before — as GitHub's
+  // Reviewers list shows them. The row says so until GitHub does.
+  trackGitHubChange({ repo, id: Number(prNumber) }, "review-request", {
+    subject: login,
+    label: `Review asked again of ${login}`,
+    patch: reviewAskedOf(login),
+  });
 }

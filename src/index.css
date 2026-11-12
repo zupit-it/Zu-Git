@@ -2632,6 +2632,10 @@ body[data-view]:not([data-view="list"]) .rlb { display: none; }
 }
 .chip-btn:hover .chip { border-color: var(--accent-bd); filter: brightness(0.97); }
 .chip-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* What ZuGit just did on GitHub, drawn over GitHub's data until GitHub shows it too
+   (pending-changes.ts): it looks it, and is no button meanwhile. */
+.chip-wait { display: inline-flex; opacity: 0.55; cursor: progress; }
+.review-badge--waiting { opacity: 0.55; cursor: progress; }
 /* An offer, not a state: quiet until the row is under the pointer. */
 .chip-btn--offer .chip { border-style: dashed; }
 .chip-btn--offer { opacity: 0.45; transition: opacity 0.12s; }
