@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.1.3] - 2026-11-12
+
 ### Changed
 - **Diff: the PR's conversation folds and opens in place** — no more separate section to go to and
   come back from. Above the files, **Conversation** is one line (what is there, who spoke last);
