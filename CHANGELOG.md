@@ -9,7 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **Auto-merge from the PR list** — where GitHub lets you, a PR row offers **Auto-merge**: pick
-  one of the methods the repo allows (its default first) and GitHub merges the PR once its required
+  one of the methods the repo allows (the default first) and GitHub merges the PR once its required
   reviews and checks pass. A click on **Auto-merge (squash)** turns it off again. ZuGit offers it
   only where GitHub says you may, and never merges a PR on the spot.
 - **Rebase on the base branch, as GitHub's "Update with rebase"** — **Needs rebase** on a PR row

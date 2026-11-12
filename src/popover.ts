@@ -2,14 +2,20 @@
 // One at a time, under the element that opened it; a click elsewhere, Esc or a
 // click on `[data-popover-close]` closes it. The add-reviewer popover and the
 // auto-merge / rebase ones share it.
+//
+// It is about the row it opened from: when a refresh redraws the list and that
+// row's element is gone, it closes rather than float beside another PR's row.
+// One that no longer hangs on its row says so with `data-popover-stay`.
 
 let popover: HTMLElement | null = null;
+let anchor: HTMLElement | null = null;
 let outside: ((event: MouseEvent) => void) | null = null;
 let onKey: ((event: KeyboardEvent) => void) | null = null;
 
 export function closePopover() {
   popover?.remove();
   popover = null;
+  anchor = null;
   if (outside) document.removeEventListener("click", outside, { capture: true });
   if (onKey) document.removeEventListener("keydown", onKey, { capture: true });
   outside = null;
@@ -32,6 +38,7 @@ export function openPopover(trigger: HTMLElement, html: string, options: Popover
   el.innerHTML = html;
   document.body.appendChild(el);
   popover = el;
+  anchor = trigger;
 
   // Below the trigger, aligned to its left edge; above it when there is no room below.
   const rect = trigger.getBoundingClientRect();
@@ -62,3 +69,8 @@ export function openPopover(trigger: HTMLElement, html: string, options: Popover
   if (options.focus) el.querySelector<HTMLElement>(options.focus)?.focus();
   return el;
 }
+
+// A new snapshot was drawn (api.ts says so once it is on screen).
+window.addEventListener("zugit:dashboard", () => {
+  if (popover && anchor && !anchor.isConnected && !popover.hasAttribute("data-popover-stay")) closePopover();
+});

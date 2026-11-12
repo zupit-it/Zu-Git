@@ -32,9 +32,11 @@ const REBASE_REFRESH_MS = 6000;
 /**
  * GitHub refuses auto-merge on a PR it could merge right now ("Pull request is
  * in clean status", or unstable, or has_hooks). The list does not offer it
- * then; this is for a status that went stale since.
+ * then; this is for a status that went stale since. Any other status GitHub
+ * names is not that, and is shown as GitHub said it.
  */
 const MERGEABLE_NOW = "GitHub can merge this PR right now, so auto-merge has nothing to wait for: merge it on GitHub.";
+const MERGEABLE_NOW_REFUSAL = /is in (clean|unstable|has_hooks) status/i;
 
 function prOf(trigger: HTMLElement, attribute: "autoMerge" | "rebase"): PullRequestSummary | undefined {
   const key = trigger.dataset[attribute];
@@ -125,7 +127,7 @@ export function showAutoMergePopover(trigger: HTMLButtonElement) {
   const options = methods.map((method, i) => `
     <label class="pra-method">
       <input type="radio" name="pra-method" value="${escHtml(method)}"${i === 0 ? " checked" : ""}>
-      <span>${escHtml(METHOD_LABELS[method] ?? method)}${i === 0 ? ` <span class="pra-default">repo default</span>` : ""}</span>
+      <span>${escHtml(METHOD_LABELS[method] ?? method)}${i === 0 ? ` <span class="pra-default">default</span>` : ""}</span>
     </label>`).join("");
   const queue = state.mergeQueueEnabled
     ? `<p class="pra-note">The merge queue is on: once this PR is first in its queue, ZuGit may rebase it on its own.</p>`
@@ -153,7 +155,7 @@ export function showAutoMergePopover(trigger: HTMLButtonElement) {
     } catch (error) {
       busy(go, false);
       const message = errorMessage(error, "");
-      showError(el, /is in \w+ status/i.test(message) ? MERGEABLE_NOW : refusal(error));
+      showError(el, MERGEABLE_NOW_REFUSAL.test(message) ? MERGEABLE_NOW : refusal(error));
     }
   });
 }
@@ -217,6 +219,8 @@ export function showRebasePopover(trigger: HTMLButtonElement) {
 
 /** After rebasing someone else's branch: tell them, on Slack, in a message they read before working on it. */
 function offerNotice(el: HTMLElement, pr: PullRequestSummary) {
+  // No longer about the row it opened from: it stays when the list is read again.
+  el.setAttribute("data-popover-stay", "");
   const author = escHtml(authorName(pr));
   const person = slackMember(state.slackDirectory, pr.author);
   el.innerHTML = `

@@ -323,8 +323,9 @@ pub struct MergeActions {
     pub can_update_branch: bool,
     pub can_enable_auto_merge: bool,
     pub can_disable_auto_merge: bool,
-    /// The merge methods auto-merge may use, the repo's default first; empty
-    /// when the repo does not allow auto-merge.
+    /// The merge methods auto-merge may use, GitHub's default for the viewer
+    /// first (their last one, or the repo's); empty when the repo does not
+    /// allow auto-merge.
     pub auto_merge_methods: Vec<String>,
     /// When the head commit was authored: how recently its author last worked
     /// on the branch. A rebase keeps it, where the committer date would be the
