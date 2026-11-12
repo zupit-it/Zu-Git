@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.2.0] - 2026-11-12
+
 ### Changed
 - **The GPU rests when ZuGit does** — on Windows ZuGit kept the GPU busy all day, even with
   nothing moving. The sync dot pulsed for good, and an animation that never ends has the window
