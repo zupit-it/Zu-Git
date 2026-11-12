@@ -65,6 +65,20 @@ export interface PullRequestSummary {
   headSha: string;
   baseRef: string;
   body: string;
+  /** What GitHub lets the viewer do to the branch and its merge; absent in mock data. */
+  mergeActions?: MergeActions;
+}
+
+/** What the viewer may do from ZuGit, as GitHub says: nothing is guessed from roles. */
+export interface MergeActions {
+  /** "Update branch" — ZuGit only ever does it with rebase. */
+  canUpdateBranch: boolean;
+  canEnableAutoMerge: boolean;
+  canDisableAutoMerge: boolean;
+  /** The merge methods auto-merge may use, the repo's default first; empty when the repo does not allow auto-merge. */
+  autoMergeMethods: string[];
+  /** When the head commit was authored: how recently its author last worked on the branch. A rebase keeps it. */
+  headAuthoredAt: string | null;
 }
 
 export interface MyScoreItem {

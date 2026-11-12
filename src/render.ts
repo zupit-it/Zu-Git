@@ -512,6 +512,14 @@ export function renderDiffStat(additions: number, deletions: number, mute = fals
     `</span>`;
 }
 
+/**
+ * A chip that acts (see `pr-actions.ts`): a button around it, naming the PR it
+ * acts on. An `offer` is quiet until the row is under the pointer.
+ */
+function actionChip(chipHtml: string, attr: "data-auto-merge" | "data-rebase", prKey: string, title: string, offer = false): string {
+  return `<button class="chip-btn${offer ? " chip-btn--offer" : ""}" ${attr}="${prKey}" type="button" title="${title}">${chipHtml}</button>`;
+}
+
 export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin?: string): string {
   const isDraft = !!pr.isDraft;
   const isAging = Date.now() - Date.parse(pr.createdAtIso) > 14 * 24 * 60 * 60 * 1000;
@@ -572,17 +580,36 @@ export function renderPRRow(pr: PullRequestSummary, isLast: boolean, viewerLogin
             ? chip("action", "Action required", SVG.x)
             : "";
 
-  const autoMergeChip = pr.autoMergeMethod
-    ? chip(isDraft ? "mute" : "ok", `Auto-merge (${pr.autoMergeMethod.toLowerCase()})`, SVG.autoMerge)
-    : "";
+  // What GitHub lets the viewer do from here: the chips become buttons.
+  const actions = pr.mergeActions;
+  const actionKey = `${escHtml(pr.repo)}/${pr.id}`;
+  let autoMergeChip = "";
+  if (pr.autoMergeMethod) {
+    const on = chip(isDraft ? "mute" : "ok", `Auto-merge (${pr.autoMergeMethod.toLowerCase()})`, SVG.autoMerge);
+    autoMergeChip = actions?.canDisableAutoMerge
+      ? actionChip(on, "data-auto-merge", actionKey, "Auto-merge is on · click to turn it off")
+      : on;
+  } else if (
+    actions?.canEnableAutoMerge && actions.autoMergeMethods.length > 0 && !isDraft
+    // Mergeable right now: auto-merge would have nothing to wait for, and GitHub refuses it.
+    && pr.mergeStatus !== "clean"
+  ) {
+    autoMergeChip = actionChip(
+      chip("ghost", "Auto-merge", SVG.autoMerge), "data-auto-merge", actionKey,
+      "Let GitHub merge this PR once its reviews and checks allow it", true,
+    );
+  }
 
   const threadsChip = pr.unresolvedThreads > 0
     ? chip(isDraft ? "mute" : "warn", `${pr.unresolvedThreads} unresolved`, SVG.threads)
     : "";
 
+  const behindChip = chip(isDraft ? "mute" : "warn", "Needs rebase", SVG.behind);
   const mergeStatusChip =
     pr.mergeStatus === "behind"
-      ? chip(isDraft ? "mute" : "warn", "Needs rebase", SVG.behind)
+      ? actions?.canUpdateBranch
+        ? actionChip(behindChip, "data-rebase", actionKey, `Rebase on ${escHtml(pr.baseRef)}, as GitHub's “Update with rebase”`)
+        : behindChip
       : pr.mergeStatus === "conflicting"
         ? chip(isDraft ? "mute" : "fail", "Conflicts", SVG.conflict)
         : "";

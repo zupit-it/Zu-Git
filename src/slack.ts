@@ -11,7 +11,7 @@ import { registerSectionStatus, syncSettingsSections } from "./settings-sections
 import { escHtml, errorMessage } from "./utils";
 import {
   directoryFromRows, nudgeMessage, reviewRows, slackMember,
-  type ReviewRow, type SlackDirectory, type SlackProposal,
+  type ReviewRow, type SlackDirectory, type SlackPerson, type SlackProposal,
 } from "./slack-people";
 
 interface SlackPeopleState {
@@ -247,21 +247,32 @@ export async function nudgeReviewer(button: HTMLButtonElement) {
   const pr = state.currentDashboard?.prs.find((p) => p.repo === repo && String(p.id) === prNumber);
   const person = login ? slackMember(state.slackDirectory, login) : undefined;
   if (!login || !pr || !person) return;
-
-  try {
-    await navigator.clipboard.writeText(nudgeMessage(pr, person.slackName));
-  } catch {
-    setStatus("Copia del messaggio non riuscita: Slack non è stato aperto.", "danger");
-    return;
-  }
   button.disabled = true;
   try {
-    await invoke("slack_open_dm", { login });
-    setStatus(`Messaggio per ${escHtml(person.slackName ?? login)} negli appunti: incollalo nella chat Slack e invia.`);
-  } catch (error) {
-    setStatus(escHtml(errorMessage(error, "Impossibile aprire Slack.")), "danger");
+    await openSlackDm(person, nudgeMessage(pr, person.slackName));
   } finally {
     window.setTimeout(() => (button.disabled = false), 1500);
+  }
+}
+
+/**
+ * Opens someone's Slack DM with a message on the clipboard, to paste and send:
+ * ZuGit never sends it. Returns whether Slack was opened.
+ */
+export async function openSlackDm(person: SlackPerson, message: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(message);
+  } catch {
+    setStatus("Copia del messaggio non riuscita: Slack non è stato aperto.", "danger");
+    return false;
+  }
+  try {
+    await invoke("slack_open_dm", { login: person.login });
+    setStatus(`Messaggio per ${escHtml(person.slackName ?? person.login)} negli appunti: incollalo nella chat Slack e invia.`);
+    return true;
+  } catch (error) {
+    setStatus(escHtml(errorMessage(error, "Impossibile aprire Slack.")), "danger");
+    return false;
   }
 }
 

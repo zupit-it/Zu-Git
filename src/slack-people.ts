@@ -135,6 +135,20 @@ export function zugitPrLink(pr: Pick<NudgedPr, "repo" | "id">): string {
 }
 
 /**
+ * What goes on the clipboard after rebasing a colleague's branch from ZuGit:
+ * what happened, and what to do before working on it again.
+ */
+export function rebaseNoticeMessage(
+  pr: NudgedPr & { headRef: string; baseRef: string }, slackName?: string,
+): string {
+  const name = firstName(slackName);
+  const title = pr.title.trim() || `${pr.repo}#${pr.id}`;
+  return `Ciao${name ? ` ${name}` : ""}! Ho appena fatto il rebase del tuo branch \`${pr.headRef}\` su \`${pr.baseRef}\` ` +
+    `(PR “${title}”), per allinearlo. Se ce l'hai in locale, prima di lavorarci fai \`git pull --rebase\`. ${pr.url}\n` +
+    `In ZuGit: ${zugitPrLink(pr)}`;
+}
+
+/**
  * What a nudge puts on the clipboard, to paste in the reviewer's DM: the PR on
  * GitHub for anyone, its diff in ZuGit for whoever has it.
  */

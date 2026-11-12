@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Auto-merge from the PR list** — where GitHub lets you, a PR row offers **Auto-merge**: pick
+  one of the methods the repo allows (its default first) and GitHub merges the PR once its required
+  reviews and checks pass. A click on **Auto-merge (squash)** turns it off again. ZuGit offers it
+  only where GitHub says you may, and never merges a PR on the spot.
+- **Rebase on the base branch, as GitHub's "Update with rebase"** — **Needs rebase** on a PR row
+  rebases the branch, after a confirmation that says what changes. On someone else's PR it names
+  the author and how recent their last commit is, and once the rebase starts it offers to open
+  Slack on their chat with a message saying what to run (`git pull --rebase`), to paste and send.
+  GitHub does the rebase: with conflicts, or a push since ZuGit last looked, it refuses and nothing
+  changes. Never a merge of the base into the branch. The GitHub token needs write access to Pull
+  requests and Contents.
+
 ---
 
 ## [3.2.0] - 2026-11-12

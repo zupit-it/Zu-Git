@@ -2621,6 +2621,46 @@ body[data-view]:not([data-view="list"]) .rlb { display: none; }
 .chip-key-open:hover .chip { border-color: var(--accent-bd); filter: brightness(0.97); }
 .chip-key-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* A chip that acts: auto-merge on or off, rebase on the base branch. */
+.chip-btn {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+}
+.chip-btn:hover .chip { border-color: var(--accent-bd); filter: brightness(0.97); }
+.chip-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* An offer, not a state: quiet until the row is under the pointer. */
+.chip-btn--offer .chip { border-style: dashed; }
+.chip-btn--offer { opacity: 0.45; transition: opacity 0.12s; }
+.pr-row:hover .chip-btn--offer, .chip-btn--offer:focus-visible { opacity: 1; }
+
+/* Their popover: what happens, then the button that does it. */
+/* Two classes: `.arv-popover` further down would otherwise win on width and padding. */
+.arv-popover.pra-popover { width: 320px; max-width: calc(100vw - 16px); padding: 10px 12px 12px; }
+.pra-popover .arv-header { padding: 0 0 6px; }
+.pra-text { margin: 0 0 8px; font-size: 12.5px; line-height: 1.45; color: var(--ink-soft); }
+.pra-text code, .pra-warn code, .pra-note code, .arv-header code { font-family: var(--font-mono); font-size: 11.5px; }
+.pra-note { margin: 0 0 8px; font-size: 11.5px; line-height: 1.4; color: var(--ink-muted); }
+.pra-warn {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--warn);
+  border-radius: 7px;
+  background: var(--warn-soft);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.pra-error { margin: 0 0 8px; font-size: 12px; line-height: 1.4; color: var(--fail); }
+.pra-methods { display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px; }
+.pra-method { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink); cursor: pointer; }
+.pra-default { margin-left: 4px; font-size: 11px; color: var(--ink-muted); }
+.pra-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.pra-actions .is-loading { opacity: 0.6; cursor: progress; }
+
 .diffstat {
   display: inline-flex;
   align-items: center;

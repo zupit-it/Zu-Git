@@ -177,6 +177,7 @@ pub fn run() {
             commands::complete_jira_story,
             commands::promote_draft_pr,
             commands::rebase_pull_request,
+            commands::set_auto_merge,
             commands::toggl_check_connection,
             commands::toggl_prepare_day,
             commands::toggl_submit_entries,

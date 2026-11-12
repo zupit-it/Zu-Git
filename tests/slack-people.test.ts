@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  directoryFromRows, firstName, nudgeMessage, reviewRows, slackMember,
+  directoryFromRows, firstName, nudgeMessage, rebaseNoticeMessage, reviewRows, slackMember,
   type SlackDirectory, type SlackProposal,
 } from "../src/slack-people.ts";
 
@@ -76,4 +76,15 @@ test("the nudge greets by first name only when Slack has a real one", () => {
   );
   assert.ok(nudgeMessage(pr).startsWith("Ciao! "));
   assert.ok(nudgeMessage({ ...pr, title: " " }).includes("“org/app#12”"));
+});
+
+test("after a rebase, the author is told what happened and what to run", () => {
+  const pr = { repo: "org/app", id: 12, title: "Login page", url: "https://github.com/org/app/pull/12", headRef: "feat/login", baseRef: "main" };
+  assert.equal(
+    rebaseNoticeMessage(pr, "Anna Bianchi"),
+    "Ciao Anna! Ho appena fatto il rebase del tuo branch `feat/login` su `main` (PR “Login page”), per allinearlo. " +
+      "Se ce l'hai in locale, prima di lavorarci fai `git pull --rebase`. https://github.com/org/app/pull/12\n" +
+      "In ZuGit: zugit://pr/org/app/12",
+  );
+  assert.ok(rebaseNoticeMessage(pr).startsWith("Ciao! "));
 });

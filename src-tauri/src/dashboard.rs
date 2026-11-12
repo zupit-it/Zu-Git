@@ -511,6 +511,7 @@ fn enrich(
         head_sha: pr.head_sha.clone(),
         base_ref: pr.base_ref.clone(),
         body: pr.body.clone(),
+        merge_actions: pr.merge_actions.clone(),
     }
 }
 

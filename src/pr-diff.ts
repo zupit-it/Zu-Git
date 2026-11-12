@@ -680,7 +680,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     overlay.remove();
     void refreshAiReviewBadges();
     // The PR's review state and conversations on the list are from before.
-    if (changedOnGitHub) void refreshDashboard("auto");
+    if (changedOnGitHub) void refreshDashboard("after-change");
   }
 
   const isMac = navigator.platform.toUpperCase().includes("MAC");
@@ -1996,7 +1996,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     // The list behind shows the PR's review state: brought up to date now, not on close.
     if (result.published.length) {
       changedOnGitHub = false;
-      void refreshDashboard("auto");
+      void refreshDashboard("after-change");
     }
     // What GitHub accepted comes back as its own conversations.
     void loadConversation();

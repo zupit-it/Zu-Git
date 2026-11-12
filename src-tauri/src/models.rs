@@ -310,6 +310,26 @@ pub struct PullRequestSummary {
     pub head_sha: String,
     pub base_ref: String,
     pub body: String,
+    /// What GitHub lets the viewer do to the PR's branch and its merge.
+    #[serde(default)]
+    pub merge_actions: MergeActions,
+}
+
+/// What the viewer may do from ZuGit, as GitHub says: nothing is guessed from roles.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeActions {
+    /// "Update branch" — here only ever with rebase.
+    pub can_update_branch: bool,
+    pub can_enable_auto_merge: bool,
+    pub can_disable_auto_merge: bool,
+    /// The merge methods auto-merge may use, the repo's default first; empty
+    /// when the repo does not allow auto-merge.
+    pub auto_merge_methods: Vec<String>,
+    /// When the head commit was authored: how recently its author last worked
+    /// on the branch. A rebase keeps it, where the committer date would be the
+    /// rebase itself.
+    pub head_authored_at: Option<String>,
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -903,6 +923,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             node_id: String::new(),
             head_ref: String::new(),
             head_sha: String::new(),
+            merge_actions: MergeActions::default(),
             base_ref: String::new(),
             body: String::new(),
         },
@@ -955,6 +976,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             node_id: String::new(),
             head_ref: String::new(),
             head_sha: String::new(),
+            merge_actions: MergeActions::default(),
             base_ref: String::new(),
             body: String::new(),
         },
@@ -1007,6 +1029,7 @@ pub fn mock_pull_requests() -> Vec<PullRequestSummary> {
             node_id: String::new(),
             head_ref: String::new(),
             head_sha: String::new(),
+            merge_actions: MergeActions::default(),
             base_ref: String::new(),
             body: String::new(),
         },

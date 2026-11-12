@@ -640,6 +640,25 @@ pub async fn rebase_pull_request(
         .map_err(|e| format!("{repo}#{pr_number}: {e}"))
 }
 
+/// Auto-merge on with `method`, or off: as GitHub's own button, under GitHub's rules.
+#[tauri::command]
+pub async fn set_auto_merge(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    pr_number: u64,
+    node_id: String,
+    method: Option<String>,
+    head_sha: String,
+) -> Result<Option<String>, String> {
+    let settings = storage::load_settings(&app).await?;
+    let result = match method {
+        Some(method) => crate::github::enable_auto_merge(&node_id, &method, &head_sha, &settings, &state.http_client).await,
+        None => crate::github::disable_auto_merge(&node_id, &settings, &state.http_client).await.map(|()| None),
+    };
+    result.map_err(|e| format!("{repo}#{pr_number}: {e}"))
+}
+
 #[tauri::command]
 pub async fn request_review(
     app: tauri::AppHandle,

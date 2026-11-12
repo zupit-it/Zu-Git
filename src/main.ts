@@ -26,6 +26,8 @@ import {
 } from "./toggl";
 import { initSettingsSections } from "./settings-sections";
 import { initSlack, nudgeReviewer } from "./slack";
+import { showAutoMergePopover, showRebasePopover } from "./pr-actions";
+import { closePopover, openPopover } from "./popover";
 import { installSadReviewer } from "./meme";
 import { installPetReminder, petTry } from "./pet-triggers";
 import type { PetPrLink } from "./pet-lines";
@@ -334,6 +336,12 @@ window.addEventListener("DOMContentLoaded", () => {
     const rerequestButton = target.closest<HTMLButtonElement>(".review-badge-rerequest");
     if (rerequestButton) { void rerequestReview(rerequestButton); return; }
 
+    const autoMergeBtn = target.closest<HTMLButtonElement>("[data-auto-merge]");
+    if (autoMergeBtn) { showAutoMergePopover(autoMergeBtn); return; }
+
+    const rebaseBtn = target.closest<HTMLButtonElement>("[data-rebase]");
+    if (rebaseBtn) { showRebasePopover(rebaseBtn); return; }
+
     const addReviewerBtn = target.closest<HTMLButtonElement>("[data-add-reviewer]");
     if (addReviewerBtn) { showAddReviewerPopover(addReviewerBtn); return; }
 
@@ -563,9 +571,6 @@ function showDemoToast(stage: number) {
 
 // ── Add-reviewer popover ──────────────────────────────────────────────────────
 
-let _arvPopover: HTMLElement | null = null;
-let _arvOutsideListener: ((e: MouseEvent) => void) | null = null;
-
 /**
  * After a filter changed: the toolbar, the reviewer chips and the list follow
  * the state, and the choice is saved — the reviewer filter is not saved.
@@ -584,16 +589,8 @@ function filtersChanged(persist = true) {
   if (persist) void persistListFilters();
 }
 
-function closeAddReviewerPopover() {
-  if (_arvPopover) { _arvPopover.remove(); _arvPopover = null; }
-  if (_arvOutsideListener) {
-    document.removeEventListener("click", _arvOutsideListener, { capture: true });
-    _arvOutsideListener = null;
-  }
-}
-
 function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
-  closeAddReviewerPopover();
+  closePopover();
 
   const prKey = triggerBtn.dataset.addReviewer ?? "";
   const slashIdx = prKey.lastIndexOf("/");
@@ -641,22 +638,10 @@ function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
     </button>`;
   }).join("");
 
-  const popover = document.createElement("div");
-  popover.className = "arv-popover";
-  popover.innerHTML = `<div class="arv-header">Add reviewer</div><div class="arv-chips">${chipsHtml}</div>`;
-  document.body.appendChild(popover);
-  _arvPopover = popover;
-
-  // Position below/above the trigger
-  const rect = triggerBtn.getBoundingClientRect();
-  const pw = popover.offsetWidth || 220;
-  const ph = popover.offsetHeight || 160;
-  let top = rect.bottom + 6;
-  let left = rect.left;
-  if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
-  if (top + ph > window.innerHeight - 8) top = rect.top - ph - 6;
-  popover.style.top = `${Math.max(8, top)}px`;
-  popover.style.left = `${Math.max(8, left)}px`;
+  const popover = openPopover(
+    triggerBtn,
+    `<div class="arv-header">Add reviewer</div><div class="arv-chips">${chipsHtml}</div>`,
+  );
 
   // Chip click — call backend
   popover.querySelectorAll<HTMLButtonElement>("[data-arv-login]").forEach(chip => {
@@ -667,8 +652,8 @@ function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
       chip.classList.add("arv-chip--loading");
       try {
         await invoke("request_review", { repo, prNumber, login });
-        closeAddReviewerPopover();
-        void refreshDashboard("auto");
+        closePopover();
+        void refreshDashboard("after-change");
       } catch (err) {
         setStatus(errorMessage(err, "Failed to add reviewer."), "danger");
         chip.disabled = false;
@@ -676,15 +661,5 @@ function showAddReviewerPopover(triggerBtn: HTMLButtonElement) {
       }
     });
   });
-
-  // Close on outside click (deferred so the triggering click doesn't immediately close it)
-  setTimeout(() => {
-    _arvOutsideListener = (e: MouseEvent) => {
-      if (!_arvPopover?.contains(e.target as Node) && e.target !== triggerBtn) {
-        closeAddReviewerPopover();
-      }
-    };
-    document.addEventListener("click", _arvOutsideListener, { capture: true });
-  }, 0);
 }
 

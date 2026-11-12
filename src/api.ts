@@ -70,17 +70,30 @@ export async function persistListFilters() {
 
 // ── Dashboard refresh ─────────────────────────────────────────────────────────
 
-export async function refreshDashboard(mode: "manual" | "auto" = "manual") {
+/**
+ * A refresh asked for after a change on GitHub while one was already running:
+ * the running one may have read GitHub before the change, so one more follows.
+ */
+let refreshAgain = false;
+
+/**
+ * `manual` from the Refresh button, `auto` from the timer and at start-up,
+ * `after-change` after ZuGit wrote to GitHub: that one is never lost to a
+ * refresh already in flight.
+ */
+export async function refreshDashboard(mode: "manual" | "auto" | "after-change" = "manual") {
   if (state.refreshInProgress) {
     if (mode === "manual") setStatus("Refresh already in progress…");
+    if (mode === "after-change") refreshAgain = true;
     return;
   }
   state.refreshInProgress = true;
   const myId = ++state.refreshRequestId;
   configureAutoRefresh();
-  setStatus(
-    mode === "auto" ? "Auto-refreshing GitHub and Jira data…" : "Refreshing GitHub and Jira data…",
-  );
+  // After a change, the status still says what was just done.
+  if (mode !== "after-change") {
+    setStatus(mode === "auto" ? "Auto-refreshing GitHub and Jira data…" : "Refreshing GitHub and Jira data…");
+  }
   setListLoading(true, mode === "auto" ? "Auto-refreshing pull requests…" : "Refreshing pull requests…");
 
   try {
@@ -100,7 +113,13 @@ export async function refreshDashboard(mode: "manual" | "auto" = "manual") {
     );
     setListLoading(false);
   } finally {
-    if (myId === state.refreshRequestId) state.refreshInProgress = false;
+    if (myId === state.refreshRequestId) {
+      state.refreshInProgress = false;
+      if (refreshAgain) {
+        refreshAgain = false;
+        void refreshDashboard("after-change");
+      }
+    }
   }
 }
 

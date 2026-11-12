@@ -12,6 +12,11 @@ use crate::models::{
 const PR_QUERY: &str = r#"
 query($owner: String!, $repo: String!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
+    autoMergeAllowed
+    mergeCommitAllowed
+    squashMergeAllowed
+    rebaseMergeAllowed
+    viewerDefaultMergeMethod
     pullRequests(
       states: OPEN
       first: 50
@@ -48,6 +53,9 @@ query($owner: String!, $repo: String!, $cursor: String) {
         autoMergeRequest { mergeMethod }
         mergeable
         mergeStateStatus
+        viewerCanEnableAutoMerge
+        viewerCanDisableAutoMerge
+        viewerCanUpdateBranch
         reviewThreads(first: 50) {
           nodes { isResolved }
         }
@@ -59,6 +67,7 @@ query($owner: String!, $repo: String!, $cursor: String) {
         commits(last: 1) {
           nodes {
             commit {
+              authoredDate
               statusCheckRollup {
                 state
                 contexts(first: 100) {
@@ -114,7 +123,48 @@ struct GqlData {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GqlRepository {
+    #[serde(default)]
+    auto_merge_allowed: bool,
+    #[serde(default)]
+    merge_commit_allowed: bool,
+    #[serde(default)]
+    squash_merge_allowed: bool,
+    #[serde(default)]
+    rebase_merge_allowed: bool,
+    viewer_default_merge_method: Option<String>,
     pull_requests: GqlPrConnection,
+}
+
+/// How the repo lets its PRs merge, as auto-merge may use it.
+#[derive(Debug, Clone, Default)]
+struct RepoMerging {
+    /// The methods the repo allows, its default (the viewer's) first; empty when
+    /// the repo does not allow auto-merge.
+    auto_merge_methods: Vec<String>,
+}
+
+impl RepoMerging {
+    fn of(repo: &GqlRepository) -> Self {
+        if !repo.auto_merge_allowed {
+            return Self::default();
+        }
+        let mut methods: Vec<String> = [
+            ("SQUASH", repo.squash_merge_allowed),
+            ("MERGE", repo.merge_commit_allowed),
+            ("REBASE", repo.rebase_merge_allowed),
+        ]
+        .into_iter()
+        .filter(|(_, allowed)| *allowed)
+        .map(|(method, _)| method.to_string())
+        .collect();
+        if let Some(default) = repo.viewer_default_merge_method.as_deref() {
+            if let Some(at) = methods.iter().position(|m| m == default) {
+                let first = methods.remove(at);
+                methods.insert(0, first);
+            }
+        }
+        Self { auto_merge_methods: methods }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,6 +201,12 @@ struct GqlPr {
     auto_merge_request: Option<GqlAutoMergeRequest>,
     mergeable: Option<String>,
     merge_state_status: Option<String>,
+    #[serde(default)]
+    viewer_can_enable_auto_merge: bool,
+    #[serde(default)]
+    viewer_can_disable_auto_merge: bool,
+    #[serde(default)]
+    viewer_can_update_branch: bool,
     review_threads: GqlNodes<GqlReviewThread>,
     base_ref: Option<GqlHeadRef>,
     head_ref: Option<GqlHeadRef>,
@@ -211,6 +267,7 @@ struct GqlCommitNode {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GqlCommit {
+    authored_date: Option<String>,
     status_check_rollup: Option<GqlStatusCheckRollup>,
 }
 
@@ -325,6 +382,7 @@ pub struct GithubPullRequestRecord {
     pub auto_merge_method: Option<String>,
     pub unresolved_threads: u32,
     pub merge_status: String,
+    pub merge_actions: crate::models::MergeActions,
 }
 
 
@@ -602,6 +660,7 @@ async fn fetch_repo_pull_requests_inner(
     // Fetch all pages (typically one for most repos).
     let mut all_prs: Vec<GqlPr> = vec![];
     let mut cursor: Option<String> = None;
+    let mut merging = RepoMerging::default();
 
     loop {
         let variables = serde_json::json!({
@@ -617,11 +676,14 @@ async fn fetch_repo_pull_requests_inner(
             return Err(ApiError::Other(format!("GraphQL error: {}", msgs.join("; "))));
         }
 
-        let connection = resp
+        let repository = resp
             .data
             .and_then(|d| d.repository)
-            .ok_or_else(|| ApiError::Other(format!("Repository {repo} not found or inaccessible")))?
-            .pull_requests;
+            .ok_or_else(|| ApiError::Other(format!("Repository {repo} not found or inaccessible")))?;
+        if cursor.is_none() {
+            merging = RepoMerging::of(&repository);
+        }
+        let connection = repository.pull_requests;
 
         let has_next = connection.page_info.has_next_page;
         let end_cursor = connection.page_info.end_cursor;
@@ -684,6 +746,13 @@ async fn fetch_repo_pull_requests_inner(
             auto_merge_method: details.auto_merge_method.clone(),
             unresolved_threads: details.unresolved_threads,
             merge_status: details.merge_status.clone(),
+            merge_actions: crate::models::MergeActions {
+                can_update_branch: pr.viewer_can_update_branch,
+                can_enable_auto_merge: pr.viewer_can_enable_auto_merge,
+                can_disable_auto_merge: pr.viewer_can_disable_auto_merge,
+                auto_merge_methods: merging.auto_merge_methods.clone(),
+                head_authored_at: pr.commits.nodes.first().and_then(|c| c.commit.authored_date.clone()),
+            },
         });
     }
 
@@ -2095,6 +2164,49 @@ pub async fn rebase_pull_request(
     Ok(())
 }
 
+/// Turns auto-merge on, as GitHub's "Enable auto-merge": GitHub merges the PR
+/// by `method` once its rules allow it, and it can be turned off until then.
+/// `expected_head_sha` is the commit the user saw: GitHub refuses if the branch
+/// has moved since.
+pub async fn enable_auto_merge(
+    node_id: &str,
+    method: &str,
+    expected_head_sha: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<Option<String>, String> {
+    if !matches!(method, "MERGE" | "SQUASH" | "REBASE") {
+        return Err(format!("Unknown merge method: {method}"));
+    }
+    const ENABLE: &str = r#"mutation($id: ID!, $method: PullRequestMergeMethod!, $sha: GitObjectID) {
+  enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method, expectedHeadOid: $sha }) {
+    pullRequest { autoMergeRequest { mergeMethod } }
+  }
+}"#;
+    let sha = (!expected_head_sha.is_empty()).then_some(expected_head_sha);
+    let data = graphql_data(ENABLE, serde_json::json!({ "id": node_id, "method": method, "sha": sha }), settings, client)
+        .await
+        .map_err(|e| format!("GitHub refused: {e}"))?;
+    Ok(data["enablePullRequestAutoMerge"]["pullRequest"]["autoMergeRequest"]["mergeMethod"]
+        .as_str()
+        .map(str::to_string))
+}
+
+/// Turns auto-merge off, as GitHub's "Disable auto-merge".
+pub async fn disable_auto_merge(
+    node_id: &str,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<(), String> {
+    const DISABLE: &str = r#"mutation($id: ID!) {
+  disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { id } }
+}"#;
+    graphql_data(DISABLE, serde_json::json!({ "id": node_id }), settings, client)
+        .await
+        .map_err(|e| format!("GitHub refused: {e}"))?;
+    Ok(())
+}
+
 fn keep_latest_check_runs<'a>(runs: &[&'a GqlStatusContext]) -> Vec<&'a GqlStatusContext> {
     let mut latest: HashMap<String, &'a GqlStatusContext> = HashMap::new();
 
@@ -2903,6 +3015,31 @@ pub async fn fetch_stale_branches(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn repo_json(value: serde_json::Value) -> GqlRepository {
+        let mut repo = serde_json::json!({ "pullRequests": { "nodes": [], "pageInfo": { "hasNextPage": false } } });
+        repo.as_object_mut().unwrap().extend(value.as_object().unwrap().clone());
+        serde_json::from_value(repo).unwrap()
+    }
+
+    #[test]
+    fn auto_merge_offers_the_repos_methods_its_default_first() {
+        let repo = repo_json(serde_json::json!({
+            "autoMergeAllowed": true, "mergeCommitAllowed": true, "squashMergeAllowed": true,
+            "rebaseMergeAllowed": false, "viewerDefaultMergeMethod": "MERGE",
+        }));
+        assert_eq!(RepoMerging::of(&repo).auto_merge_methods, ["MERGE", "SQUASH"]);
+    }
+
+    #[test]
+    fn no_auto_merge_where_the_repo_does_not_allow_it() {
+        let repo = repo_json(serde_json::json!({
+            "autoMergeAllowed": false, "squashMergeAllowed": true, "viewerDefaultMergeMethod": "SQUASH",
+        }));
+        assert!(RepoMerging::of(&repo).auto_merge_methods.is_empty());
+        // Fields GitHub left out read as not allowed.
+        assert!(RepoMerging::of(&repo_json(serde_json::json!({}))).auto_merge_methods.is_empty());
+    }
 
     /// A rollup as GraphQL sends it: enums in capitals.
     fn rollup(state: &str, runs: &[(&str, &str, Option<&str>, &str)]) -> GqlStatusCheckRollup {
