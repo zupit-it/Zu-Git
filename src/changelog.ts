@@ -21,8 +21,8 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
-        title: "Links that open a PR's diff in ZuGit",
-        body: "A <code>zugit://pr/owner/repo/123</code> link — Slack makes it clickable — brings ZuGit up on that PR's diff, or on its GitHub page when the PR is not in your list. The Slack nudge now carries one under the GitHub link, so a reviewer with ZuGit lands straight in the diff. A link only ever opens a PR, nothing else.",
+        title: "PR diff — the conversation folds and opens in place",
+        body: "Above the files, <strong>Conversation</strong> is one line with what is there and who spoke last. <strong>Show</strong> opens it right there — description, comments and reviews in full — and <strong>Hide</strong> folds it again; ZuGit remembers your choice. No more separate section to go back from. And <strong>Add comment</strong>, <strong>Save</strong> and <strong>Cancel</strong> in the diff answer again.",
       },
     ],
   },
@@ -30,8 +30,8 @@ const VERSIONS: VersionBlock[] = [
     label: "Older news",
     entries: [
       {
-        title: "PR diff — the conversation in its own section",
-        body: "What is said on the PR as a whole no longer stands as a wall of text above the code. <strong>Conversation</strong>, first in the file list with its count, shows the description, the comments on the PR and the reviews in place of the files, in a column short enough to read; a file in the list brings the diff back. Above the files one line stands for it, with what is there and who spoke last. Comments from apps such as CI or Nx Cloud fold to one line, and the hidden markers they leave stay hidden, as on GitHub.",
+        title: "Links that open a PR's diff in ZuGit",
+        body: "A <code>zugit://pr/owner/repo/123</code> link — Slack makes it clickable — brings ZuGit up on that PR's diff, or on its GitHub page when the PR is not in your list. The Slack nudge now carries one under the GitHub link, so a reviewer with ZuGit lands straight in the diff. A link only ever opens a PR, nothing else.",
       },
       {
         title: "Slack — fill who is who once for the team",

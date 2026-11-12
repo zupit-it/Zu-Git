@@ -426,6 +426,7 @@ function conversationEntry(item: GhConversationItem): string {
     : `<span>${escHtml(when)}</span>`;
   const meta = `<div class="pd-gh-meta"><span class="pd-gh-author">${escHtml(item.author)}</span>` +
     (verdict ? ghTag(verdict.tag, verdict.kind) : "") +
+    (item.kind === "description" ? ghTag("Description", "file") : "") +
     at + `</div>`;
   const text = stripHtmlComments(item.body);
   const body = item.minimized !== null
@@ -454,12 +455,19 @@ export function conversationCounts(conversation: GhConversation | null): { peopl
 }
 
 /**
- * The line above the files that stands for the Conversation section: what is
- * there and who spoke last, a click away, instead of all of it in the way.
+ * Above the files, what is said on the PR as a whole, as on GitHub's
+ * Conversation tab: one block, folded or open with one click. Folded, its line
+ * says what is there and who spoke last; open, the description, the comments
+ * and the reviews read in full, oldest first. Only the apps' comments stay one
+ * line each: they rarely need reading.
  */
-export function renderConversationStrip(conversation: GhConversation | null, notice: string | null): string {
+export function renderConversationBlock(
+  conversation: GhConversation | null, notice: string | null, prUrl: string,
+  open: boolean, isOpen: (id: string) => boolean,
+): string {
   const items = conversation?.items ?? [];
   if (items.length === 0 && !notice) return "";
+  const description = items.find(i => i.kind === "description");
   const said = items.filter(i => i.kind !== "description");
   const people = said.filter(i => !i.bot);
   const comments = people.filter(i => i.kind === "comment").length;
@@ -467,65 +475,37 @@ export function renderConversationStrip(conversation: GhConversation | null, not
   const bots = said.length - people.length;
   const latest = [...(people.length ? people : said)].pop();
   const parts = [
-    items.some(i => i.kind === "description") ? "Description" : "",
+    description ? "Description" : "",
     comments ? `${comments} comment${comments === 1 ? "" : "s"}` : "",
     reviews ? `${reviews} review${reviews === 1 ? "" : "s"}` : "",
     bots ? `${bots} from bots` : "",
     latest ? `latest <strong>${escHtml(latest.author)}</strong>${latest.createdAt ? `, ${escHtml(relativeTime(latest.createdAt))}` : ""}` : "",
     notice && items.length === 0 ? "could not be loaded" : "",
   ].filter(Boolean);
-  return `<button class="pd-conv-strip" type="button" data-pd-show="conversation" title="What is said on the PR as a whole, as on GitHub's Conversation tab">` +
-    `<span class="pd-gh-badge">Conversation</span>` +
-    `<span class="pd-ai-panel__meta">${parts.join(" · ")}</span>` +
-    `<span class="pd-conv-strip__go">Read →</span>` +
-  `</button>`;
-}
-
-/**
- * The Conversation section, in place of the files: what is said on the PR as
- * a whole, as on GitHub's Conversation tab. The description folds — its author
- * knows it — and so do the apps' comments; people's comments and reviews read
- * in full, oldest first.
- */
-export function renderConversationPanel(
-  conversation: GhConversation | null, notice: string | null, prUrl: string, isOpen: (id: string) => boolean,
-): string {
   const warning = notice ? `<div class="pd-ai-outdated">${escHtml(notice)}</div>` : "";
-  const items = conversation?.items ?? [];
-  const description = items.find(i => i.kind === "description");
-  const said = items.filter(i => i.kind !== "description");
-  const { people, bots } = conversationCounts(conversation);
-  const comments = said.filter(i => i.kind === "comment" && !i.bot).length;
-  const reviews = people - comments;
-  const meta = [
-    comments ? `${comments} comment${comments === 1 ? "" : "s"} on the PR` : "No comments on the PR",
-    reviews ? `${reviews} review${reviews === 1 ? "" : "s"}` : "",
-    bots ? `${bots} from bots, folded` : "",
-  ].filter(Boolean).join(" · ");
-  const open = prUrl.startsWith("https://")
+  const github = prUrl.startsWith("https://")
     ? `<a class="pd-md-link" href="#" data-pd-link="${escHtml(prUrl)}">Open on GitHub</a>`
     : "";
   const more = conversation?.moreComments
     ? `${conversation.moreComments} older comment${conversation.moreComments === 1 ? "" : "s"} on GitHub · `
     : "";
-  const back = `<button class="pd-ai-btn" type="button" data-pd-show="files">← Files</button>`;
-  const entries = said.map(item => item.bot ? botEntry(item, isOpen(`conv:${item.url || item.createdAt}`)) : `<div class="pd-gh-thread">${conversationEntry(item)}</div>`);
-  return `<div class="pd-ai-panel pd-ai-panel--gh pd-conv-panel">` +
-    `<div class="pd-ai-panel__head"><span class="pd-gh-badge">Conversation</span><span class="pd-ai-panel__meta">${meta}</span><div class="rd-spacer"></div>${back}</div>` +
+  const entries = [description, ...said].filter(i => i !== undefined).map(item => item.bot
+    ? botEntry(item, isOpen(`conv:${item.url || item.createdAt}`))
+    : `<div class="pd-gh-thread">${conversationEntry(item)}</div>`);
+  return `<details class="pd-ai-panel pd-ai-panel--gh pd-conv-block" data-pd-conv-block${open ? " open" : ""}>` +
+    `<summary class="pd-conv-block__head" title="What is said on the PR as a whole, as on GitHub's Conversation tab">` +
+      `<span class="pd-gh-badge">Conversation</span>` +
+      `<span class="pd-ai-panel__meta">${parts.join(" · ")}</span>` +
+      `<span class="pd-conv-block__fold" aria-hidden="true"></span>` +
+    `</summary>` +
     warning +
     `<div class="pd-ai-general">` +
-      (description
-        ? `<details class="pd-gh-thread" data-pd-gh="conv:description"${isOpen("conv:description") ? " open" : ""}>` +
-            `<summary class="pd-gh-summary">${ghTag("Description", "file")}<span class="pd-gh-gist"><strong>${escHtml(description.author)}</strong> ${escHtml(gistOf(description.body))}</span></summary>` +
-            conversationEntry(description) +
-          `</details>`
-        : "") +
       entries.join("") +
-      (said.length || !description
-        ? `<div class="pd-gh-foot"><span class="pd-gh-foot__more">${said.length ? "" : "Nobody has written on the PR as a whole yet. "}${more}${open}</span></div>`
+      (items.length
+        ? `<div class="pd-gh-foot"><span class="pd-gh-foot__more">${said.length ? "" : "Nobody has written on the PR as a whole yet. "}${more}${github}</span></div>`
         : "") +
     `</div>` +
-    `</div>`;
+  `</details>`;
 }
 
 function counts(review: AiReview): string {
@@ -545,7 +525,7 @@ export interface PanelInput {
   armedDiscard: string | null;
   /** Why the user's comments could not be read, if they could not. */
   notice: string | null;
-  /** The line standing for the Conversation section, drawn by renderConversationStrip. */
+  /** The PR's Conversation block, drawn by renderConversationBlock. */
   conversation: string;
   /** The GitHub block, drawn by renderGhPanel. */
   github: string;
@@ -558,7 +538,7 @@ export interface PanelInput {
 
 /**
  * Above the files: the user's comments first, with those that have no line to
- * hang under, then the line standing for the Conversation section, then GitHub's conversations without a line in this diff, then
+ * hang under, then the PR's Conversation block, then GitHub's conversations without a line in this diff, then
  * one block per agent with its summary and its comments without a line.
  */
 export interface PublishState {

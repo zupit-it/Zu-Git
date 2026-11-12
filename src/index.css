@@ -6561,7 +6561,7 @@ ul.field-hint {
 .pd-side__resize:focus { outline: none; }
 .pd-resizing, .pd-resizing * { cursor: col-resize !important; user-select: none; }
 
-/* The Conversation section, first in the list: GitHub's tab, beside the files. */
+/* Conversation, first in the list: brings the block above the files into view, open. */
 .pd-nav-conv {
   display: flex;
   align-items: center;
@@ -6577,7 +6577,6 @@ ul.field-hint {
   cursor: pointer;
 }
 .pd-nav-conv:hover { border-color: var(--border-strong); }
-.pd-nav-conv--active { border-color: var(--accent-bd); background: var(--accent-soft); color: var(--accent-ink); }
 .pd-nav-conv__label { flex: 1; }
 .pd-nav-conv__count {
   min-width: 18px;
@@ -6588,7 +6587,6 @@ ul.field-hint {
   font: 700 10.5px/1.4 var(--font-mono);
   text-align: center;
 }
-.pd-main--conv .pd-file--active { background: none; color: var(--ink-soft); }
 
 .pd-filter {
   margin: 10px;
@@ -6663,30 +6661,28 @@ ul.field-hint {
   background: var(--bg);
 }
 
-/* The Conversation section takes the files' place, in a column short enough to read. */
-.pd-conv-view { grid-column: 2; grid-row: 1; padding-bottom: 16px; }
-.pd-conv-view .pd-conv-panel { max-width: 900px; margin: 0 auto; }
-.pd-conv-panel .pd-gh-thread + .pd-gh-thread { margin-top: 8px; }
-
-/* Above the files, one line stands for the Conversation section. */
-.pd-conv-strip {
+/* Above the files, the PR's Conversation: one line folded, all of it open. */
+.pd-ai-panel.pd-conv-block { padding: 0; }
+.pd-conv-block__head {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  margin-bottom: 12px;
   padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface);
-  font: inherit;
-  text-align: left;
+  list-style: none;
   cursor: pointer;
+  user-select: none;
 }
-.pd-conv-strip:hover { border-color: var(--accent-bd); }
-.pd-conv-strip .pd-ai-panel__meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pd-conv-strip .pd-ai-panel__meta strong { color: var(--ink-soft); }
-.pd-conv-strip__go { flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--accent-ink); }
+.pd-conv-block__head::-webkit-details-marker { display: none; }
+.pd-conv-block__head .pd-ai-panel__meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-conv-block__head .pd-ai-panel__meta strong { color: var(--ink-soft); }
+.pd-conv-block__fold { flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--accent-ink); }
+.pd-conv-block__fold::after { content: "Show ▾"; }
+.pd-conv-block[open] > .pd-conv-block__head .pd-conv-block__fold::after { content: "Hide ▴"; }
+.pd-conv-block[open] > .pd-conv-block__head { border-bottom: 1px solid var(--border); }
+.pd-conv-block > .pd-ai-outdated { margin: 10px 12px 0; }
+.pd-conv-block > .pd-ai-general { margin: 0; padding: 10px 12px 12px; }
+/* As wide as the files below; prose wraps at a length that reads, code keeps the width. */
+.pd-conv-block :is(.pd-md-p, .pd-md-list, .pd-md-quote, .pd-md-h) { max-width: 80ch; }
 .pd-gh-bot .pd-gh-gist { color: var(--ink-muted); }
 
 .pd-section {

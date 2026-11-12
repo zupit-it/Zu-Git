@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Diff: the PR's conversation folds and opens in place** — no more separate section to go to and
+  come back from. Above the files, **Conversation** is one line (what is there, who spoke last);
+  **Show** opens it right there with the description, comments and reviews in full, **Hide** folds
+  it again, and ZuGit remembers which you chose. Only comments from apps stay one line each.
+  **Conversation** in the file list opens it and scrolls up to it.
+
+### Fixed
+- **Diff: Add comment, Save and Cancel answer again** — since 3.1.1 a click anywhere in a file was
+  taken for the switch back to the files and went no further, so a comment could neither be
+  written nor closed.
+
 ---
 
 ## [3.1.2] - 2026-11-11

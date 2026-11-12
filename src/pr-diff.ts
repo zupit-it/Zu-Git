@@ -26,8 +26,7 @@ import {
   type CommentPosition, type PublishResult, type ReviewEvent, type UserComment, type UserReply, type UserReview,
 } from "./ai-review";
 import {
-  anchorKey, cardKey, conversationCounts, draftKey, fileKey, renderCard, renderConversationPanel, renderConversationStrip,
-  renderDraft, renderGhPanel, renderGhThread, renderPanel,
+  anchorKey, cardKey, conversationCounts, draftKey, fileKey, renderCard, renderConversationBlock, renderDraft, renderGhPanel, renderGhThread, renderPanel,
   renderPendingReply, renderPublishButtons, renderPublishOpen, renderPublishPanel, renderReplyEditor, verdictWords,
   type CardRef, type Draft, type PublishDone, type PublishState, type ReplyArea, type Side, type ThreadItem,
 } from "./pr-diff-ai";
@@ -109,6 +108,7 @@ const HEAD_POLL_MS = 120_000;
 const ORDER_KEY = "zugit.prDiff.order";
 const VIEW_KEY = "zugit.prDiff.view";
 const TREE_KEY = "zugit.prDiff.tree";
+const CONV_KEY = "zugit.prDiff.conversationOpen";
 const SIDE_KEY = "zugit.prDiff.sideWidth";
 /** The file list's width (280px by default, in the CSS): dragged down to SIDE_MIN_PX, the diff keeping DIFF_MIN_PX. */
 const SIDE_MIN_PX = 200;
@@ -162,6 +162,14 @@ function readViewMode(): ViewMode {
 
 function saveViewMode(mode: ViewMode) {
   try { localStorage.setItem(VIEW_KEY, mode); } catch { /* a preference, not data */ }
+}
+
+function readConversationOpen(): boolean {
+  try { return localStorage.getItem(CONV_KEY) === "1"; } catch { return false; }
+}
+
+function saveConversationOpen(open: boolean) {
+  try { localStorage.setItem(CONV_KEY, open ? "1" : "0"); } catch { /* a preference, not data */ }
 }
 
 /** By path, as a folder tree rather than a flat list. */
@@ -554,8 +562,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
       </div>
       <div class="pd-main">
         <aside class="pd-side">
-          <button class="pd-nav-conv" type="button" data-pd-show="conversation" aria-pressed="false"
-            title="What is said on the PR as a whole, as on GitHub's Conversation tab">
+          <button class="pd-nav-conv" type="button" data-pd-conv-jump
+            title="What is said on the PR as a whole, as on GitHub's Conversation tab: above the files">
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h7A1.5 1.5 0 0 1 12 3.5v5A1.5 1.5 0 0 1 10.5 10H6l-3 2.5V10h0A1.5 1.5 0 0 1 2 8.5Z"/></svg>
             <span class="pd-nav-conv__label">Conversation</span>
             <span class="pd-nav-conv__count" data-pd-conv-count hidden></span>
@@ -573,7 +581,6 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
             tabindex="0" title="Drag to resize · double-click to reset"></div>
         </aside>
         <div class="pd-content" data-pd-content></div>
-        <div class="pd-content pd-conv-view" data-pd-conv hidden></div>
       </div>
       <div class="pd-publish-pop" data-pd-publish-pop role="dialog" aria-label="Publish your review" hidden></div>
       <div class="rd-loading-overlay" data-pd-loading><div class="rd-spinner"></div></div>
@@ -587,9 +594,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     return el;
   };
   const content = $<HTMLElement>("[data-pd-content]");
-  const conversationView = $<HTMLElement>("[data-pd-conv]");
-  /** The files, or the PR's Conversation in their place, as GitHub's tabs. */
-  let section: "files" | "conversation" = "files";
+  /** The Conversation block above the files is open: as the user left it last. */
+  let conversationOpen = readConversationOpen();
   const fileList = $<HTMLElement>("[data-pd-files]");
   const filter = $<HTMLInputElement>("[data-pd-filter]");
   let views: FileView[] = [];
@@ -740,8 +746,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     const copy = target.closest<HTMLButtonElement>("[data-pd-copy-prompt]");
     if (copy) { void copyPrompt(copy); return; }
 
-    const sectionButton = target.closest<HTMLElement>("[data-pd-show]");
-    if (sectionButton) { showSection(sectionButton.dataset.pdShow === "conversation" ? "conversation" : "files"); return; }
+    if (target.closest("[data-pd-conv-jump]")) { jumpToConversation(); return; }
 
     // Links in comments open in the browser (open_external takes http(s) only).
     const link = target.closest<HTMLElement>("[data-pd-link]");
@@ -825,7 +830,12 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
   // `toggle` does not bubble: caught on the way down.
   overlay.addEventListener("toggle", (e) => {
     const fold = e.target;
-    if (!(fold instanceof HTMLDetailsElement) || !fold.dataset.pdGh) return;
+    if (!(fold instanceof HTMLDetailsElement)) return;
+    if (fold.matches("[data-pd-conv-block]")) {
+      if (fold.open !== conversationOpen) { conversationOpen = fold.open; saveConversationOpen(fold.open); }
+      return;
+    }
+    if (!fold.dataset.pdGh) return;
     if (fold.open) openThreads.add(fold.dataset.pdGh); else openThreads.delete(fold.dataset.pdGh);
   }, true);
 
@@ -924,7 +934,6 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
 
   function scrollToFile(i: number) {
     if (!sectionEl(i)) return;
-    showSection("files");
     pendingJump = i;
     window.clearTimeout(pendingJumpTimer);
     pendingJumpTimer = window.setTimeout(() => { pendingJump = null; }, 400);
@@ -1290,7 +1299,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
       reviews, mine, headSha, armedDiscard, notice: mineNotice,
       drafts: [...drafts.values()].filter(isLoose)
         .map(d => renderDraft(d, errors.get(draftKey(d)) ?? null, true)).join(""),
-      conversation: renderConversationStrip(conversation, conversationNotice),
+      conversation: renderConversationBlock(conversation, conversationNotice, pr.url, conversationOpen, id => openThreads.has(id)),
       github: renderGhPanel(threads, threads.filter(t => !ghAnchor(t)), threadsNotice, id => openThreads.has(id), replyArea),
       inPanel: ref => !anchorOf(ref),
       card: ref => renderItem(ref, true),
@@ -1299,31 +1308,19 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     drawConversation();
   }
 
-  /** The Conversation section and its count in the file list. */
+  /** The count on Conversation in the file list. */
   function drawConversation() {
     const { people, bots } = conversationCounts(conversation);
     const count = $<HTMLElement>("[data-pd-conv-count]");
     count.textContent = String(people);
     count.hidden = people === 0;
     count.title = bots ? `${people} by people · ${bots} from bots` : "";
-    if (section !== "conversation") return;
-    conversationView.innerHTML = renderConversationPanel(conversation, conversationNotice, pr.url, id => openThreads.has(id));
   }
 
-  function showSection(next: "files" | "conversation") {
-    if (section === next) return;
-    section = next;
-    content.hidden = next !== "files";
-    conversationView.hidden = next !== "conversation";
-    const nav = $<HTMLElement>("[data-pd-show].pd-nav-conv");
-    nav.classList.toggle("pd-nav-conv--active", next === "conversation");
-    nav.setAttribute("aria-pressed", String(next === "conversation"));
-    // The file last read stays marked in the list, but it is not what shows.
-    $<HTMLElement>(".pd-main").classList.toggle("pd-main--conv", next === "conversation");
-    if (next === "conversation") {
-      drawConversation();
-      conversationView.scrollTop = 0;
-    }
+  /** Conversation in the file list: opens the block above the files and brings it into view. */
+  function jumpToConversation() {
+    if (!conversationOpen) { conversationOpen = true; saveConversationOpen(true); drawPanel(); }
+    content.querySelector<HTMLElement>("[data-pd-conv-block]")?.scrollIntoView({ block: "start" });
   }
 
   /** Redraws what hangs under one row, from state. */
