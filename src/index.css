@@ -3646,13 +3646,15 @@ ul.field-hint {
   animation: spin .6s linear infinite;
 }
 
-/* Overlay backdrop */
+/* The veil behind a dialog. No backdrop-filter: with a blur as large as the
+   window, Chromium (WebView2 on Windows) redraws the whole page and blurs it
+   again at every frame in which anything moves, in the dialog or behind it —
+   scrolling a diff had the GPU blur a page nobody could see. */
 .rd-overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
   background: rgba(15, 17, 25, .42);
-  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3675,13 +3677,13 @@ ul.field-hint {
   overflow: hidden;
 }
 
-/* Loading overlay — covers the entire modal shell */
+/* Loading overlay — covers the entire modal shell. No backdrop-filter either:
+   the spinner turning over it would blur the dialog again at every frame. */
 .rd-loading-overlay {
   position: absolute;
   inset: 0;
   z-index: 100;
   background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(1.5px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5214,12 +5216,12 @@ ul.field-hint {
 @keyframes tg-spin { to { transform: rotate(360deg); } }
 @keyframes tg-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 
+/* A veil without backdrop-filter, as .rd-overlay and for its reason. */
 .tg-overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
   background: rgba(15, 17, 26, .42);
-  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
