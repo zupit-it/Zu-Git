@@ -90,6 +90,8 @@ export function setListLoading(isLoading: boolean, label = "Loading pull request
 
   if (loading) loading.toggleAttribute("hidden", !isLoading);
   if (loadingLabel) loadingLabel.textContent = label;
+  // The sync dot's ring pulses while the sync is on, and three times after it (index.css).
+  document.querySelector("[data-sync-status]")?.toggleAttribute("data-syncing", isLoading);
   if (isLoading) dashboardEmpty?.setAttribute("hidden", "");
 }
 

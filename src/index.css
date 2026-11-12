@@ -255,7 +255,7 @@ html, body {
 .app-toolbar .sync-status { min-width: 0; flex-shrink: 1; }
 .app-toolbar .sync-status-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ── Sync status (pulsing dot + text) ────────────────────── */
+/* ── Sync status (dot + text) ────────────────────────────── */
 .sync-status {
   display: flex;
   align-items: center;
@@ -279,14 +279,21 @@ html, body {
   background: var(--ok);
 }
 
+/* The ring pulses while a sync is on and three more times once it lands, then
+   rests. It used to pulse for good, and an animation that never ends has the
+   window drawn again at every refresh of the screen, for as long as the window
+   shows: 60 frames a second with nothing to say. `data-syncing` comes from
+   setListLoading. The two names hold the same keyframes: the change of name is
+   what starts the three pulses when the sync lands. */
 .sync-dot-ring {
   position: absolute;
   inset: -2px;
   border-radius: 6px;
   background: var(--ok);
-  opacity: 0.25;
-  animation: zpulse 2s ease-out infinite;
+  opacity: 0;
+  animation: zpulse-settle 2s ease-out 3;
 }
+.sync-status[data-syncing] .sync-dot-ring { animation: zpulse 2s ease-out infinite; }
 
 .sync-status[data-tone="danger"] .sync-dot,
 .sync-status[data-tone="danger"] .sync-dot-ring {
@@ -1743,15 +1750,19 @@ body[data-view]:not([data-view="list"]) .rlb { display: none; }
   position: absolute;
   top: 0;
   bottom: 0;
+  left: 0;
   width: 32%;
   border-radius: 2px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   animation: list-progress-slide 1.15s ease-in-out infinite;
 }
 
+/* transform rather than left: the compositor slides it, with no layout and no
+   repaint at every frame. In its own widths: from just off the left edge to
+   just off the right one (100% / 32%). */
 @keyframes list-progress-slide {
-  0%   { left: -32%; }
-  100% { left: 100%; }
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(312.5%); }
 }
 
 /* Announced to screen readers, invisible on screen. */
@@ -3456,6 +3467,10 @@ ul.field-hint {
   0%   { transform: scale(0.8); opacity: 0.6; }
   100% { transform: scale(2.4); opacity: 0; }
 }
+@keyframes zpulse-settle {
+  0%   { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
 
 /* ── Changelog modal ────────────────────────────────────────────────────────── */
 .cl-overlay {
@@ -3646,13 +3661,15 @@ ul.field-hint {
   animation: spin .6s linear infinite;
 }
 
-/* Overlay backdrop */
+/* The veil behind a dialog. No backdrop-filter: with a blur as large as the
+   window, Chromium (WebView2 on Windows) redraws the whole page and blurs it
+   again at every frame in which anything moves, in the dialog or behind it —
+   scrolling a diff had the GPU blur a page nobody could see. */
 .rd-overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
   background: rgba(15, 17, 25, .42);
-  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3675,13 +3692,13 @@ ul.field-hint {
   overflow: hidden;
 }
 
-/* Loading overlay — covers the entire modal shell */
+/* Loading overlay — covers the entire modal shell. No backdrop-filter either:
+   the spinner turning over it would blur the dialog again at every frame. */
 .rd-loading-overlay {
   position: absolute;
   inset: 0;
   z-index: 100;
   background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(1.5px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5214,12 +5231,12 @@ ul.field-hint {
 @keyframes tg-spin { to { transform: rotate(360deg); } }
 @keyframes tg-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 
+/* A veil without backdrop-filter, as .rd-overlay and for its reason. */
 .tg-overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
   background: rgba(15, 17, 26, .42);
-  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
