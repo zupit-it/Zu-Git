@@ -4,13 +4,15 @@
 // until GitHub shows it: its row draws it over GitHub's data, marked as
 // waiting (`trackGitHubChange`, api.ts).
 //
-// GitHub is read sparingly for it — each read is a whole refresh, and counts
-// against the token's hourly limit: once after the change, as before, and once
-// more only if that read does not show it. Never more than MAX_READS.
+// GitHub is asked sparingly for it, since every request counts against the
+// token's hourly limit: that PR alone is read (one point, where a refresh of
+// the list costs three per repository), once after the change and once more
+// only if that answer does not show it. Never more than MAX_READS — and a
+// refresh that lands meanwhile counts as one of them.
 //
 // It ends by itself: when GitHub's data on it moves, or already says what the
 // row draws — or when its reads are spent without a sign of it, and then the
-// row is GitHub's again and the status says so. A snapshot asked for before
+// row is GitHub's again and the status says so. An answer asked for before
 // the change neither ends it nor counts: that one never saw it.
 //
 // Only what GitHub answered to the change is drawn over. What follows from it
@@ -39,20 +41,23 @@ export interface PendingChange {
   patch?: PendingPatch;
   /** GitHub's data on it when it was made (see `trace`). */
   before: string;
-  /** When it was made, and when GitHub is first read for it (ms since the epoch). */
+  /** When it was made (ms since the epoch). */
   at: number;
+  /** When its PR is next read for it; Infinity when ZuGit has no read of its own left to ask. */
   readAt: number;
-  /** Snapshots asked for after it that did not show it. */
+  /** GitHub's answers asked for after it that did not show it. */
   reads: number;
+  /** When the last answer it was checked against was asked for: an answer counts once. */
+  seenAt: number;
   /** When to give it up whatever happens: for when no read lands at all. */
   expiresAt: number;
   /** Nothing to say if GitHub never shows it: a read was all it asked for. */
   quiet: boolean;
 }
 
-/** GitHub is read once for a change and, if that read does not show it, once more. */
+/** GitHub is asked once for a change and, if that answer does not show it, once more. */
 export const MAX_READS = 2;
-/** How long after a read that did not show it the second one follows. */
+/** How long after an answer that did not show it the second read follows. */
 export const RETRY_MS = 6_000;
 /** With no read landing at all (GitHub out of reach), a change is given up after this long. */
 export const PENDING_TTL_MS = 60_000;
@@ -99,6 +104,7 @@ export function pendingChange(pr: PullRequestSummary, kind: PendingKind, options
     at: now,
     readAt: now + (options.readIn ?? 0),
     reads: 0,
+    seenAt: 0,
     expiresAt: now + PENDING_TTL_MS,
     quiet: options.quiet ?? false,
   };
@@ -119,26 +125,29 @@ function shows(change: PendingChange, pr: PullRequestSummary): boolean {
   return !!change.patch && trace(change.kind, change.patch(pr)) === now;
 }
 
+/** What GitHub last said of a PR — nothing when it is not in the list — and when that was asked for. */
+export type GitHubSays = (pr: string) => { pr: PullRequestSummary | undefined; askedAt: number };
+
 /**
- * Sorts `changes` against the PRs of a snapshot asked for at `askedAt`: those
- * it shows — or whose PR left the list — are dropped; those it does not show
- * have used one of their reads, and come back as `expired` once they are spent
- * (or their time is over); the rest keep `waiting`. A snapshot asked for before
- * a change says nothing about it. Call it once per snapshot: it counts reads.
+ * Sorts `changes` against what GitHub last said of their PRs. An answer asked
+ * for after a change, and not checked yet, is news about it: a change it shows
+ * — or whose PR left the list — is dropped; one it does not show has used one
+ * of its reads, comes back as `expired` once they are spent, and is otherwise
+ * due its last read RETRY_MS from `now`. With no news a change keeps `waiting`
+ * until its time is over.
  */
 export function reconcilePending(
-  changes: PendingChange[], prs: PullRequestSummary[], askedAt: number, now: number,
+  changes: PendingChange[], github: GitHubSays, now: number,
 ): { waiting: PendingChange[]; expired: PendingChange[] } {
-  const byKey = new Map(prs.map((pr) => [prKey(pr), pr]));
   const waiting: PendingChange[] = [];
   const expired: PendingChange[] = [];
   for (const change of changes) {
-    const read = askedAt >= change.at;
-    const pr = byKey.get(change.pr);
-    if (read && (!pr || shows(change, pr))) continue;
-    const reads = change.reads + (read ? 1 : 0);
+    const { pr, askedAt } = github(change.pr);
+    const news = askedAt >= change.at && askedAt > change.seenAt;
+    if (news && (!pr || shows(change, pr))) continue;
+    const reads = change.reads + (news ? 1 : 0);
     if (reads >= MAX_READS || now >= change.expiresAt) expired.push(change);
-    else waiting.push(read ? { ...change, reads } : change);
+    else waiting.push(news ? { ...change, reads, seenAt: askedAt, readAt: now + RETRY_MS } : change);
   }
   return { waiting, expired };
 }
@@ -157,19 +166,31 @@ export function waitingOn(
   return changes.find((c) => c.pr === key && c.kind === kind && (subject === undefined || c.subject === subject.toLowerCase()));
 }
 
-/**
- * How long before GitHub is read for the changes still waiting; null when none
- * waits. One not read yet is read at its time; one a read did not show, once
- * more RETRY_MS after that read (this is asked right after a read landed).
- * One read serves every change waiting: they are not read one by one.
- */
+/** How long before a PR is next read for a change still waiting; null when no read is due. */
 export function nextPendingRead(changes: PendingChange[], now: number): number | null {
-  let next: number | null = null;
-  for (const change of changes) {
-    const wait = change.reads === 0 ? Math.max(0, change.readAt - now) : RETRY_MS;
-    next = next === null ? wait : Math.min(next, wait);
-  }
-  return next;
+  const due = changes.map((change) => change.readAt).filter(Number.isFinite);
+  return due.length ? Math.max(0, Math.min(...due) - now) : null;
+}
+
+/** The PRs to read now, each once whatever the changes waiting on it. */
+export function duePendingPrs(changes: PendingChange[], now: number): string[] {
+  return [...new Set(changes.filter((change) => change.readAt <= now).map((change) => change.pr))];
+}
+
+/**
+ * A PR's read failed (GitHub out of reach): ZuGit does not ask again on its
+ * own for the changes on it. The next refresh, by the timer or by hand, takes over.
+ */
+export function withoutOwnRead(changes: PendingChange[], pr: string): PendingChange[] {
+  return changes.map((change) => (change.pr === pr ? { ...change, readAt: Number.POSITIVE_INFINITY } : change));
+}
+
+/**
+ * `prs` with GitHub's newer answer for one PR in place of the one they had:
+ * replaced, or taken out when it is no longer open (`null`).
+ */
+export function withAnswer(prs: PullRequestSummary[], key: string, pr: PullRequestSummary | null): PullRequestSummary[] {
+  return pr ? prs.map((p) => (prKey(p) === key ? pr : p)) : prs.filter((p) => prKey(p) !== key);
 }
 
 /** What the status says of changes GitHub never showed; nothing for the quiet ones. */

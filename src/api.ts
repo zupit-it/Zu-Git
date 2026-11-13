@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import type { DashboardBootstrap, DashboardSnapshot, SaveSettingsResult } from "./shared/rpc";
+import type { PullRequestSummary } from "./shared/pr-model";
 import { defaultSettings, serializeSettingsForm } from "./shared/settings";
 import { state } from "./state";
 import { showUpdateNotes } from "./changelog";
@@ -9,11 +10,11 @@ import {
   setSettingsNotice, syncSettingsSaveButton,
   stopSyncLabelTicker,
   renderDashboard, renderSettings, renderSecretStoreInfo,
-  collectSettingsForm, redrawList, settlePendingChanges,
+  collectSettingsForm, redrawList, redrawPullRequests, settlePendingChanges,
 } from "./render";
-import { errorMessage } from "./utils";
+import { errorMessage, escHtml } from "./utils";
 import {
-  nextPendingRead, pendingChange, reviewAskedOf, withPending,
+  duePendingPrs, pendingChange, reviewAskedOf, withAnswer, withPending, withoutOwnRead,
   type PendingKind, type PendingOptions,
 } from "./pending-changes";
 import { processMergeQueue } from "./merge-queue";
@@ -101,13 +102,11 @@ export async function refreshDashboard(mode: "manual" | "auto" | "after-change" 
   setListLoading(true, mode === "auto" ? "Auto-refreshing pull requests…" : "Refreshing pull requests…");
 
   const readAt = Date.now();
-  let landed = false;
   try {
-    const payload = await invoke<DashboardSnapshot>("refresh_dashboard");
+    const payload = withNewerAnswers(await invoke<DashboardSnapshot>("refresh_dashboard"), readAt);
     if (myId !== state.refreshRequestId) return;
     state.dashboardReadAt = readAt;
     renderDashboard(payload);
-    landed = true;
     setListLoading(false);
     if (state.mergeQueueEnabled) void processMergeQueue(payload);
     // The Sprint tab shows PR state on its cards: tell it there is a new snapshot.
@@ -127,7 +126,7 @@ export async function refreshDashboard(mode: "manual" | "auto" | "after-change" 
         refreshAgain = false;
         void refreshDashboard("after-change");
       } else {
-        followPendingChanges(landed);
+        followPendingChanges();
       }
     }
   }
@@ -135,54 +134,103 @@ export async function refreshDashboard(mode: "manual" | "auto" | "after-change" 
 
 // ── Changes made from ZuGit, until GitHub shows them ─────────────────────────
 
-let followUpTimer = 0;
-let giveUpTimer = 0;
+/** PRs being read on their own right now, by `repo/id`. */
+const reading = new Set<string>();
+let pendingTimer = 0;
 
 /**
  * ZuGit just changed a PR on GitHub. Its row draws the change at once, as
- * waiting, over what GitHub last said (pending-changes.ts) — the snapshot
- * itself is never edited — and GitHub is read for it: now, or in `readIn` ms
- * when it needs a moment. A read is a whole refresh and counts against the
- * token's hourly limit, so there is one, as there always was after a change,
- * and one more only if it does not show the change.
+ * waiting, over what GitHub last said (pending-changes.ts) — the snapshot is
+ * never edited by a guess — and GitHub is asked for that PR alone: now, or in
+ * `readIn` ms when it needs a moment. One point of the token's hourly limit,
+ * where a refresh of the list costs three per repository; and once more only
+ * if that answer does not show the change.
  */
 export function trackGitHubChange(pr: { repo: string; id: number }, kind: PendingKind, options: PendingOptions) {
   const known = state.currentDashboard?.prs.find((p) => p.repo === pr.repo && p.id === pr.id);
-  if (known) {
-    state.pendingChanges = withPending(state.pendingChanges, pendingChange(known, kind, options, Date.now()));
-    redrawList();
-    watchPendingTime();
+  if (!known) {
+    // Not a PR of the list (yet): there is no row to keep true, and only a refresh can bring one.
+    void refreshDashboard("after-change");
+    return;
   }
-  window.clearTimeout(followUpTimer);
-  if (options.readIn) followUpTimer = window.setTimeout(() => void refreshDashboard("after-change"), options.readIn);
-  else void refreshDashboard("after-change");
+  state.pendingChanges = withPending(state.pendingChanges, pendingChange(known, kind, options, Date.now()));
+  redrawList();
+  followPendingChanges();
 }
 
 /**
- * After a read that landed: a change it did not show gets its second and last
- * read a while later, and one whose first read is still due keeps its time.
- * A read that failed is not tried again from here: the next refresh, by the
- * timer or by hand, takes over.
+ * Reads the PRs whose change is due its read, each on its own, and comes back
+ * when the next is due or a change's time is over. Called after anything that
+ * may have moved them: a change, an answer, a refresh.
  */
-function followPendingChanges(landed: boolean) {
-  watchPendingTime();
-  if (!landed) return;
-  window.clearTimeout(followUpTimer);
-  const wait = nextPendingRead(state.pendingChanges, Date.now());
-  if (wait !== null) followUpTimer = window.setTimeout(() => void refreshDashboard("after-change"), wait);
+function followPendingChanges() {
+  window.clearTimeout(pendingTimer);
+  if (state.pendingChanges.length === 0) return;
+  // Time over with no answer to say so (GitHub out of reach): the rows are GitHub's again.
+  const { changed, message } = settlePendingChanges();
+  if (changed) redrawList();
+  if (message) setStatus(message);
+
+  const now = Date.now();
+  for (const key of duePendingPrs(state.pendingChanges, now)) {
+    if (!reading.has(key)) void readPullRequest(key);
+  }
+  const waits = state.pendingChanges
+    .flatMap((change) => [reading.has(change.pr) ? Infinity : change.readAt - now, change.expiresAt - now])
+    .filter(Number.isFinite);
+  if (waits.length) pendingTimer = window.setTimeout(followPendingChanges, Math.max(50, Math.min(...waits)));
 }
 
-/** With no read landing at all, a change is still given up when its time is over: a timer, no request. */
-function watchPendingTime() {
-  window.clearTimeout(giveUpTimer);
-  if (state.pendingChanges.length === 0) return;
-  const due = Math.min(...state.pendingChanges.map((change) => change.expiresAt)) - Date.now();
-  giveUpTimer = window.setTimeout(() => {
-    const { changed, message } = settlePendingChanges(state.currentDashboard?.prs ?? [], 0);
-    if (changed) redrawList();
-    if (message) setStatus(message);
-    watchPendingTime();
-  }, Math.max(0, due) + 50);
+/** Asks GitHub for one PR as the list has it, and takes its answer for that PR's row. */
+async function readPullRequest(key: string) {
+  const slash = key.lastIndexOf("/");
+  reading.add(key);
+  const askedAt = Date.now();
+  try {
+    const pr = await invoke<PullRequestSummary | null>("fetch_pull_request", {
+      repo: key.slice(0, slash), number: Number(key.slice(slash + 1)),
+    });
+    reading.delete(key);
+    takeAnswer(key, pr, askedAt);
+  } catch {
+    reading.delete(key);
+    // GitHub out of reach: not asked again from here. The next refresh, by the timer or by hand, takes over.
+    state.pendingChanges = withoutOwnRead(state.pendingChanges, key);
+    setStatus(`GitHub did not answer for ${escHtml(key.slice(0, slash))}#${key.slice(slash + 1)}: its row waits for the next refresh.`);
+  }
+  followPendingChanges();
+}
+
+/**
+ * GitHub's answer for one PR, asked for at `askedAt`: it takes that PR's place
+ * in the snapshot (or takes it out, when it is no longer open) — GitHub's own
+ * newer word, not an edit — unless the snapshot was asked for later still.
+ */
+function takeAnswer(key: string, pr: PullRequestSummary | null, askedAt: number) {
+  const snapshot = state.currentDashboard;
+  if (!snapshot || askedAt < state.dashboardReadAt) return;
+  if ((state.prAnswers.get(key)?.askedAt ?? 0) > askedAt) return;
+  state.prAnswers.set(key, { askedAt, pr });
+  state.currentDashboard = { ...snapshot, prs: withAnswer(snapshot.prs, key, pr) };
+  const { message } = settlePendingChanges();
+  redrawPullRequests();
+  if (message) setStatus(message);
+  // The Sprint tab and an open popover follow the list.
+  window.dispatchEvent(new CustomEvent("zugit:dashboard"));
+}
+
+/**
+ * A snapshot asked for at `askedAt`, with GitHub's newer answer in place of
+ * each PR read on its own since: a refresh that was already on its way cannot
+ * put an older PR back. Answers the snapshot has caught up with are forgotten.
+ */
+function withNewerAnswers(snapshot: DashboardSnapshot, askedAt: number): DashboardSnapshot {
+  let prs = snapshot.prs;
+  for (const [key, answer] of state.prAnswers) {
+    if (answer.askedAt > askedAt) prs = withAnswer(prs, key, answer.pr);
+    else state.prAnswers.delete(key);
+  }
+  return prs === snapshot.prs ? snapshot : { ...snapshot, prs };
 }
 
 // ── Settings save ─────────────────────────────────────────────────────────────
@@ -207,9 +255,10 @@ export async function saveSettingsAndRefresh(event: SubmitEvent) {
       .split("\n").map(s => s.trim()).filter(Boolean);
     configureAutoRefresh();
     renderSettings(payload.settings);
+    const dashboard = withNewerAnswers(payload.dashboard, readAt);
     state.dashboardReadAt = readAt;
-    renderDashboard(payload.dashboard);
-    if (state.mergeQueueEnabled) void processMergeQueue(payload.dashboard);
+    renderDashboard(dashboard);
+    if (state.mergeQueueEnabled) void processMergeQueue(dashboard);
     if (payload.settings.notificationsEnabled === "on") void ensureNotificationPermission();
     setView("list");
     state.settingsSaving = false;

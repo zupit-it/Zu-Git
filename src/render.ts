@@ -17,7 +17,7 @@ import {
   getAvailableRepos,
 } from "./filters";
 import { computeMyScore } from "./reaction-score";
-import { givenUpMessage, reconcilePending, shownPr, waitingOn } from "./pending-changes";
+import { givenUpMessage, prKey, reconcilePending, shownPr, waitingOn } from "./pending-changes";
 import { slackMember } from "./slack-people";
 import { petReactToDashboard } from "./pet-triggers";
 import { clearSettingsSectionsDirty, openUnconfiguredSections, syncSettingsSections } from "./settings-sections";
@@ -1399,12 +1399,30 @@ export function redrawList() {
 }
 
 /**
- * Lets go of the changes made from ZuGit that a snapshot asked for at `readAt`
- * shows, and of those GitHub still does not show after their time. Returns
- * whether any went, and what to say of those given up.
+ * The parts of the page drawn from the PRs, after one of them was read again on
+ * its own: there is no new sync to tell, and nothing to notify.
  */
-export function settlePendingChanges(prs: PullRequestSummary[], readAt: number): { changed: boolean; message: string } {
-  const { waiting, expired } = reconcilePending(state.pendingChanges, prs, readAt, Date.now());
+export function redrawPullRequests() {
+  const snapshot = state.currentDashboard;
+  if (!snapshot) return;
+  renderSummary(snapshot.prs);
+  renderListFilters(snapshot);
+  renderReviewerLoad(snapshot);
+  renderListBoard(applyListFilters(snapshot));
+}
+
+/**
+ * Lets go of the changes made from ZuGit that GitHub now shows — in the
+ * snapshot, or in its newer answer for their PR — and of those it still does
+ * not show once their reads or their time are spent. Returns whether any went,
+ * and what to say of those given up.
+ */
+export function settlePendingChanges(): { changed: boolean; message: string } {
+  const prs = state.currentDashboard?.prs ?? [];
+  const { waiting, expired } = reconcilePending(state.pendingChanges, (key) => ({
+    pr: prs.find((pr) => prKey(pr) === key),
+    askedAt: state.prAnswers.get(key)?.askedAt ?? state.dashboardReadAt,
+  }), Date.now());
   const changed = waiting.length !== state.pendingChanges.length;
   state.pendingChanges = waiting;
   return { changed, message: givenUpMessage(expired) };
@@ -1414,7 +1432,7 @@ export function renderDashboard(snapshot: DashboardSnapshot) {
   void petReactToDashboard(state.currentDashboard, snapshot);
   state.currentDashboard = snapshot;
   // Before the rows are drawn: what this snapshot shows is no longer waiting.
-  const givenUp = settlePendingChanges(snapshot.prs, state.dashboardReadAt).message;
+  const givenUp = settlePendingChanges().message;
   const myPendingReviewIds = getMyPendingReviewIds(snapshot);
   const myChangesRequestedIds = getMyChangesRequestedIds(snapshot);
   const filteredPrs = applyListFilters(snapshot);

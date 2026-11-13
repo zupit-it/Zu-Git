@@ -136,6 +136,7 @@ pub fn run() {
             commands::fetch_pr_file_text,
             commands::fetch_pr_head,
             commands::fetch_pr_state,
+            commands::fetch_pull_request,
             pet::pet_play,
             pet::pet_done,
             pet::pet_cursor,

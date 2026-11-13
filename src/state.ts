@@ -1,5 +1,6 @@
 import type { DashboardSnapshot, StaleBranchesResult } from "./shared/rpc";
 import type { PendingChange } from "./pending-changes";
+import type { PullRequestSummary } from "./shared/pr-model";
 import { defaultListFilterPreferences, defaultSettings } from "./shared/settings";
 import type { SlackDirectory } from "./slack-people";
 
@@ -127,6 +128,12 @@ export const state = {
   dashboardReadAt: 0,
   /** What ZuGit just changed on GitHub and `currentDashboard` does not show yet (pending-changes.ts). */
   pendingChanges: [] as PendingChange[],
+  /**
+   * PRs read on their own since `currentDashboard` was asked for, by `repo/id`:
+   * GitHub's newer answer (null: no longer open), already in `currentDashboard`,
+   * and kept so a snapshot asked for earlier cannot put the older PR back.
+   */
+  prAnswers: new Map<string, { askedAt: number; pr: PullRequestSummary | null }>(),
 
   // ── Timers ─────────────────────────────────────────────────────────────────
   autoRefreshIntervalId: null as number | null,

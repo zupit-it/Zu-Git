@@ -279,6 +279,16 @@ fn cache_key(base_url: &str, issue_key: &str) -> String {
     format!("{}::{}", base_url, issue_key)
 }
 
+/// A story as Jira last answered for it, without asking again: `None` when it
+/// was never asked for, `Some(None)` when Jira had no such issue.
+pub fn cached_issue(
+    key: &str,
+    settings: &AppSettings,
+    cache: &Mutex<HashMap<String, Option<JiraIssueSummary>>>,
+) -> Option<Option<JiraIssueSummary>> {
+    cache.lock().get(&cache_key(&settings.jira_base_url, key)).cloned()
+}
+
 // ── API base resolution ───────────────────────────────────────────────────────
 
 const ATLASSIAN_GATEWAY: &str = "https://api.atlassian.com/ex/jira";

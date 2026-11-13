@@ -21,12 +21,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   requests and Contents.
 - **What you just did on a PR shows at once, marked as waiting** — after an auto-merge switch, a
   rebase, a reviewer asked or asked again, the row shows it straight away, dimmed, until GitHub
-  shows it too. ZuGit reads GitHub once for it, as it did, and once more only if that read does
-  not show it yet — also after a review published from the diff — and never more: each read
-  counts against your token's hourly limit. With no sign of it after the second, the row goes back
-  to what GitHub says and the status tells you. The list itself is only ever what GitHub last
-  said: ZuGit no longer works out a PR's state in its place, so a row cannot be left showing a
-  guess.
+  shows it too. For that ZuGit asks GitHub for that one PR, no longer for the whole list — a
+  fraction of what a refresh costs your token's hourly limit — once, and once more only if the
+  first answer does not show it yet; also after a review published from the diff. With no sign of
+  it after the second, the row goes back to what GitHub says and the status tells you. The list
+  itself is only ever what GitHub last said: ZuGit no longer works out a PR's state in its place,
+  so a row cannot be left showing a guess.
 
 ---
 

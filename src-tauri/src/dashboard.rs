@@ -318,6 +318,46 @@ async fn fetch_live(
     })
 }
 
+// ── One PR, read on its own ───────────────────────────────────────────────────
+
+/// One pull request as the dashboard lists it — `None` when it is no longer
+/// open — for the read that follows a change ZuGit made to it on GitHub.
+/// Nothing else is asked again: one GraphQL point, where a refresh costs three
+/// per repository and asks Jira too. The PR's story is taken as the last
+/// refresh read it, since a change on GitHub does not touch it; Jira is asked
+/// only if it never was.
+pub async fn build_pull_request(
+    repo: &str,
+    number: u64,
+    settings: &AppSettings,
+    jira_cache: &Mutex<HashMap<String, Option<JiraIssueSummary>>>,
+    client: &reqwest::Client,
+) -> Result<Option<PullRequestSummary>, String> {
+    let Some(record) = crate::github::fetch_pull_request(repo, number, settings, client)
+        .await
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(None);
+    };
+    // What a refresh would warn about this PR, the refresh has said already.
+    let mut warnings = vec![];
+    let normalised = normalise_pr(&record, settings, &mut warnings);
+
+    let mut jira_issues = HashMap::new();
+    if let Some(key) = normalised.jira_key.as_ref().filter(|_| settings_ready_for_jira(settings)) {
+        match crate::jira::cached_issue(key, settings, jira_cache) {
+            Some(issue) => {
+                jira_issues.insert(key.clone(), issue);
+            }
+            None => {
+                jira_issues =
+                    crate::jira::fetch_jira_issues(std::slice::from_ref(key), settings, jira_cache, client).await;
+            }
+        }
+    }
+    Ok(Some(enrich(&normalised, &jira_issues, settings)))
+}
+
 // ── Per-PR normalisation ──────────────────────────────────────────────────────
 
 struct NormalisedPr<'a> {

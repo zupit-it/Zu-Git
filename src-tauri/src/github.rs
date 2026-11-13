@@ -9,23 +9,26 @@ use crate::models::{
 
 // ── GraphQL query ─────────────────────────────────────────────────────────────
 
-const PR_QUERY: &str = r#"
-query($owner: String!, $repo: String!, $cursor: String) {
-  repository(owner: $owner, name: $repo) {
+/// How a repository lets its PRs merge: read with the list and with a single PR.
+macro_rules! repo_merge_fields {
+    () => {
+        r#"
     autoMergeAllowed
     mergeCommitAllowed
     squashMergeAllowed
     rebaseMergeAllowed
-    viewerDefaultMergeMethod
-    pullRequests(
-      states: OPEN
-      first: 50
-      after: $cursor
-      orderBy: { field: UPDATED_AT, direction: DESC }
-    ) {
-      nodes {
+    viewerDefaultMergeMethod"#
+    };
+}
+
+/// What is read of a pull request. The list's query and the one for a single PR
+/// share it, so a PR read on its own is the PR the list would show.
+macro_rules! pr_fields {
+    () => {
+        r#"
         id
         number
+        state
         title
         body
         url
@@ -94,13 +97,50 @@ query($owner: String!, $repo: String!, $cursor: String) {
               }
             }
           }
-        }
+        }"#
+    };
+}
+
+const PR_QUERY: &str = concat!(
+    r#"
+query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {"#,
+    repo_merge_fields!(),
+    r#"
+    pullRequests(
+      states: OPEN
+      first: 50
+      after: $cursor
+      orderBy: { field: UPDATED_AT, direction: DESC }
+    ) {
+      nodes {"#,
+    pr_fields!(),
+    r#"
       }
       pageInfo { hasNextPage endCursor }
     }
   }
 }
-"#;
+"#
+);
+
+/// One pull request by its number, with the fields of the list. GitHub counts
+/// it 1 point of the token's hourly limit; a page of a repository's list is 3,
+/// and a refresh reads every repository.
+const ONE_PR_QUERY: &str = concat!(
+    r#"
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {"#,
+    repo_merge_fields!(),
+    r#"
+    pullRequest(number: $number) {"#,
+    pr_fields!(),
+    r#"
+    }
+  }
+}
+"#
+);
 
 // ── GraphQL response types ────────────────────────────────────────────────────
 
@@ -132,7 +172,11 @@ struct GqlRepository {
     #[serde(default)]
     rebase_merge_allowed: bool,
     viewer_default_merge_method: Option<String>,
+    /// The list's page; not in the answer when one PR was asked for.
+    #[serde(default)]
     pull_requests: GqlPrConnection,
+    /// The PR asked for by number; not in the list's answer.
+    pull_request: Option<GqlPr>,
 }
 
 /// How the repo lets its PRs merge, as auto-merge may use it.
@@ -167,14 +211,14 @@ impl RepoMerging {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GqlPrConnection {
     nodes: Vec<GqlPr>,
     page_info: GqlPageInfo,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GqlPageInfo {
     has_next_page: bool,
@@ -186,6 +230,8 @@ struct GqlPageInfo {
 struct GqlPr {
     id: String,
     number: u64,
+    /// OPEN, CLOSED or MERGED. The list asks for open ones only.
+    state: Option<String>,
     title: String,
     body: Option<String>,
     url: String,
@@ -670,16 +716,7 @@ async fn fetch_repo_pull_requests_inner(
         });
 
         let resp = graphql_request(PR_QUERY, variables, settings, client).await?;
-
-        if let Some(errors) = &resp.errors {
-            let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
-            return Err(ApiError::Other(format!("GraphQL error: {}", msgs.join("; "))));
-        }
-
-        let repository = resp
-            .data
-            .and_then(|d| d.repository)
-            .ok_or_else(|| ApiError::Other(format!("Repository {repo} not found or inaccessible")))?;
+        let repository = repository_of(resp, repo)?;
         if cursor.is_none() {
             merging = RepoMerging::of(&repository);
         }
@@ -696,67 +733,106 @@ async fn fetch_repo_pull_requests_inner(
         }
     }
 
-    let mut records = Vec::new();
-    for pr in &all_prs {
-        let head_sha = pr
+    Ok(all_prs.iter().map(|pr| record_of(repo, pr, &merging)).collect())
+}
+
+/// A pull request as GitHub gave it, in the shape the dashboard works on.
+fn record_of(repo: &str, pr: &GqlPr, merging: &RepoMerging) -> GithubPullRequestRecord {
+    let head_sha = pr
+        .head_ref
+        .as_ref()
+        .and_then(|h| h.target.as_ref())
+        .map(|t| t.oid.clone())
+        .unwrap_or_default();
+
+    let details = build_pr_details(pr, &head_sha);
+
+    GithubPullRequestRecord {
+        repo: repo.to_string(),
+        number: pr.number,
+        title: pr.title.clone(),
+        url: pr.url.clone(),
+        body: pr.body.clone().unwrap_or_default(),
+        created_at: pr.created_at.clone(),
+        author: pr.author.as_ref().map(|a| a.login.clone()).unwrap_or_default(),
+        assignee: pr.assignees.nodes.first().map(|a| a.login.clone()),
+        requested_reviewers: pr
+            .review_requests
+            .nodes
+            .iter()
+            .filter_map(|rr| rr.requested_reviewer.as_ref()?.login.clone())
+            .collect(),
+        participant_avatars: details.participant_avatars.clone(),
+        head_ref: pr
+            .head_ref
+            .as_ref()
+            .map(|h| h.name.clone())
+            .unwrap_or_default(),
+        head_sha: pr
             .head_ref
             .as_ref()
             .and_then(|h| h.target.as_ref())
             .map(|t| t.oid.clone())
-            .unwrap_or_default();
-
-        let details = build_pr_details(pr, &head_sha);
-
-        records.push(GithubPullRequestRecord {
-            repo: repo.to_string(),
-            number: pr.number,
-            title: pr.title.clone(),
-            url: pr.url.clone(),
-            body: pr.body.clone().unwrap_or_default(),
-            created_at: pr.created_at.clone(),
-            author: pr.author.as_ref().map(|a| a.login.clone()).unwrap_or_default(),
-            assignee: pr.assignees.nodes.first().map(|a| a.login.clone()),
-            requested_reviewers: pr
-                .review_requests
-                .nodes
-                .iter()
-                .filter_map(|rr| rr.requested_reviewer.as_ref()?.login.clone())
-                .collect(),
-            participant_avatars: details.participant_avatars.clone(),
-            head_ref: pr
-                .head_ref
-                .as_ref()
-                .map(|h| h.name.clone())
-                .unwrap_or_default(),
-            head_sha: pr
-                .head_ref
-                .as_ref()
-                .and_then(|h| h.target.as_ref())
-                .map(|t| t.oid.clone())
-                .unwrap_or_default(),
-            updated_at: pr.updated_at.clone(),
-            node_id: pr.id.clone(),
-            base_ref: pr.base_ref.as_ref().map(|b| b.name.clone()).unwrap_or_default(),
-            draft: pr.is_draft,
-            pipeline_state: details.pipeline_state.clone(),
-            failed_checks: details.failed_checks.clone(),
-            review_summary: details.review_summary.clone(),
-            additions: details.additions,
-            deletions: details.deletions,
-            auto_merge_method: details.auto_merge_method.clone(),
-            unresolved_threads: details.unresolved_threads,
-            merge_status: details.merge_status.clone(),
-            merge_actions: crate::models::MergeActions {
-                can_update_branch: pr.viewer_can_update_branch,
-                can_enable_auto_merge: pr.viewer_can_enable_auto_merge,
-                can_disable_auto_merge: pr.viewer_can_disable_auto_merge,
-                auto_merge_methods: merging.auto_merge_methods.clone(),
-                head_authored_at: pr.commits.nodes.first().and_then(|c| c.commit.authored_date.clone()),
-            },
-        });
+            .unwrap_or_default(),
+        updated_at: pr.updated_at.clone(),
+        node_id: pr.id.clone(),
+        base_ref: pr.base_ref.as_ref().map(|b| b.name.clone()).unwrap_or_default(),
+        draft: pr.is_draft,
+        pipeline_state: details.pipeline_state.clone(),
+        failed_checks: details.failed_checks.clone(),
+        review_summary: details.review_summary.clone(),
+        additions: details.additions,
+        deletions: details.deletions,
+        auto_merge_method: details.auto_merge_method.clone(),
+        unresolved_threads: details.unresolved_threads,
+        merge_status: details.merge_status.clone(),
+        merge_actions: crate::models::MergeActions {
+            can_update_branch: pr.viewer_can_update_branch,
+            can_enable_auto_merge: pr.viewer_can_enable_auto_merge,
+            can_disable_auto_merge: pr.viewer_can_disable_auto_merge,
+            auto_merge_methods: merging.auto_merge_methods.clone(),
+            head_authored_at: pr.commits.nodes.first().and_then(|c| c.commit.authored_date.clone()),
+        },
     }
+}
 
-    Ok(records)
+/// The repository of a GraphQL answer, or why there is none.
+fn repository_of(resp: GqlResponse, repo: &str) -> Result<GqlRepository, ApiError> {
+    if let Some(errors) = &resp.errors {
+        let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
+        return Err(ApiError::Other(format!("GraphQL error: {}", msgs.join("; "))));
+    }
+    resp.data
+        .and_then(|d| d.repository)
+        .ok_or_else(|| ApiError::Other(format!("Repository {repo} not found or inaccessible")))
+}
+
+/// The PR of an answer to `ONE_PR_QUERY`; none when it is no longer open, since
+/// the list holds open PRs only.
+fn open_pull_request(repo: &str, repository: GqlRepository) -> Option<GithubPullRequestRecord> {
+    let merging = RepoMerging::of(&repository);
+    repository
+        .pull_request
+        .filter(|pr| pr.state.as_deref() == Some("OPEN"))
+        .map(|pr| record_of(repo, &pr, &merging))
+}
+
+/// One pull request as the list has it, read on its own: after ZuGit changed
+/// it on GitHub, this is what tells whether GitHub shows the change — for 1
+/// point of the hourly limit instead of a whole refresh. `None` when it is no
+/// longer open.
+pub async fn fetch_pull_request(
+    repo: &str,
+    number: u64,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<Option<GithubPullRequestRecord>, ApiError> {
+    let (owner, repo_name) = repo
+        .split_once('/')
+        .ok_or_else(|| ApiError::Other(format!("Invalid repo format: {repo}")))?;
+    let variables = serde_json::json!({ "owner": owner, "repo": repo_name, "number": number });
+    let resp = graphql_request(ONE_PR_QUERY, variables, settings, client).await?;
+    Ok(open_pull_request(repo, repository_of(resp, repo)?))
 }
 
 // ── Build processed details from a GraphQL PR node ────────────────────────────
@@ -3020,6 +3096,64 @@ mod tests {
         let mut repo = serde_json::json!({ "pullRequests": { "nodes": [], "pageInfo": { "hasNextPage": false } } });
         repo.as_object_mut().unwrap().extend(value.as_object().unwrap().clone());
         serde_json::from_value(repo).unwrap()
+    }
+
+    /// The answer to `ONE_PR_QUERY` for a PR in `state`, in a repo that allows auto-merge by squash.
+    fn one_pr_answer(state: &str) -> GqlRepository {
+        serde_json::from_value(serde_json::json!({
+            "autoMergeAllowed": true, "squashMergeAllowed": true, "viewerDefaultMergeMethod": "SQUASH",
+            "pullRequest": {
+                "id": "PR_1", "number": 12, "state": state, "title": "Login page", "body": null,
+                "url": "https://github.com/org/app/pull/12", "isDraft": false,
+                "createdAt": "2026-11-10T09:00:00Z", "updatedAt": "2026-11-12T10:00:00Z",
+                "additions": 10, "deletions": 2, "author": { "login": "anna", "avatarUrl": "a.png" },
+                "assignees": { "nodes": [] },
+                "reviewRequests": { "nodes": [{ "requestedReviewer": { "login": "bob", "avatarUrl": "b.png" } }] },
+                "reviews": { "nodes": [] },
+                "autoMergeRequest": { "mergeMethod": "SQUASH" },
+                "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
+                "viewerCanEnableAutoMerge": false, "viewerCanDisableAutoMerge": true, "viewerCanUpdateBranch": false,
+                "reviewThreads": { "nodes": [] },
+                "baseRef": { "name": "main" },
+                "headRef": { "name": "feat/login", "target": { "oid": "abc123" } },
+                "commits": { "nodes": [] },
+            },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn one_pr_is_read_with_the_fields_of_the_list() {
+        // Same fields, so a PR read on its own is the PR the list would show.
+        let fields = pr_fields!();
+        assert!(PR_QUERY.contains(fields) && ONE_PR_QUERY.contains(fields));
+        for field in ["viewerCanUpdateBranch", "autoMergeRequest { mergeMethod }", "statusCheckRollup", "reviewRequests(first: 20)"] {
+            assert!(fields.contains(field), "{field}");
+        }
+        assert!(ONE_PR_QUERY.contains("pullRequest(number: $number)"));
+        // One PR, not a page of them: that is what makes it cheap.
+        assert!(!ONE_PR_QUERY.contains("pullRequests("));
+        assert!(ONE_PR_QUERY.contains("autoMergeAllowed") && ONE_PR_QUERY.contains("viewerDefaultMergeMethod"));
+    }
+
+    #[test]
+    fn a_pr_read_on_its_own_is_the_record_the_list_would_hold() {
+        let record = open_pull_request("org/app", one_pr_answer("OPEN")).expect("an open PR");
+        assert_eq!((record.repo.as_str(), record.number, record.node_id.as_str()), ("org/app", 12, "PR_1"));
+        assert_eq!(record.head_sha, "abc123");
+        assert_eq!(record.requested_reviewers, ["bob"]);
+        assert_eq!(record.auto_merge_method.as_deref(), Some("SQUASH"));
+        assert_eq!(record.merge_status, "blocked");
+        assert!(record.merge_actions.can_disable_auto_merge && !record.merge_actions.can_enable_auto_merge);
+        assert_eq!(record.merge_actions.auto_merge_methods, ["SQUASH"]);
+    }
+
+    #[test]
+    fn a_pr_no_longer_open_is_not_in_the_list() {
+        assert!(open_pull_request("org/app", one_pr_answer("MERGED")).is_none());
+        assert!(open_pull_request("org/app", one_pr_answer("CLOSED")).is_none());
+        // Nor is one GitHub did not answer for.
+        assert!(open_pull_request("org/app", repo_json(serde_json::json!({}))).is_none());
     }
 
     #[test]

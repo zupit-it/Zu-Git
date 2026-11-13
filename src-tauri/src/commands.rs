@@ -451,6 +451,24 @@ pub async fn fetch_pr_head(
     Ok(crate::github::fetch_pr_meta(&repo, number, &settings, &state.http_client).await?.head_sha)
 }
 
+/// One PR as the dashboard lists it, read on its own — `None` when it is no
+/// longer open. After ZuGit changed a PR on GitHub, this is how its row gets
+/// GitHub's word on it: a fraction of what a whole refresh costs the token's
+/// hourly limit.
+#[tauri::command]
+pub async fn fetch_pull_request(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    repo: String,
+    number: u64,
+) -> Result<Option<crate::models::PullRequestSummary>, String> {
+    if !crate::pr_review::valid_repo(&repo) {
+        return Err(format!("Invalid repo '{repo}', expected owner/name."));
+    }
+    let settings = storage::load_settings(&app).await?;
+    dashboard::build_pull_request(&repo, number, &settings, &state.jira_cache, &state.http_client).await
+}
+
 /// Whether a PR is open, closed or merged: in meme mode, one of yours leaving
 /// the list is asked about, and a merge brings the Tiny King out.
 #[tauri::command]

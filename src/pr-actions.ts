@@ -29,7 +29,7 @@ const METHOD_LABELS: Record<string, string> = {
   REBASE: "Rebase and merge",
 };
 
-/** GitHub takes a moment to rebase: the read of the list waits for it, so that one is enough. */
+/** GitHub takes a moment to rebase: the PR's read waits for it, so that one is enough. */
 const REBASE_READ_MS = 5000;
 
 /**
