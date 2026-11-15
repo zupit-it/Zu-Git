@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.3.1] - 2026-11-15
+
 ### Changed
 - **Only the repositories you select are loaded** — a repository turned off in the list's selector
   is no longer asked to GitHub at every refresh, which also spares your token's hourly limit, and
