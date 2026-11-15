@@ -21,6 +21,10 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Only the repositories you select are loaded",
+        body: "A repository turned off in the list's selector is no longer asked to GitHub at every refresh — less of your token's hourly limit — and its PRs are no longer counted: the numbers on <strong>All</strong>, <strong>Mine</strong>, <strong>Needs you</strong> and in <strong>Review load</strong> are about the selected repositories only, so they match the list. Turn one back on and it loads right away. The Sprint cards, the merge queue and the notifications follow the same selection.",
+      },
+      {
         title: "Auto-merge and rebase, without opening GitHub",
         body: "Where GitHub lets you, a PR row offers <strong>Auto-merge</strong>: GitHub then merges the PR by itself, by <strong>Squash and merge</strong>, once its reviews and checks pass — the commit message is yours to edit first — and a click on the chip turns it off again. <strong>Needs rebase</strong> rebases the branch on its base, as GitHub's <em>Update with rebase</em>, after saying what changes. On a colleague's PR it says so, with how recent their last commit is, and afterwards offers to open Slack with a message telling them to run <code>git pull --rebase</code>. With conflicts, or a push meanwhile, GitHub refuses and nothing changes: ZuGit reads the PR again and tells you when the branch has moved. Your GitHub token needs write access to <strong>Pull requests</strong> and <strong>Contents</strong>.",
       },
@@ -31,10 +35,6 @@ const VERSIONS: VersionBlock[] = [
       {
         title: "Needs you — one place for what waits on you",
         body: "<strong>Show</strong> is now <strong>All</strong>, <strong>Mine</strong> and <strong>Needs you</strong>: the reviews asked of you, and your own PRs with changes requested, a failed check or a branch to bring up to date. Its count is the only one filled in. The line under the filters is gone — the toolbar already says what is on — and the reviewer you pick in <strong>Review load</strong> is tinted, with an × to turn it off.",
-      },
-      {
-        title: "Only the repositories you select are loaded",
-        body: "A repository turned off in the list's selector is no longer asked to GitHub at every refresh — less of your token's hourly limit — and its PRs are no longer counted: the numbers on <strong>All</strong>, <strong>Mine</strong>, <strong>Needs you</strong> and in <strong>Review load</strong> are about the selected repositories only, so they match the list. Turn one back on and it loads right away. The Sprint cards, the merge queue and the notifications follow the same selection.",
       },
       {
         title: "GitHub's hourly limit in the top bar",
