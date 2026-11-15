@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.3.0] - 2026-11-15
+
 ### Added
 - **Auto-merge from the PR list** — where GitHub lets you, a PR row offers **Auto-merge**: GitHub
   then merges the PR by itself once its required reviews and checks pass, by **Squash and merge**
