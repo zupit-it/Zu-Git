@@ -46,6 +46,8 @@ export interface AppSettings {
   /** Empty = the account's primary calendar. */
   googleCalendarId: string;
   /** Shows the "Stale branches" tab. */
+  /** Shows in the top bar how much of GitHub's hourly limits the token has used. */
+  githubQuotaEnabled: boolean;
   staleBranchesEnabled: boolean;
   /** Days without a push after which a branch with no open PR counts as stale. */
   staleBranchDays: number;
@@ -103,6 +105,7 @@ export interface SettingsFormValues {
   googleClientId: string;
   googleClientSecret: string;
   googleCalendarId: string;
+  githubQuotaEnabled: string;            // "on" | ""
   staleBranchesEnabled: string;          // "on" | ""
   staleBranchDays: string;
   staleBranchIgnoredPrefixes: string;
@@ -146,6 +149,7 @@ export const defaultSettings: AppSettings = {
   googleClientId: "",
   googleClientSecret: "",
   googleCalendarId: "",
+  githubQuotaEnabled: false,
   staleBranchesEnabled: false,
   staleBranchDays: 15,
   // Release branches are long-lived by convention, not by protection rule.
@@ -234,6 +238,7 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
     googleClientId: settings.googleClientId,
     googleClientSecret: settings.googleClientSecret,
     googleCalendarId: settings.googleCalendarId,
+    githubQuotaEnabled: settings.githubQuotaEnabled ? "on" : "",
     staleBranchesEnabled: settings.staleBranchesEnabled ? "on" : "",
     staleBranchDays: String(settings.staleBranchDays),
     staleBranchIgnoredPrefixes: settings.staleBranchIgnoredPrefixes.join("\n"),
@@ -302,6 +307,7 @@ export function normalizeSettings(
     googleClientId: values.googleClientId?.trim() ?? "",
     googleClientSecret: values.googleClientSecret?.trim() ?? "",
     googleCalendarId: values.googleCalendarId?.trim() ?? "",
+    githubQuotaEnabled: values.githubQuotaEnabled === "on",
     staleBranchesEnabled: values.staleBranchesEnabled === "on",
     // Below a week the list fills with branches that are simply in progress.
     staleBranchDays: boundedInt(

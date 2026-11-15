@@ -11,13 +11,14 @@ import {
   personLoadLevel, teamLoadLevel, loginInitials, errorMessage,
 } from "./utils";
 import {
-  activeFilters, applyListFilters, draftsMatching, listBase,
-  countPendingReviewsForViewer, countMyChangesRequested,
+  applyListFilters, draftsMatching, filtersOn, listBase,
+  countNeedsViewer,
   getMyPendingReviewIds, getMyChangesRequestedIds,
   getAvailableRepos,
 } from "./filters";
 import { computeMyScore } from "./reaction-score";
 import { givenUpMessage, prKey, reconcilePending, shownPr, waitingOn } from "./pending-changes";
+import { drawGithubQuota } from "./github-quota-bar";
 import { slackMember } from "./slack-people";
 import { petReactToDashboard } from "./pet-triggers";
 import { clearSettingsSectionsDirty, openUnconfiguredSections, syncSettingsSections } from "./settings-sections";
@@ -221,6 +222,8 @@ export function renderSettings(values: SettingsFormValues) {
   if (togglSaveFirst) togglSaveFirst.hidden = true;
   const togglButton = document.querySelector<HTMLElement>("[data-toggl-button]");
   if (togglButton) togglButton.hidden = !state.togglReady;
+  state.githubQuotaEnabled = values.githubQuotaEnabled === "on";
+  drawGithubQuota();
   state.staleBranchesEnabled = values.staleBranchesEnabled === "on";
   state.staleBranchDays =
     Number.parseInt(values.staleBranchDays, 10) || defaultSettings.staleBranchDays;
@@ -367,8 +370,8 @@ export function renderListFilters(snapshot: DashboardSnapshot) {
     searchInput.value = state.listSearchQuery;
   }
 
-  // Show: one of All, To review, Mine.
-  const scope = state.onlyMyPendingReviews ? "review" : state.onlyMyPullRequests ? "mine" : "all";
+  // Show: one of All, Mine, Needs you.
+  const scope = state.onlyMyPendingReviews ? "needs" : state.onlyMyPullRequests ? "mine" : "all";
   const viewer = snapshot.viewerLogin?.toLowerCase();
   document.querySelectorAll<HTMLButtonElement>("[data-scope]").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.scope === scope));
@@ -376,30 +379,21 @@ export function renderListFilters(snapshot: DashboardSnapshot) {
     button.disabled = !viewer;
     button.title = !viewer
       ? "Unavailable until GitHub viewer info is loaded"
-      : button.dataset.scope === "review"
-        ? `Pull requests waiting for a review from ${snapshot.viewerLogin}`
+      : button.dataset.scope === "needs"
+        ? "Waiting on you: a review to give, or a pull request of yours with changes requested, " +
+          "a failed check, or a branch behind its base or in conflict"
         : `Pull requests opened by ${snapshot.viewerLogin}`;
   });
-  const toReview = countPendingReviewsForViewer(snapshot);
-  const reviewCount = document.querySelector<HTMLElement>("[data-scope-count-review]");
-  if (reviewCount) {
-    reviewCount.textContent = String(toReview);
-    reviewCount.hidden = toReview === 0;
-  }
-  const mine = viewer
-    ? snapshot.prs.filter((pr) => pr.author.toLowerCase() === viewer && (state.showDraft || !pr.isDraft)).length
-    : 0;
-  const mineCount = document.querySelector<HTMLElement>("[data-scope-count-mine]");
-  if (mineCount) {
-    mineCount.textContent = String(mine);
-    mineCount.hidden = mine === 0;
-  }
-  const changesRequested = countMyChangesRequested(snapshot);
-  const mineAttn = document.querySelector<HTMLElement>("[data-scope-attn-mine]");
-  if (mineAttn) {
-    mineAttn.hidden = changesRequested === 0;
-    mineAttn.title = `${changesRequested} with changes requested`;
-  }
+  const setCount = (name: string, n: number) => {
+    const el = document.querySelector<HTMLElement>(`[data-scope-count-${name}]`);
+    if (!el) return;
+    el.textContent = String(n);
+    el.hidden = n === 0;
+  };
+  const shownDrafts = (pr: PullRequestSummary) => state.showDraft || !pr.isDraft;
+  setCount("all", listBase(snapshot));
+  setCount("mine", viewer ? snapshot.prs.filter((pr) => pr.author.toLowerCase() === viewer && shownDrafts(pr)).length : 0);
+  setCount("needs", countNeedsViewer(snapshot));
 
   // Authors: a set, at least one on.
   const authors: Record<string, boolean> = {
@@ -427,27 +421,16 @@ export function renderListFilters(snapshot: DashboardSnapshot) {
   renderToolbarRepoFilters(snapshot);
 }
 
-/**
- * The line under the toolbar: how many PRs show of those the Drafts switch
- * lets through, and one chip per filter on, each with its own ×.
- */
-export function renderActiveFilters(shown: PullRequestSummary[]) {
-  const target = document.querySelector<HTMLElement>("[data-active-filters-items]");
+/** How many pull requests show, for a screen reader: nothing of it is on screen. */
+export function renderFilterStatus(shown: PullRequestSummary[]) {
   const snapshot = state.currentDashboard;
-  if (!target || !snapshot) return;
-  const filters = activeFilters(snapshot);
-  const plural = (n: number) => `PR${n === 1 ? "" : "s"}`;
-  if (filters.length === 0) {
-    target.innerHTML = `<span class="laf-count"><strong>${shown.length}</strong> ${plural(shown.length)}</span>` +
-      `<span class="laf-none">· no filters on</span>`;
-    return;
-  }
+  const live = document.querySelector<HTMLElement>("[data-list-count]");
+  if (!snapshot || !live) return;
   const base = listBase(snapshot);
-  target.innerHTML = `<span class="laf-count"><strong>${shown.length}</strong> of ${base} ${plural(base)}</span>` +
-    filters.map((f) =>
-      `<span class="laf-chip">${escHtml(f.label)}${f.value ? ` <strong>${escHtml(f.value)}</strong>` : ""}` +
-      `<button type="button" data-clear-filter="${f.key}" aria-label="Remove this filter" title="Remove only this filter">×</button></span>`,
-    ).join("");
+  const count = shown.length < base
+    ? `${shown.length} of ${base} PR${base === 1 ? "" : "s"} shown`
+    : `${shown.length} PR${shown.length === 1 ? "" : "s"}`;
+  if (live.textContent !== count) live.textContent = count;
 }
 
 // ── PR row rendering ──────────────────────────────────────────────────────────
@@ -612,7 +595,7 @@ export function renderPRRow(fromGitHub: PullRequestSummary, isLast: boolean, vie
         ? actionChip(on, "data-auto-merge", actionKey, "Auto-merge is on · click to turn it off")
         : on;
   } else if (
-    !autoMergeWait && actions?.canEnableAutoMerge && actions.autoMergeMethods.length > 0 && !isDraft
+    !autoMergeWait && actions?.canEnableAutoMerge && !isDraft
     // Mergeable right now: auto-merge would have nothing to wait for, and GitHub refuses it.
     && pr.mergeStatus !== "clean"
   ) {
@@ -717,13 +700,20 @@ export function renderListTable(prs: PullRequestSummary[]) {
 
   if (prs.length === 0) {
     const snapshot = state.currentDashboard;
-    if (!snapshot || activeFilters(snapshot).length === 0) {
+    const scoped = state.onlyMyPendingReviews || state.onlyMyPullRequests;
+    const filtered = !!snapshot && filtersOn(snapshot);
+    if (!snapshot || (!scoped && !filtered)) {
       target.innerHTML = `<div class="list-empty">No pull requests available.</div>`;
       return;
     }
+    const what = filtered
+      ? "No pull requests match these filters."
+      : state.onlyMyPendingReviews
+        ? "Nothing is waiting on you."
+        : "You have no open pull requests.";
     // A draft the filters let through is told, with its own switch: nothing else moves.
     const drafts = draftsMatching(snapshot);
-    target.innerHTML = `<div class="list-empty">No pull requests match these filters: remove one above.` +
+    target.innerHTML = `<div class="list-empty">${what}` +
       (drafts
         ? `<div class="list-empty-hint">${drafts} draft${drafts === 1 ? " matches" : "s match"} · ` +
           `<button type="button" class="list-empty-link" data-show-drafts>Show drafts</button></div>`
@@ -792,7 +782,7 @@ export function renderListTable(prs: PullRequestSummary[]) {
 
 export function renderListBoard(prs: PullRequestSummary[]) {
   renderListTable(prs);
-  renderActiveFilters(prs);
+  renderFilterStatus(prs);
   flashPendingRow();
 }
 
@@ -904,7 +894,7 @@ export function renderReviewerLoad(snapshot: DashboardSnapshot) {
     const isActive = state.filteredReviewer?.toLowerCase() === login.toLowerCase();
     const classes = ["rlb__chip", isMe ? "rlb__chip--me" : "", isEmpty ? "rlb__chip--empty" : "", isActive ? "rlb__chip--active" : ""]
       .filter(Boolean).join(" ");
-    return `<button class="${classes}" title="${tooltip}" data-reviewer-filter="${login}">` +
+    return `<button class="${classes}" title="${tooltip}" aria-pressed="${isActive}" data-reviewer-filter="${login}">` +
       renderAvatar(login) +
       `<span class="rlb__name">${name}</span>` +
       `<span class="rlb__nums">` +
@@ -912,6 +902,7 @@ export function renderReviewerLoad(snapshot: DashboardSnapshot) {
         `<span class="rlb__num-sep">/</span>` +
         `<span class="rlb__num-total">${t}</span>` +
       `</span>` +
+      `<span class="rlb__x" aria-hidden="true">×</span>` +
       `</button>`;
   };
 

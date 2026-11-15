@@ -80,6 +80,8 @@ pub async fn save_settings(
 ) -> Result<SaveSettingsResult, String> {
     let (settings, used_vault) = storage::save_settings(&app, &params).await?;
     *state.last_save_used_vault.lock() = Some(used_vault);
+    // The token may be another one now: the limits shown are told again by its first answer.
+    crate::quota::forget();
 
     // Clear caches after settings change.
     state.jira_cache.lock().clear();
@@ -658,7 +660,12 @@ pub async fn rebase_pull_request(
         .map_err(|e| format!("{repo}#{pr_number}: {e}"))
 }
 
-/// Auto-merge on with `method`, or off: as GitHub's own button, under GitHub's rules.
+/// Auto-merge on — by "Squash and merge", the only method ZuGit asks for — or
+/// off: as GitHub's own button, under GitHub's rules. GitHub answers with the
+/// PR as it now is, and that is what goes back: the row needs nothing read
+/// after it.
+// Each argument is a field of the one call the window makes.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn set_auto_merge(
     app: tauri::AppHandle,
@@ -666,15 +673,31 @@ pub async fn set_auto_merge(
     repo: String,
     pr_number: u64,
     node_id: String,
-    method: Option<String>,
+    on: bool,
     head_sha: String,
-) -> Result<Option<String>, String> {
+    commit_headline: Option<String>,
+) -> Result<crate::models::AutoMergeSet, String> {
     let settings = storage::load_settings(&app).await?;
-    let result = match method {
-        Some(method) => crate::github::enable_auto_merge(&node_id, &method, &head_sha, &settings, &state.http_client).await,
-        None => crate::github::disable_auto_merge(&node_id, &settings, &state.http_client).await.map(|()| None),
+    let answer = if on {
+        // An empty message is no message: GitHub then writes its own.
+        let headline = commit_headline.as_deref().map(str::trim).filter(|h| !h.is_empty());
+        crate::github::enable_auto_merge(&repo, &node_id, &head_sha, headline, &settings, &state.http_client).await
+    } else {
+        crate::github::disable_auto_merge(&repo, &node_id, &settings, &state.http_client).await
+    }
+    .map_err(|e| format!("{repo}#{pr_number}: {e}"))?;
+    let pull_request = match &answer.pull_request {
+        Some(record) => Some(dashboard::summary_of(record, &settings, &state.jira_cache, &state.http_client).await),
+        None => None,
     };
-    result.map_err(|e| format!("{repo}#{pr_number}: {e}"))
+    Ok(crate::models::AutoMergeSet { method: answer.method, pull_request })
+}
+
+/// How much of GitHub's hourly limits the token has used, as its last answers
+/// said: nothing is asked of GitHub for it.
+#[tauri::command]
+pub fn github_quota() -> crate::quota::GithubQuota {
+    crate::quota::current()
 }
 
 #[tauri::command]

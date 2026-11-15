@@ -11,6 +11,7 @@ mod models;
 mod pet;
 mod pet_pack;
 mod pr_review;
+mod quota;
 mod release_picks;
 mod secret_store;
 mod slack;
@@ -68,6 +69,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             links::listen(app);
+            quota::attach(app.handle());
             // On macOS the menu bar lives at the top of the screen (system-wide),
             // so we keep it. On Windows/Linux it would render as an in-window bar,
             // which we don't want.
@@ -179,6 +181,7 @@ pub fn run() {
             commands::promote_draft_pr,
             commands::rebase_pull_request,
             commands::set_auto_merge,
+            commands::github_quota,
             commands::toggl_check_connection,
             commands::toggl_prepare_day,
             commands::toggl_submit_entries,

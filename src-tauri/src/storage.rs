@@ -107,6 +107,8 @@ struct PersistedSettings {
     google_client_id: String,
     #[serde(default)]
     google_calendar_id: String,
+    #[serde(default)]
+    github_quota_enabled: bool,
     // The aliases are the keys written while the feature was called "orphan
     // branches" — without them the rename would silently reset the setting.
     #[serde(default, alias = "orphanBranchesEnabled")]
@@ -366,6 +368,7 @@ pub fn load_settings_from(dir: &Path) -> AppSettings {
         google_client_id: persisted.google_client_id,
         google_client_secret,
         google_calendar_id: persisted.google_calendar_id,
+        github_quota_enabled: if persisted.github_quota_enabled { "on".to_string() } else { String::new() },
         stale_branches_enabled: if persisted.stale_branches_enabled { "on".to_string() } else { String::new() },
         stale_branch_days: persisted.stale_branch_days.to_string(),
         stale_branch_ignored_prefixes: persisted.stale_branch_ignored_prefixes.join("\n"),
@@ -436,6 +439,7 @@ pub async fn save_settings(
         google_calendar_enabled: normalized.google_calendar_enabled,
         google_client_id: normalized.google_client_id.clone(),
         google_calendar_id: normalized.google_calendar_id.clone(),
+        github_quota_enabled: normalized.github_quota_enabled,
         stale_branches_enabled: normalized.stale_branches_enabled,
         stale_branch_days: normalized.stale_branch_days,
         stale_branch_ignored_prefixes: normalized.stale_branch_ignored_prefixes.clone(),

@@ -339,9 +339,20 @@ pub async fn build_pull_request(
     else {
         return Ok(None);
     };
+    Ok(Some(summary_of(&record, settings, jira_cache, client).await))
+}
+
+/// A PR as GitHub just gave it — read on its own, or in the answer to a change
+/// — as the dashboard lists it, with its story as the last refresh read it.
+pub async fn summary_of(
+    record: &GithubPullRequestRecord,
+    settings: &AppSettings,
+    jira_cache: &Mutex<HashMap<String, Option<JiraIssueSummary>>>,
+    client: &reqwest::Client,
+) -> PullRequestSummary {
     // What a refresh would warn about this PR, the refresh has said already.
     let mut warnings = vec![];
-    let normalised = normalise_pr(&record, settings, &mut warnings);
+    let normalised = normalise_pr(record, settings, &mut warnings);
 
     let mut jira_issues = HashMap::new();
     if let Some(key) = normalised.jira_key.as_ref().filter(|_| settings_ready_for_jira(settings)) {
@@ -355,7 +366,7 @@ pub async fn build_pull_request(
             }
         }
     }
-    Ok(Some(enrich(&normalised, &jira_issues, settings)))
+    enrich(&normalised, &jira_issues, settings)
 }
 
 // ── Per-PR normalisation ──────────────────────────────────────────────────────

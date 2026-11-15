@@ -54,6 +54,8 @@ pub struct AppSettings {
     pub google_client_secret: String,
     /// Calendar to read; empty means the account's primary one.
     pub google_calendar_id: String,
+    /// Shows in the top bar how much of GitHub's hourly limits the token has used.
+    pub github_quota_enabled: bool,
     /// Shows the "Stale branches" tab.
     pub stale_branches_enabled: bool,
     /// Days without a push after which a branch with no open PR counts as stale.
@@ -103,6 +105,7 @@ impl Default for AppSettings {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_calendar_id: String::new(),
+            github_quota_enabled: false,
             stale_branches_enabled: false,
             stale_branch_days: 15,
             stale_branch_ignored_prefixes: vec!["release".to_string()],
@@ -164,6 +167,8 @@ pub struct SettingsFormValues {
     pub google_client_id: String,
     pub google_client_secret: String,
     pub google_calendar_id: String,
+    #[serde(default)]
+    pub github_quota_enabled: String,                    // "on" | ""
     pub stale_branches_enabled: String,                  // "on" | ""
     pub stale_branch_days: String,
     pub stale_branch_ignored_prefixes: String,
@@ -321,16 +326,25 @@ pub struct PullRequestSummary {
 pub struct MergeActions {
     /// "Update branch" — here only ever with rebase.
     pub can_update_branch: bool,
+    /// Auto-merge can be turned on — by "Squash and merge", the only way ZuGit
+    /// does: false too where the repo does not allow squash merging.
     pub can_enable_auto_merge: bool,
     pub can_disable_auto_merge: bool,
-    /// The merge methods auto-merge may use, GitHub's default for the viewer
-    /// first (their last one, or the repo's); empty when the repo does not
-    /// allow auto-merge.
-    pub auto_merge_methods: Vec<String>,
     /// When the head commit was authored: how recently its author last worked
     /// on the branch. A rebase keeps it, where the committer date would be the
     /// rebase itself.
     pub head_authored_at: Option<String>,
+}
+
+/// What an auto-merge switch gives back to the page.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoMergeSet {
+    /// The method auto-merge is on with, as GitHub answered; none when it is off.
+    pub method: Option<String>,
+    /// The PR after the switch, as the dashboard lists it, when GitHub's answer
+    /// brought it: the row is then true at once, and nothing is read for it.
+    pub pull_request: Option<PullRequestSummary>,
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -583,6 +597,7 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         google_client_id: values.google_client_id.trim().to_string(),
         google_client_secret: values.google_client_secret.trim().to_string(),
         google_calendar_id: values.google_calendar_id.trim().to_string(),
+        github_quota_enabled: values.github_quota_enabled.trim() == "on",
         stale_branches_enabled: values.stale_branches_enabled.trim() == "on",
         // Below a week the list fills with branches that are simply in progress.
         stale_branch_days: match values.stale_branch_days.trim().parse::<u32>() {
@@ -663,6 +678,7 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         google_client_id: settings.google_client_id.clone(),
         google_client_secret: settings.google_client_secret.clone(),
         google_calendar_id: settings.google_calendar_id.clone(),
+        github_quota_enabled: if settings.github_quota_enabled { "on".to_string() } else { String::new() },
         stale_branches_enabled: if settings.stale_branches_enabled { "on".to_string() } else { String::new() },
         stale_branch_days: settings.stale_branch_days.to_string(),
         stale_branch_ignored_prefixes: settings.stale_branch_ignored_prefixes.join("\n"),

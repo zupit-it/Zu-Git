@@ -8,25 +8,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **Auto-merge from the PR list** — where GitHub lets you, a PR row offers **Auto-merge**: pick
-  one of the methods the repo allows (the default first) and GitHub merges the PR once its required
-  reviews and checks pass. A click on **Auto-merge (squash)** turns it off again. ZuGit offers it
-  only where GitHub says you may, and never merges a PR on the spot.
+- **Auto-merge from the PR list** — where GitHub lets you, a PR row offers **Auto-merge**: GitHub
+  then merges the PR by itself once its required reviews and checks pass, by **Squash and merge**
+  — one commit on the base for the whole PR. That is the only method ZuGit turns it on with: a
+  merge commit, or the PR's commits rebased onto the base, are not offered even where the repo
+  allows them. Its commit message is yours to edit before turning it on, starting from the PR's
+  title and number as GitHub proposes it. A click on **Auto-merge (squash)** turns it off again.
+  ZuGit offers it only where GitHub says you may and the repo allows squash merging, and never
+  merges a PR on the spot.
 - **Rebase on the base branch, as GitHub's "Update with rebase"** — **Needs rebase** on a PR row
-  rebases the branch, after a confirmation that says what changes. On someone else's PR it names
-  the author and how recent their last commit is, and once the rebase starts it offers to open
+  rebases the branch, after a confirmation that says what changes. On someone else's PR it says
+  so, with how recent their last commit is, and once the rebase starts it offers to open
   Slack on their chat with a message saying what to run (`git pull --rebase`), to paste and send.
   GitHub does the rebase: with conflicts, or a push since ZuGit last looked, it refuses and nothing
-  changes. Never a merge of the base into the branch. The GitHub token needs write access to Pull
-  requests and Contents.
-- **What you just did on a PR shows at once, marked as waiting** — after an auto-merge switch, a
-  rebase, a reviewer asked or asked again, the row shows it straight away, dimmed, until GitHub
-  shows it too. For that ZuGit asks GitHub for that one PR, no longer for the whole list — a
-  fraction of what a refresh costs your token's hourly limit — once, and once more only if the
-  first answer does not show it yet; also after a review published from the diff. With no sign of
-  it after the second, the row goes back to what GitHub says and the status tells you. The list
-  itself is only ever what GitHub last said: ZuGit no longer works out a PR's state in its place,
-  so a row cannot be left showing a guess.
+  changes. ZuGit then reads that PR again: if the branch has moved — someone pushed to it, or
+  rebased it already — it says so in plain words and the row is up to date. The question stays
+  open until GitHub answers, and an answer that is a refusal stays until you close it. Never a
+  merge of the base into the branch. The GitHub token needs write access to Pull requests and
+  Contents.
+- **What you just did on a PR shows at once, and only as GitHub says it** — an auto-merge switch
+  is answered by GitHub with the PR as it now is, and that is its row straight away. After a
+  rebase, a reviewer asked or asked again, the row shows it at once, dimmed, until GitHub shows it
+  too: for that ZuGit asks GitHub for that one PR, no longer for the whole list — a fraction of
+  what a refresh costs your token's hourly limit — once, and once more only if the first answer
+  does not show it yet; also after a review published from the diff. With no sign of it after the
+  second, the row goes back to what GitHub says and the status tells you. The list itself is only
+  ever what GitHub last said: ZuGit no longer works out a PR's state in its place, so a row cannot
+  be left showing a guess.
+- **GitHub's hourly limit in the top bar** — off until you turn it on in **Settings → GitHub →
+  API usage**: it then shows, beside the sync status, how much of your token's hourly limit is
+  used, as **52/5000**: the one used the most of the two GitHub keeps (GraphQL, in points, and
+  REST, in requests), with both and when they start again on hover. It turns amber from 70% and
+  red from 90%. GitHub says it in every answer, so nothing is asked for it.
+
+### Changed
+- **Show: All, Mine, Needs you** — *To review* is now **Needs you**, and lists everything waiting
+  on you: the reviews you were asked for and have not given, and your own PRs with changes
+  requested, a failed check, or a branch behind its base or in conflict. Its count is the only one
+  filled in, so a glance says whether there is something to do; the red dot on *Mine* is gone, and
+  *Mine* is simply your PRs. Each row says why with the badges it already has. If you had
+  *To review* on, you find *Needs you* on.
+- **The line under the list's filters is gone** — it repeated what the toolbar above it already
+  shows. **All** now carries its count as the other two do. The reviewer picked in the **Review
+  load** strip — the one filter the toolbar does not show — is now tinted as every other filter
+  on, with an × to turn it off, and the others step back while one is picked.
 
 ---
 

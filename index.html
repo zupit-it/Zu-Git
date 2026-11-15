@@ -60,6 +60,12 @@
           <span class="sync-status-text" data-status></span>
         </div>
 
+        <!-- GitHub's hourly limit, used/limit: Settings → GitHub turns it on (github-quota-bar.ts). -->
+        <span class="api-quota" data-github-quota hidden>
+          <span class="api-quota__label">API</span>
+          <span class="api-quota__value" data-github-quota-value></span>
+        </span>
+
         <button class="update-badge" data-update-badge type="button" hidden>
           <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2v8M4 7l3 3 3-3"/><path d="M2 12h10"/></svg>
           <span data-update-badge-label>Update available</span>
@@ -153,13 +159,15 @@
               <span class="list-search-kbd" data-search-kbd></span>
             </div>
 
-            <!-- Which PRs: one choice at a time, as the segments show. -->
+            <!-- Which list: all, yours, or what waits on you. One at a time. -->
             <div class="lf-seg" role="group" aria-label="Show">
               <span class="lf-label">Show</span>
-              <button type="button" data-scope="all" aria-pressed="true">All</button>
-              <button type="button" data-scope="review">To review<span class="lf-count lf-count--attn" data-scope-count-review hidden></span></button>
-              <button type="button" data-scope="mine">Mine<span class="lf-count" data-scope-count-mine hidden></span><span class="lf-dot" data-scope-attn-mine hidden></span></button>
+              <button type="button" data-scope="all" aria-pressed="true">All<span class="lf-count" data-scope-count-all hidden></span></button>
+              <button type="button" data-scope="mine">Mine<span class="lf-count" data-scope-count-mine hidden></span></button>
+              <button type="button" data-scope="needs">Needs you<span class="lf-count lf-count--attn" data-scope-count-needs hidden></span></button>
             </div>
+
+            <span class="sr-only" data-list-count aria-live="polite"></span>
 
             <div style="flex:1"></div>
 
@@ -181,18 +189,12 @@
                 <option value="release">By release</option>
               </select>
             </label>
-          </div>
-
-          <!-- The filters on, each with its own ×: always there and one line high,
-               so turning one on or off never moves the list. -->
-          <div class="list-active-filters" data-active-filters aria-live="polite">
-            <!-- Loading hairline: absolutely positioned over the row's bottom
+            <!-- Loading hairline: absolutely positioned over the toolbar's bottom
                  border, so showing it cannot move a single row of the list. -->
             <div class="list-progress" data-list-loading hidden role="progressbar"
                  aria-label="Loading pull requests">
               <span class="sr-only" data-list-loading-label>Loading pull requests…</span>
             </div>
-            <div class="list-active-filters__items" data-active-filters-items></div>
           </div>
 
           <!-- Scrollable content -->
@@ -320,6 +322,18 @@
                         <input id="notificationsEnabled" name="notificationsEnabled" type="checkbox" />
                         <span>Enable native notifications</span>
                       </label>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label">API usage</label>
+                      <label class="filter-pill">
+                        <input id="githubQuotaEnabled" name="githubQuotaEnabled" type="checkbox" />
+                        <span>Show GitHub's hourly limit in the top bar</span>
+                      </label>
+                      <p class="field-hint">
+                        Beside the sync status, how much of your token's hourly limit is used (as
+                        <strong>52/5000</strong>), with both limits and when they start again on hover. GitHub
+                        says it in every answer: nothing is asked for it.
+                      </p>
                     </div>
                     <div class="settings-field">
                       <label class="field-label" for="internalAuthorMarker">Internal author marker</label>

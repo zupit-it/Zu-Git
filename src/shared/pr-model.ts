@@ -73,10 +73,9 @@ export interface PullRequestSummary {
 export interface MergeActions {
   /** "Update branch" — ZuGit only ever does it with rebase. */
   canUpdateBranch: boolean;
+  /** Auto-merge can be turned on — by "Squash and merge", the only way ZuGit does: false too where the repo does not allow squash merging. */
   canEnableAutoMerge: boolean;
   canDisableAutoMerge: boolean;
-  /** The merge methods auto-merge may use, GitHub's default for the viewer first (their last one, or the repo's); empty when the repo does not allow auto-merge. */
-  autoMergeMethods: string[];
   /** When the head commit was authored: how recently its author last worked on the branch. A rebase keeps it. */
   headAuthoredAt: string | null;
 }

@@ -22,7 +22,19 @@ const VERSIONS: VersionBlock[] = [
     entries: [
       {
         title: "Auto-merge and rebase, without opening GitHub",
-        body: "Where GitHub lets you, a PR row offers <strong>Auto-merge</strong>: pick a method the repo allows and GitHub merges the PR once its reviews and checks pass; a click on the chip turns it off again. <strong>Needs rebase</strong> rebases the branch on its base, as GitHub's <em>Update with rebase</em>, after saying what changes. On a colleague's PR it names them and their last commit, and afterwards offers to open Slack with a message telling them to run <code>git pull --rebase</code>. With conflicts, or a push meanwhile, GitHub refuses and nothing changes. Your GitHub token needs write access to <strong>Pull requests</strong> and <strong>Contents</strong>.",
+        body: "Where GitHub lets you, a PR row offers <strong>Auto-merge</strong>: GitHub then merges the PR by itself, by <strong>Squash and merge</strong>, once its reviews and checks pass — the commit message is yours to edit first — and a click on the chip turns it off again. <strong>Needs rebase</strong> rebases the branch on its base, as GitHub's <em>Update with rebase</em>, after saying what changes. On a colleague's PR it says so, with how recent their last commit is, and afterwards offers to open Slack with a message telling them to run <code>git pull --rebase</code>. With conflicts, or a push meanwhile, GitHub refuses and nothing changes: ZuGit reads the PR again and tells you when the branch has moved. Your GitHub token needs write access to <strong>Pull requests</strong> and <strong>Contents</strong>.",
+      },
+      {
+        title: "What you just did on a PR shows at once",
+        body: "After a rebase, a reviewer asked or asked again, the row shows it straight away, dimmed, until GitHub shows it too; an auto-merge switch is answered by GitHub with the PR as it now is. For that ZuGit reads that one PR, no longer the whole list: a fraction of what a refresh costs your token's hourly limit. The list is only ever what GitHub last said, so a row cannot be left showing a guess.",
+      },
+      {
+        title: "Needs you — one place for what waits on you",
+        body: "<strong>Show</strong> is now <strong>All</strong>, <strong>Mine</strong> and <strong>Needs you</strong>: the reviews asked of you, and your own PRs with changes requested, a failed check or a branch to bring up to date. Its count is the only one filled in. The line under the filters is gone — the toolbar already says what is on — and the reviewer you pick in <strong>Review load</strong> is tinted, with an × to turn it off.",
+      },
+      {
+        title: "GitHub's hourly limit in the top bar",
+        body: "Turn on <strong>Settings → GitHub → API usage</strong> and the top bar shows, beside the sync status, how much of your token's hourly limit is used, as <strong>52/5000</strong>: the one used the most of GraphQL and REST, with both and when they start again on hover. Amber from 70%, red from 90%. GitHub says it in every answer, so nothing is asked for it.",
       },
     ],
   },

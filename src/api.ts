@@ -159,6 +159,34 @@ export function trackGitHubChange(pr: { repo: string; id: number }, kind: Pendin
 }
 
 /**
+ * GitHub answered a change with the PR as it now is (an auto-merge switch
+ * does): that is its row, at once, and nothing is read for it. The answer is as
+ * of now — a refresh asked for while the change was on its way may have read
+ * GitHub before it, and must not put the older PR back.
+ */
+export function gitHubAnswered(pr: { repo: string; id: number }, answer: PullRequestSummary) {
+  takeAnswer(`${pr.repo}/${pr.id}`, answer, Date.now());
+  followPendingChanges();
+}
+
+/**
+ * GitHub refused a change on a PR: what it says of that PR right now, which is
+ * also its row from here on. Null when the PR is no longer open; undefined when
+ * GitHub did not answer, and then nothing is known.
+ */
+export async function gitHubSaysNow(pr: { repo: string; id: number }): Promise<PullRequestSummary | null | undefined> {
+  const askedAt = Date.now();
+  try {
+    const answer = await invoke<PullRequestSummary | null>("fetch_pull_request", { repo: pr.repo, number: pr.id });
+    takeAnswer(`${pr.repo}/${pr.id}`, answer, askedAt);
+    followPendingChanges();
+    return answer;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Reads the PRs whose change is due its read, each on its own, and comes back
  * when the next is due or a change's time is over. Called after anything that
  * may have moved them: a change, an answer, a refresh.

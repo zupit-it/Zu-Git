@@ -43,6 +43,7 @@ export const state = {
 
   // ── List filters ───────────────────────────────────────────────────────────
   listSearchQuery: "",
+  // Show → Needs you. It keeps the name it was saved under when it was "To review".
   onlyMyPendingReviews: defaultListFilterPreferences.onlyMyPendingReviews,
   onlyMyPullRequests: defaultListFilterPreferences.onlyMyPullRequests,
   showInternalOnly: defaultListFilterPreferences.includeInternal,
@@ -83,6 +84,8 @@ export const state = {
 
   // ── Stale branches ────────────────────────────────────────────────────────
   staleBranchesEnabled: defaultSettings.staleBranchesEnabled,
+  /** Settings → GitHub: the hourly limit used shows beside the sync status. */
+  githubQuotaEnabled: defaultSettings.githubQuotaEnabled,
   staleBranchDays: defaultSettings.staleBranchDays,
   /** Last scan result — kept so re-opening the tab doesn't re-scan every repo. */
   staleBranches: null as StaleBranchesResult | null,

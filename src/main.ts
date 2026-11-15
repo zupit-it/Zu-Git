@@ -7,12 +7,13 @@ import {
   setView, setSettingsDirtyState, syncSettingsSaveButton,
   renderListBoard, renderListFilters, renderToolbarRepoFilters, setStatus, flashPrRow,
 } from "./render";
-import { applyListFilters, clearFilter, type FilterKey } from "./filters";
+import { applyListFilters } from "./filters";
 import {
   bootstrap, refreshDashboard, saveSettingsAndRefresh,
   openExternal, rerequestReview, persistListFilters, trackGitHubChange,
 } from "./api";
 import { reviewAskedOf } from "./pending-changes";
+import { initGithubQuota } from "./github-quota-bar";
 import { loadDraftPrInfo, toggleDraftState, publishNewPr, openExistingDraftPr } from "./draft-pr";
 import { openReleaseDiff } from "./release-diff";
 import { openPrDiff, prefetchPrDiff } from "./pr-diff";
@@ -55,6 +56,7 @@ window.addEventListener("DOMContentLoaded", () => {
   mountStoryDock();
   installSadReviewer();
   installPetReminder();
+  initGithubQuota();
   // A click on the Tiny King brings ZuGit up (pet.rs): on the PR his bubble was
   // about, its row in the list lit up a moment, or its diff when asked (a review
   // to do) or when the list's filters hide its row; on GitHub once gone
@@ -166,14 +168,14 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
   // ── List filters ────────────────────────────────────────────────────────────
-  // Show, Authors, Drafts and the × on each active filter: one change each,
-  // nothing else turns off along with it.
+  // Show, Authors and Drafts: one change each, nothing else turns off along
+  // with it.
   document.querySelector<HTMLElement>("[data-view-panel=list]")?.addEventListener("click", (event) => {
     const target = event.target as Element;
 
     const scope = target.closest<HTMLButtonElement>("[data-scope]");
     if (scope && !scope.disabled) {
-      state.onlyMyPendingReviews = scope.dataset.scope === "review";
+      state.onlyMyPendingReviews = scope.dataset.scope === "needs";
       state.onlyMyPullRequests = scope.dataset.scope === "mine";
       filtersChanged();
       return;
@@ -201,13 +203,7 @@ window.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const clear = target.closest<HTMLElement>("[data-clear-filter]")?.dataset.clearFilter as FilterKey | undefined;
-    if (clear) {
-      clearFilter(clear);
-      filtersChanged();
-      // The stale-branch view sees the repo selection change when it opens next.
-      if (clear === "search") document.querySelector<HTMLInputElement>("[data-list-search]")?.focus();
-    }
+
   });
   document
     .querySelector<HTMLSelectElement>("[data-filter-group]")
@@ -586,6 +582,7 @@ function filtersChanged(persist = true) {
     const active = state.filteredReviewer !== null &&
       chip.dataset.reviewerFilter?.toLowerCase() === state.filteredReviewer.toLowerCase();
     chip.classList.toggle("rlb__chip--active", active);
+    chip.setAttribute("aria-pressed", String(active));
   });
   if (persist) void persistListFilters();
 }

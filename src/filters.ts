@@ -2,6 +2,7 @@ import type { DashboardSnapshot } from "./shared/rpc";
 import type { PullRequestSummary } from "./shared/pr-model";
 import { matchesSearch, PRIORITY_RANK } from "./utils";
 import { state } from "./state";
+import { needsViewer } from "./needs-you";
 
 export { PRIORITY_RANK };
 
@@ -59,84 +60,24 @@ export function applyListFilters(snapshot: DashboardSnapshot): PullRequestSummar
       if (!isReviewer) return false;
     }
 
-    if (!state.onlyMyPendingReviews) return true;
-
-    const viewerLogin = snapshot.viewerLogin?.toLowerCase();
-    if (!viewerLogin) return false;
-
-    const isPendingReviewer = pr.pendingReviewers.some(
-      (actor) => actor.login.toLowerCase() === viewerLogin,
-    );
-    const alreadyApproved = pr.currentApprovers.some(
-      (actor) => actor.login.toLowerCase() === viewerLogin,
-    );
-    return isPendingReviewer && !alreadyApproved;
+    return !state.onlyMyPendingReviews || needsViewer(pr, snapshot.viewerLogin);
   }));
 }
 
 // ── Active filters ────────────────────────────────────────────────────────────
 
-/** What the list's filters can be told apart by: each one is removed on its own. */
-export type FilterKey = "scope" | "reviewer" | "authors" | "repos" | "search";
-
-export interface ActiveFilter {
-  key: FilterKey;
-  /** Plain text; the caller escapes it. */
-  label: string;
-  /** Shown bold after the label, as "Reviewer: anna". */
-  value?: string;
-}
-
 /**
- * The filters hiding pull requests right now, in the toolbar's order. Drafts
- * and grouping are how the list is seen, not filters: they are never here.
+ * Whether a filter narrows what Show lists: a reviewer, the authors, the repos
+ * or a search. Show itself is which list you look at, and Drafts and grouping
+ * how it is seen: none of them counts.
  */
-export function activeFilters(snapshot: DashboardSnapshot): ActiveFilter[] {
-  const out: ActiveFilter[] = [];
-  if (state.onlyMyPendingReviews) out.push({ key: "scope", label: "To review" });
-  else if (state.onlyMyPullRequests) out.push({ key: "scope", label: "Mine" });
-  if (state.filteredReviewer) {
-    const me = snapshot.viewerLogin?.toLowerCase() === state.filteredReviewer.toLowerCase();
-    out.push({ key: "reviewer", label: "Reviewer:", value: me ? "you" : state.filteredReviewer });
-  }
-  const authors = [
-    state.showInternalOnly ? "Internal" : "",
-    state.showTeamOnly ? "Team" : "",
-    state.showCollaboratorOnly ? "Collaborator" : "",
-  ].filter(Boolean);
-  if (authors.length < 3) out.push({ key: "authors", label: "Authors:", value: authors.join(", ") });
-  const repos = getAvailableRepos(snapshot);
-  const shownRepos = repos.filter((repo) => !state.hiddenRepos.includes(repo)).length;
-  if (shownRepos < repos.length) out.push({ key: "repos", label: "Repos:", value: `${shownRepos} of ${repos.length}` });
-  if (state.listSearchQuery) out.push({ key: "search", label: "Search:", value: `“${state.listSearchQuery}”` });
-  return out;
+export function filtersOn(snapshot: DashboardSnapshot): boolean {
+  if (state.filteredReviewer || state.listSearchQuery) return true;
+  if (!(state.showInternalOnly && state.showTeamOnly && state.showCollaboratorOnly)) return true;
+  return getAvailableRepos(snapshot).some((repo) => state.hiddenRepos.includes(repo));
 }
 
-/** Turns one filter off, and only that one: drafts and grouping never move. */
-export function clearFilter(key: FilterKey) {
-  switch (key) {
-    case "scope":
-      state.onlyMyPendingReviews = false;
-      state.onlyMyPullRequests = false;
-      break;
-    case "reviewer":
-      state.filteredReviewer = null;
-      break;
-    case "authors":
-      state.showInternalOnly = true;
-      state.showTeamOnly = true;
-      state.showCollaboratorOnly = true;
-      break;
-    case "repos":
-      state.hiddenRepos = [];
-      break;
-    case "search":
-      state.listSearchQuery = "";
-      break;
-  }
-}
-
-/** The PRs the Drafts switch lets through, before any filter: what "N of M" counts from. */
+/** The PRs the Drafts switch lets through, before any filter: the count on All. */
 export function listBase(snapshot: DashboardSnapshot): number {
   return snapshot.prs.filter((pr) => state.showDraft || !pr.isDraft).length;
 }
@@ -154,33 +95,8 @@ export function draftsMatching(snapshot: DashboardSnapshot): number {
 
 // ── Notification counters ─────────────────────────────────────────────────────
 
-export function countPendingReviewsForViewer(snapshot: DashboardSnapshot): number {
-  const viewerLogin = snapshot.viewerLogin?.toLowerCase();
-  if (!viewerLogin) return 0;
-
-  return snapshot.prs.filter((pr) => {
-    if (pr.isDraft) return false;
-    const isPendingReviewer = pr.pendingReviewers.some(
-      (actor) => actor.login.toLowerCase() === viewerLogin,
-    );
-    const alreadyApproved = pr.currentApprovers.some(
-      (actor) => actor.login.toLowerCase() === viewerLogin,
-    );
-    return isPendingReviewer && !alreadyApproved;
-  }).length;
-}
-
-export function countMyChangesRequested(snapshot: DashboardSnapshot): number {
-  const viewerLogin = snapshot.viewerLogin?.toLowerCase();
-  if (!viewerLogin) return 0;
-
-  return snapshot.prs.filter(
-    (pr) =>
-      !pr.isDraft &&
-      pr.author.toLowerCase() === viewerLogin &&
-      pr.reviewState === "changes-requested" &&
-      pr.blockingReviewers.length > 0,
-  ).length;
+export function countNeedsViewer(snapshot: DashboardSnapshot): number {
+  return snapshot.prs.filter((pr) => needsViewer(pr, snapshot.viewerLogin)).length;
 }
 
 export function getMyPendingReviewIds(snapshot: DashboardSnapshot): Set<string> {

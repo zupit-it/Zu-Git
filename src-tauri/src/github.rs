@@ -9,15 +9,14 @@ use crate::models::{
 
 // ── GraphQL query ─────────────────────────────────────────────────────────────
 
-/// How a repository lets its PRs merge: read with the list and with a single PR.
+/// Whether a repository lets ZuGit turn auto-merge on: read with the list and
+/// with a single PR. Only squash is asked about — it is the only way ZuGit
+/// merges (see `RepoMerging`).
 macro_rules! repo_merge_fields {
     () => {
         r#"
     autoMergeAllowed
-    mergeCommitAllowed
-    squashMergeAllowed
-    rebaseMergeAllowed
-    viewerDefaultMergeMethod"#
+    squashMergeAllowed"#
     };
 }
 
@@ -101,6 +100,21 @@ macro_rules! pr_fields {
     };
 }
 
+/// What a mutation that changes a PR asks back: that PR with the fields of the
+/// list, and how its repository lets it merge. Its answer is then the PR as
+/// the list holds it after the change, and nothing has to be read for it.
+macro_rules! changed_pull_request {
+    () => {
+        concat!(
+            "pullRequest {",
+            pr_fields!(),
+            "\n        repository {",
+            repo_merge_fields!(),
+            "\n        }\n    }"
+        )
+    };
+}
+
 const PR_QUERY: &str = concat!(
     r#"
 query($owner: String!, $repo: String!, $cursor: String) {
@@ -166,12 +180,7 @@ struct GqlRepository {
     #[serde(default)]
     auto_merge_allowed: bool,
     #[serde(default)]
-    merge_commit_allowed: bool,
-    #[serde(default)]
     squash_merge_allowed: bool,
-    #[serde(default)]
-    rebase_merge_allowed: bool,
-    viewer_default_merge_method: Option<String>,
     /// The list's page; not in the answer when one PR was asked for.
     #[serde(default)]
     pull_requests: GqlPrConnection,
@@ -179,35 +188,18 @@ struct GqlRepository {
     pull_request: Option<GqlPr>,
 }
 
-/// How the repo lets its PRs merge, as auto-merge may use it.
-#[derive(Debug, Clone, Default)]
+/// How ZuGit may have a repo's PRs merge by themselves. Auto-merge goes on by
+/// "Squash and merge" and by nothing else: a merge commit, or a rebase of the
+/// PR's commits onto the base, is not asked for even where the repo allows it.
+#[derive(Debug, Clone, Copy, Default)]
 struct RepoMerging {
-    /// The methods the repo allows, its default (the viewer's) first; empty when
-    /// the repo does not allow auto-merge.
-    auto_merge_methods: Vec<String>,
+    /// The repo allows auto-merge, and squash merging.
+    auto_merge_by_squash: bool,
 }
 
 impl RepoMerging {
     fn of(repo: &GqlRepository) -> Self {
-        if !repo.auto_merge_allowed {
-            return Self::default();
-        }
-        let mut methods: Vec<String> = [
-            ("SQUASH", repo.squash_merge_allowed),
-            ("MERGE", repo.merge_commit_allowed),
-            ("REBASE", repo.rebase_merge_allowed),
-        ]
-        .into_iter()
-        .filter(|(_, allowed)| *allowed)
-        .map(|(method, _)| method.to_string())
-        .collect();
-        if let Some(default) = repo.viewer_default_merge_method.as_deref() {
-            if let Some(at) = methods.iter().position(|m| m == default) {
-                let first = methods.remove(at);
-                methods.insert(0, first);
-            }
-        }
-        Self { auto_merge_methods: methods }
+        Self { auto_merge_by_squash: repo.auto_merge_allowed && repo.squash_merge_allowed }
     }
 }
 
@@ -456,6 +448,20 @@ fn github_headers(settings: &AppSettings) -> reqwest::header::HeaderMap {
     headers
 }
 
+/// `send`, with what GitHub's answer says of the token's hourly limits noted on
+/// the way (quota.rs): every request to GitHub goes out through it.
+trait SendToGitHub {
+    async fn send_noted(self) -> Result<reqwest::Response, reqwest::Error>;
+}
+
+impl SendToGitHub for reqwest::RequestBuilder {
+    async fn send_noted(self) -> Result<reqwest::Response, reqwest::Error> {
+        let response = self.send().await?;
+        crate::quota::note(response.headers());
+        Ok(response)
+    }
+}
+
 async fn github_request<T: serde::de::DeserializeOwned>(
     url: &str,
     settings: &AppSettings,
@@ -464,7 +470,7 @@ async fn github_request<T: serde::de::DeserializeOwned>(
     let response = client
         .get(url)
         .headers(github_headers(settings))
-        .send()
+        .send_noted()
         .await
         .map_err(|e| ApiError::Other(e.to_string()))?;
 
@@ -571,7 +577,7 @@ async fn graphql_request(
         .post(&url)
         .headers(github_headers(settings))
         .json(&body)
-        .send()
+        .send_noted()
         .await
         .map_err(|e| ApiError::Other(format!("GraphQL request failed: {e}")))?;
 
@@ -602,7 +608,7 @@ async fn graphql_request_raw(
         .post(&url)
         .headers(github_headers(settings))
         .json(&body)
-        .send()
+        .send_noted()
         .await
         .ok()?;
     let json: serde_json::Value = resp.json().await.ok()?;
@@ -644,7 +650,7 @@ pub async fn request_review(
         .post(&url)
         .headers(github_headers(settings))
         .json(&body)
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
 
@@ -788,9 +794,9 @@ fn record_of(repo: &str, pr: &GqlPr, merging: &RepoMerging) -> GithubPullRequest
         merge_status: details.merge_status.clone(),
         merge_actions: crate::models::MergeActions {
             can_update_branch: pr.viewer_can_update_branch,
-            can_enable_auto_merge: pr.viewer_can_enable_auto_merge,
+            // By squash, the only way ZuGit turns it on.
+            can_enable_auto_merge: pr.viewer_can_enable_auto_merge && merging.auto_merge_by_squash,
             can_disable_auto_merge: pr.viewer_can_disable_auto_merge,
-            auto_merge_methods: merging.auto_merge_methods.clone(),
             head_authored_at: pr.commits.nodes.first().and_then(|c| c.commit.authored_date.clone()),
         },
     }
@@ -1826,7 +1832,7 @@ async fn post_review(
         .post(format!("{api_base}/repos/{repo}/pulls/{number}/reviews"))
         .headers(github_headers(settings))
         .json(&payload)
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
     let created = github_reply(response).await?;
@@ -1855,7 +1861,7 @@ async fn submit_review(
         .post(format!("{api_base}/repos/{repo}/pulls/{number}/reviews/{review_id}/events"))
         .headers(github_headers(settings))
         .json(&payload)
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
     Ok(github_reply(response).await?["html_url"].as_str().unwrap_or_default().to_string())
@@ -1872,7 +1878,7 @@ async fn delete_pending_review(
     let response = client
         .delete(format!("{api_base}/repos/{repo}/pulls/{number}/reviews/{review_id}"))
         .headers(github_headers(settings))
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
     github_reply(response).await.map(|_| ())
@@ -1986,7 +1992,7 @@ pub async fn fetch_blob_text(
     let response = client
         .get(format!("{api_base}/repos/{repo}/git/blobs/{sha}"))
         .headers(headers)
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
     let status = response.status();
@@ -2038,7 +2044,7 @@ pub async fn create_pull_request(
         .post(format!("{}/repos/{}/pulls", api_base, repo))
         .headers(github_headers(settings))
         .json(&CreatePrPayload { title, body, head, base, draft })
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
 
@@ -2083,7 +2089,7 @@ pub async fn create_pull_request(
             ))
             .headers(github_headers(settings))
             .json(&ReviewersPayload { reviewers })
-            .send()
+            .send_noted()
             .await;
     }
 
@@ -2116,7 +2122,7 @@ pub async fn promote_draft_pr(
         .patch(format!("{}/repos/{}/pulls/{}", api_base, repo, pr_number))
         .headers(github_headers(settings))
         .json(&PatchPayload { title, body })
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
 
@@ -2144,7 +2150,7 @@ pub async fn promote_draft_pr(
             ))
             .headers(github_headers(settings))
             .json(&ReviewersPayload { reviewers })
-            .send()
+            .send_noted()
             .await;
     }
 
@@ -2162,7 +2168,7 @@ pub async fn promote_draft_pr(
         .post(graphql_url(settings))
         .headers(github_headers(settings))
         .json(&gql_body)
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
 
@@ -2201,19 +2207,23 @@ pub async fn promote_draft_pr(
 /// most likely means the state changed a moment ago (a new push, or a new conflicting
 /// commit on the base branch), not routine behavior, so the error is surfaced as-is
 /// rather than retried or swallowed.
+/// The only way ZuGit updates a PR's branch: a rebase on its base. GitHub's
+/// "Update branch" also offers a merge of the base into the branch
+/// (`updateMethod: MERGE`): ZuGit never asks for that, not even as a choice.
+const UPDATE_BRANCH_BY_REBASE: &str = r#"mutation($id: ID!, $sha: GitObjectID!) {
+  updatePullRequestBranch(input: { pullRequestId: $id, expectedHeadOid: $sha, updateMethod: REBASE }) {
+    pullRequest { id }
+  }
+}"#;
+
 pub async fn rebase_pull_request(
     node_id: &str,
     expected_head_sha: &str,
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Result<(), String> {
-    let mutation = r#"mutation($id: ID!, $sha: GitObjectID!) {
-  updatePullRequestBranch(input: { pullRequestId: $id, expectedHeadOid: $sha, updateMethod: REBASE }) {
-    pullRequest { id }
-  }
-}"#;
     let gql_body = serde_json::json!({
-        "query": mutation,
+        "query": UPDATE_BRANCH_BY_REBASE,
         "variables": { "id": node_id, "sha": expected_head_sha }
     });
 
@@ -2221,7 +2231,7 @@ pub async fn rebase_pull_request(
         .post(graphql_url(settings))
         .headers(github_headers(settings))
         .json(&gql_body)
-        .send()
+        .send_noted()
         .await
         .map_err(|e| e.to_string())?;
 
@@ -2240,48 +2250,85 @@ pub async fn rebase_pull_request(
     Ok(())
 }
 
-/// Turns auto-merge on, as GitHub's "Enable auto-merge": GitHub merges the PR
-/// by `method` once its rules allow it, and it can be turned off until then.
-/// `expected_head_sha` is the commit the user saw: GitHub refuses if the branch
-/// has moved since.
-pub async fn enable_auto_merge(
-    node_id: &str,
-    method: &str,
-    expected_head_sha: &str,
-    settings: &AppSettings,
-    client: &reqwest::Client,
-) -> Result<Option<String>, String> {
-    if !matches!(method, "MERGE" | "SQUASH" | "REBASE") {
-        return Err(format!("Unknown merge method: {method}"));
-    }
-    const ENABLE: &str = r#"mutation($id: ID!, $method: PullRequestMergeMethod!, $sha: GitObjectID) {
-  enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method, expectedHeadOid: $sha }) {
-    pullRequest { autoMergeRequest { mergeMethod } }
-  }
-}"#;
-    let sha = (!expected_head_sha.is_empty()).then_some(expected_head_sha);
-    let data = graphql_data(ENABLE, serde_json::json!({ "id": node_id, "method": method, "sha": sha }), settings, client)
-        .await
-        .map_err(|e| format!("GitHub refused: {e}"))?;
-    Ok(data["enablePullRequestAutoMerge"]["pullRequest"]["autoMergeRequest"]["mergeMethod"]
-        .as_str()
-        .map(str::to_string))
+/// The PR in the answer of a mutation that asked for `changed_pull_request!`,
+/// as the list holds it. None when the answer cannot be read as an open PR:
+/// whoever asked then reads the PR on its own.
+fn pull_request_in_answer(repo: &str, pr: &serde_json::Value) -> Option<GithubPullRequestRecord> {
+    let repository: GqlRepository = serde_json::from_value(pr.get("repository")?.clone()).ok()?;
+    let pr: GqlPr = serde_json::from_value(pr.clone()).ok()?;
+    (pr.state.as_deref() == Some("OPEN")).then(|| record_of(repo, &pr, &RepoMerging::of(&repository)))
 }
 
-/// Turns auto-merge off, as GitHub's "Disable auto-merge".
+/// What GitHub answered to an auto-merge switch.
+pub struct AutoMergeAnswer {
+    /// The method it is on with; none when it is off.
+    pub method: Option<String>,
+    /// The PR after the switch, as the list holds it, when the answer brought it.
+    pub pull_request: Option<GithubPullRequestRecord>,
+}
+
+/// Turns auto-merge on, as GitHub's "Enable auto-merge" with **Squash and
+/// merge**: GitHub merges the PR as one commit once its rules allow it, and it
+/// can be turned off until then. There is no other method to ask for.
+/// `expected_head_sha` is the commit the user saw: GitHub refuses if the branch
+/// has moved since. `headline` is the message of the commit the squash makes;
+/// without one GitHub writes it by the repo's own rule. Its answer brings the
+/// PR as it now is.
+pub async fn enable_auto_merge(
+    repo: &str,
+    node_id: &str,
+    expected_head_sha: &str,
+    headline: Option<&str>,
+    settings: &AppSettings,
+    client: &reqwest::Client,
+) -> Result<AutoMergeAnswer, String> {
+    let sha = (!expected_head_sha.is_empty()).then_some(expected_head_sha);
+    let data = graphql_data(ENABLE_AUTO_MERGE, serde_json::json!({ "id": node_id, "sha": sha, "headline": headline }), settings, client)
+        .await
+        .map_err(|e| format!("GitHub refused: {e}"))?;
+    let pr = &data["enablePullRequestAutoMerge"]["pullRequest"];
+    Ok(AutoMergeAnswer {
+        method: pr["autoMergeRequest"]["mergeMethod"].as_str().map(str::to_string),
+        pull_request: pull_request_in_answer(repo, pr),
+    })
+}
+
+const ENABLE_AUTO_MERGE: &str = concat!(
+    r#"mutation($id: ID!, $sha: GitObjectID, $headline: String) {
+  enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH, expectedHeadOid: $sha, commitHeadline: $headline }) {
+    "#,
+    changed_pull_request!(),
+    r#"
+  }
+}"#
+);
+
+/// Turns auto-merge off, as GitHub's "Disable auto-merge". Its answer brings
+/// the PR as it now is.
 pub async fn disable_auto_merge(
+    repo: &str,
     node_id: &str,
     settings: &AppSettings,
     client: &reqwest::Client,
-) -> Result<(), String> {
-    const DISABLE: &str = r#"mutation($id: ID!) {
-  disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { id } }
-}"#;
-    graphql_data(DISABLE, serde_json::json!({ "id": node_id }), settings, client)
+) -> Result<AutoMergeAnswer, String> {
+    let data = graphql_data(DISABLE_AUTO_MERGE, serde_json::json!({ "id": node_id }), settings, client)
         .await
         .map_err(|e| format!("GitHub refused: {e}"))?;
-    Ok(())
+    Ok(AutoMergeAnswer {
+        method: None,
+        pull_request: pull_request_in_answer(repo, &data["disablePullRequestAutoMerge"]["pullRequest"]),
+    })
 }
+
+const DISABLE_AUTO_MERGE: &str = concat!(
+    r#"mutation($id: ID!) {
+  disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+    "#,
+    changed_pull_request!(),
+    r#"
+  }
+}"#
+);
 
 fn keep_latest_check_runs<'a>(runs: &[&'a GqlStatusContext]) -> Vec<&'a GqlStatusContext> {
     let mut latest: HashMap<String, &'a GqlStatusContext> = HashMap::new();
@@ -2867,7 +2914,7 @@ async fn graphql_data(
         .post(&url)
         .headers(github_headers(settings))
         .json(&body)
-        .send()
+        .send_noted()
         .await
         .map_err(|e| ApiError::Other(format!("GraphQL request failed: {e}")))?;
 
@@ -3101,7 +3148,7 @@ mod tests {
     /// The answer to `ONE_PR_QUERY` for a PR in `state`, in a repo that allows auto-merge by squash.
     fn one_pr_answer(state: &str) -> GqlRepository {
         serde_json::from_value(serde_json::json!({
-            "autoMergeAllowed": true, "squashMergeAllowed": true, "viewerDefaultMergeMethod": "SQUASH",
+            "autoMergeAllowed": true, "squashMergeAllowed": true,
             "pullRequest": {
                 "id": "PR_1", "number": 12, "state": state, "title": "Login page", "body": null,
                 "url": "https://github.com/org/app/pull/12", "isDraft": false,
@@ -3133,7 +3180,7 @@ mod tests {
         assert!(ONE_PR_QUERY.contains("pullRequest(number: $number)"));
         // One PR, not a page of them: that is what makes it cheap.
         assert!(!ONE_PR_QUERY.contains("pullRequests("));
-        assert!(ONE_PR_QUERY.contains("autoMergeAllowed") && ONE_PR_QUERY.contains("viewerDefaultMergeMethod"));
+        assert!(ONE_PR_QUERY.contains("autoMergeAllowed") && ONE_PR_QUERY.contains("squashMergeAllowed"));
     }
 
     #[test]
@@ -3145,7 +3192,62 @@ mod tests {
         assert_eq!(record.auto_merge_method.as_deref(), Some("SQUASH"));
         assert_eq!(record.merge_status, "blocked");
         assert!(record.merge_actions.can_disable_auto_merge && !record.merge_actions.can_enable_auto_merge);
-        assert_eq!(record.merge_actions.auto_merge_methods, ["SQUASH"]);
+    }
+
+    #[test]
+    fn a_branch_is_updated_by_rebase_and_never_by_merge() {
+        assert!(UPDATE_BRANCH_BY_REBASE.contains("updateMethod: REBASE"));
+        assert!(!UPDATE_BRANCH_BY_REBASE.contains("MERGE"));
+        // On the commit the user saw, so a push meanwhile makes GitHub refuse.
+        assert!(UPDATE_BRANCH_BY_REBASE.contains("expectedHeadOid: $sha") && UPDATE_BRANCH_BY_REBASE.contains("$sha: GitObjectID!"));
+        // And it is the only update of a branch the backend knows (the name in two
+        // pieces here, so this test is not the second place it reads it in).
+        let call = ["updatePullRequestBranch", "(input"].concat();
+        assert_eq!(include_str!("github.rs").matches(&call).count(), 1);
+    }
+
+    #[test]
+    fn a_change_asks_back_the_pr_with_the_fields_of_the_list() {
+        for mutation in [ENABLE_AUTO_MERGE, DISABLE_AUTO_MERGE] {
+            assert!(mutation.contains(pr_fields!()) && mutation.contains(repo_merge_fields!()));
+            assert!(mutation.contains("pullRequest {") && mutation.contains("repository {"));
+            // Braces in balance: the fields are put together from pieces.
+            assert_eq!(mutation.matches('{').count(), mutation.matches('}').count());
+        }
+        // By squash, written in the mutation itself: there is no method to pass.
+        assert!(ENABLE_AUTO_MERGE.contains("enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH, expectedHeadOid: $sha, commitHeadline: $headline })"));
+        assert!(!ENABLE_AUTO_MERGE.contains("$method"));
+        assert!(DISABLE_AUTO_MERGE.contains("disablePullRequestAutoMerge(input: { pullRequestId: $id })"));
+    }
+
+    #[test]
+    fn the_answer_to_a_change_is_the_pr_as_the_list_holds_it() {
+        // As GitHub nests it in a mutation's answer: the PR, with its repository inside.
+        let answer = |state: &str| {
+            let mut pr = serde_json::json!({
+                "id": "PR_1", "number": 12, "state": state, "title": "Login page", "body": null,
+                "url": "https://github.com/org/app/pull/12", "isDraft": false,
+                "createdAt": "2026-11-10T09:00:00Z", "updatedAt": "2026-11-12T10:00:00Z",
+                "additions": 10, "deletions": 2, "author": { "login": "anna", "avatarUrl": "a.png" },
+                "assignees": { "nodes": [] }, "reviewRequests": { "nodes": [] }, "reviews": { "nodes": [] },
+                "autoMergeRequest": { "mergeMethod": "SQUASH" },
+                "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
+                "viewerCanEnableAutoMerge": false, "viewerCanDisableAutoMerge": true, "viewerCanUpdateBranch": false,
+                "reviewThreads": { "nodes": [] }, "baseRef": { "name": "main" },
+                "headRef": { "name": "feat/login", "target": { "oid": "abc123" } },
+                "commits": { "nodes": [] },
+            });
+            pr["repository"] = serde_json::json!({ "autoMergeAllowed": true, "squashMergeAllowed": true });
+            pr
+        };
+        let record = pull_request_in_answer("org/app", &answer("OPEN")).expect("the PR of the answer");
+        assert_eq!((record.number, record.auto_merge_method.as_deref()), (12, Some("SQUASH")));
+        assert!(record.merge_actions.can_disable_auto_merge && !record.merge_actions.can_enable_auto_merge);
+
+        // No longer open, or not an answer to read: the PR is then read on its own.
+        assert!(pull_request_in_answer("org/app", &answer("MERGED")).is_none());
+        assert!(pull_request_in_answer("org/app", &serde_json::Value::Null).is_none());
+        assert!(pull_request_in_answer("org/app", &serde_json::json!({ "id": "PR_1" })).is_none());
     }
 
     #[test]
@@ -3156,23 +3258,35 @@ mod tests {
         assert!(open_pull_request("org/app", repo_json(serde_json::json!({}))).is_none());
     }
 
-    #[test]
-    fn auto_merge_offers_the_repos_methods_its_default_first() {
-        let repo = repo_json(serde_json::json!({
-            "autoMergeAllowed": true, "mergeCommitAllowed": true, "squashMergeAllowed": true,
-            "rebaseMergeAllowed": false, "viewerDefaultMergeMethod": "MERGE",
-        }));
-        assert_eq!(RepoMerging::of(&repo).auto_merge_methods, ["MERGE", "SQUASH"]);
+    /// A PR GitHub lets the viewer turn auto-merge on for, in a repo with these merge settings.
+    fn offered(repo_settings: serde_json::Value) -> bool {
+        let pr: GqlPr = serde_json::from_value(serde_json::json!({
+            "id": "PR_1", "number": 12, "state": "OPEN", "title": "Login page", "body": null,
+            "url": "https://github.com/org/app/pull/12", "isDraft": false,
+            "createdAt": "2026-11-10T09:00:00Z", "updatedAt": "2026-11-12T10:00:00Z",
+            "additions": 10, "deletions": 2, "author": { "login": "anna", "avatarUrl": "a.png" },
+            "assignees": { "nodes": [] }, "reviewRequests": { "nodes": [] }, "reviews": { "nodes": [] },
+            "autoMergeRequest": null, "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
+            "viewerCanEnableAutoMerge": true, "viewerCanDisableAutoMerge": false, "viewerCanUpdateBranch": false,
+            "reviewThreads": { "nodes": [] }, "baseRef": { "name": "main" },
+            "headRef": { "name": "feat/login", "target": { "oid": "abc123" } }, "commits": { "nodes": [] },
+        }))
+        .unwrap();
+        record_of("org/app", &pr, &RepoMerging::of(&repo_json(repo_settings))).merge_actions.can_enable_auto_merge
     }
 
     #[test]
-    fn no_auto_merge_where_the_repo_does_not_allow_it() {
-        let repo = repo_json(serde_json::json!({
-            "autoMergeAllowed": false, "squashMergeAllowed": true, "viewerDefaultMergeMethod": "SQUASH",
-        }));
-        assert!(RepoMerging::of(&repo).auto_merge_methods.is_empty());
-        // Fields GitHub left out read as not allowed.
-        assert!(RepoMerging::of(&repo_json(serde_json::json!({}))).auto_merge_methods.is_empty());
+    fn auto_merge_is_offered_by_squash_only() {
+        assert!(offered(serde_json::json!({ "autoMergeAllowed": true, "squashMergeAllowed": true })));
+        // A repo that merges by merge commit or by rebase only: not from ZuGit, though GitHub would.
+        assert!(!offered(serde_json::json!({ "autoMergeAllowed": true, "squashMergeAllowed": false })));
+        // Nor where the repo does not allow auto-merge, or GitHub left the settings out.
+        assert!(!offered(serde_json::json!({ "autoMergeAllowed": false, "squashMergeAllowed": true })));
+        assert!(!offered(serde_json::json!({})));
+        // And the repo is not even asked about the other methods.
+        for method in ["mergeCommitAllowed", "rebaseMergeAllowed", "viewerDefaultMergeMethod"] {
+            assert!(!PR_QUERY.contains(method) && !ONE_PR_QUERY.contains(method) && !ENABLE_AUTO_MERGE.contains(method), "{method}");
+        }
     }
 
     /// A rollup as GraphQL sends it: enums in capitals.
