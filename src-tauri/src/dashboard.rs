@@ -23,8 +23,11 @@ fn placeholder_token_store() -> TokenStoreStatus {
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
+/// `hidden_repos` are the repositories turned off in the list's selector:
+/// GitHub is not asked about them, so they cost nothing of the hourly limit.
 pub async fn build_dashboard_snapshot(
     settings: &AppSettings,
+    hidden_repos: &[String],
     jira_cache: &Mutex<HashMap<String, Option<JiraIssueSummary>>>,
     client: &reqwest::Client,
 ) -> DashboardSnapshot {
@@ -88,6 +91,7 @@ pub async fn build_dashboard_snapshot(
 
     match fetch_live(
         settings,
+        hidden_repos,
         jira_cache,
         client,
         &mut integrations,
@@ -121,6 +125,7 @@ pub async fn build_dashboard_snapshot(
 #[allow(clippy::ptr_arg)] // integrations.clone() requires Vec, not slice
 async fn fetch_live(
     settings: &AppSettings,
+    hidden_repos: &[String],
     jira_cache: &Mutex<HashMap<String, Option<JiraIssueSummary>>>,
     client: &reqwest::Client,
     integrations: &mut Vec<IntegrationStatus>,
@@ -147,13 +152,29 @@ async fn fetch_live(
             return Err(e.to_string());
         }
     };
-    let repo_results = crate::github::fetch_open_pull_requests(settings, client).await;
+    let selected = selected_repos(&settings.github_repos, hidden_repos);
+    let repo_results =
+        crate::github::fetch_open_pull_requests(&selected, settings, client).await;
 
     let mut repo_syncs = vec![];
     let mut all_prs: Vec<GithubPullRequestRecord> = vec![];
     let mut failed_count = 0usize;
 
-    for result in &repo_results {
+    // Every configured repository is told, in the order of the settings: the
+    // selector lists them from here, the ones left out included.
+    let mut answers = repo_results.iter();
+    for repo in &settings.github_repos {
+        if !selected.contains(repo) {
+            repo_syncs.push(RepoSyncStatus {
+                repo: repo.clone(),
+                ok: true,
+                pr_count: 0,
+                detail: "Not selected in the list: not loaded.".to_string(),
+                skipped: true,
+            });
+            continue;
+        }
+        let Some(result) = answers.next() else { break };
         if result.ok {
             let detail = if result.pull_requests.is_empty() {
                 "Sync ok, no open PRs in this repo.".to_string()
@@ -165,6 +186,7 @@ async fn fetch_live(
                 ok: true,
                 pr_count: result.pull_requests.len(),
                 detail,
+                skipped: false,
             });
             all_prs.extend(result.pull_requests.clone());
         } else {
@@ -178,6 +200,7 @@ async fn fetch_live(
                 ok: false,
                 pr_count: 0,
                 detail: error.clone(),
+                skipped: false,
             });
             warnings.push(format!("{}: {}", result.repo, error));
         }
@@ -185,7 +208,7 @@ async fn fetch_live(
 
     if failed_count > 0 {
         warnings.push(format!(
-            "{} configured repos could not be loaded from GitHub.",
+            "{} selected repos could not be loaded from GitHub.",
             failed_count
         ));
     }
@@ -295,7 +318,7 @@ async fn fetch_live(
         format!(
             "GitHub sync completed. {} open PRs loaded from {} repos.",
             all_prs.len(),
-            settings.github_repos.len()
+            selected.len()
         )
     } else {
         format!(
@@ -316,6 +339,16 @@ async fn fetch_live(
         token_store: placeholder_token_store(), // overwritten in commands.rs
         reviewer_avatars,
     })
+}
+
+/// The configured repositories GitHub is asked about: all but the hidden ones,
+/// in the order of the settings.
+fn selected_repos(configured: &[String], hidden: &[String]) -> Vec<String> {
+    configured
+        .iter()
+        .filter(|repo| !hidden.contains(repo))
+        .cloned()
+        .collect()
 }
 
 // ── One PR, read on its own ───────────────────────────────────────────────────
@@ -659,4 +692,32 @@ fn format_release_date(iso_date: &str) -> Option<String> {
         date.day(),
         date.year()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::selected_repos;
+
+    fn repos(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn hidden_repositories_are_not_asked_for() {
+        let configured = repos(&["org/a", "org/b", "org/c"]);
+        assert_eq!(selected_repos(&configured, &repos(&["org/b"])), repos(&["org/a", "org/c"]));
+    }
+
+    #[test]
+    fn nothing_hidden_asks_for_every_repository() {
+        let configured = repos(&["org/a", "org/b"]);
+        assert_eq!(selected_repos(&configured, &[]), configured);
+    }
+
+    #[test]
+    fn a_hidden_repository_no_longer_configured_changes_nothing() {
+        let configured = repos(&["org/a"]);
+        assert_eq!(selected_repos(&configured, &repos(&["org/gone"])), configured);
+        assert!(selected_repos(&configured, &configured).is_empty());
+    }
 }

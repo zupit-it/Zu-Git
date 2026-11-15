@@ -430,6 +430,9 @@ pub struct RepoSyncStatus {
     pub ok: bool,
     pub pr_count: usize,
     pub detail: String,
+    /// Not picked in the list's repository selector: GitHub was not asked about it.
+    #[serde(default)]
+    pub skipped: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

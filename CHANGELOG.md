@@ -56,6 +56,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   shows. **All** now carries its count as the other two do. The reviewer picked in the **Review
   load** strip — the one filter the toolbar does not show — is now tinted as every other filter
   on, with an × to turn it off, and the others step back while one is picked.
+- **Only the repositories you select are loaded** — a repository turned off in the list's selector
+  is no longer asked to GitHub at every refresh, which also spares your token's hourly limit, and
+  its PRs are no longer counted: the counts on **All**, **Mine** and **Needs you** and the
+  **Review load** numbers are about the selected repositories only, so they match the list.
+  Turning one back on loads it right away. It follows that the Sprint cards, the merge queue and
+  the notifications know only the PRs of the selected repositories.
 
 ---
 

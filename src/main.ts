@@ -5,8 +5,9 @@ import { maybeShowChangelog, showChangelog } from "./changelog";
 import { state } from "./state";
 import {
   setView, setSettingsDirtyState, syncSettingsSaveButton,
-  renderListBoard, renderListFilters, renderToolbarRepoFilters, setStatus, flashPrRow,
+  renderListBoard, renderListFilters, redrawPullRequests, setStatus, flashPrRow,
 } from "./render";
+import { wasNotLoaded } from "./repo-selection";
 import { applyListFilters } from "./filters";
 import {
   bootstrap, refreshDashboard, saveSettingsAndRefresh,
@@ -383,12 +384,16 @@ window.addEventListener("DOMContentLoaded", () => {
     if (repoItem) {
       const repo = repoItem.dataset.reposSelectorRepo;
       if (!repo) return;
-      state.hiddenRepos = state.hiddenRepos.includes(repo)
+      const turnedOn = state.hiddenRepos.includes(repo);
+      state.hiddenRepos = turnedOn
         ? state.hiddenRepos.filter(r => r !== repo)
         : [...state.hiddenRepos, repo];
-      if (state.currentDashboard) {
-        renderListBoard(applyListFilters(state.currentDashboard));
-        renderToolbarRepoFilters(state.currentDashboard);
+      // The list, its counts and the review load are about the selected repositories only.
+      redrawPullRequests();
+      // One turned on that the last read left out: GitHub is asked now. One
+      // turned off needs nothing — its PRs just stop being shown and counted.
+      if (turnedOn && state.currentDashboard && wasNotLoaded(state.currentDashboard.repoSyncs, repo)) {
+        void refreshDashboard("after-change");
       }
       // The stale-branch scan is scoped to the same selection, so it has to follow it.
       if (state.currentView === "stale") void loadStaleBranches();

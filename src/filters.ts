@@ -3,6 +3,7 @@ import type { PullRequestSummary } from "./shared/pr-model";
 import { matchesSearch, PRIORITY_RANK } from "./utils";
 import { state } from "./state";
 import { needsViewer } from "./needs-you";
+import { inSelectedRepos } from "./repo-selection";
 
 export { PRIORITY_RANK };
 
@@ -16,6 +17,15 @@ export function getAvailableRepos(snapshot: DashboardSnapshot): string[] {
   return Array.from(new Set(snapshot.prs.map((pr) => pr.repo))).sort((a, b) =>
     a.localeCompare(b),
   );
+}
+
+/**
+ * The PRs of the repositories picked in the selector: the ones the list, its
+ * counts and the review load are about. The others are not loaded at all; one
+ * turned off since the last refresh is still in the snapshot, and left out here.
+ */
+export function selectedPrs(snapshot: DashboardSnapshot): PullRequestSummary[] {
+  return inSelectedRepos(snapshot.prs, state.hiddenRepos);
 }
 
 // ── Sorting ───────────────────────────────────────────────────────────────────
@@ -33,10 +43,9 @@ export function applyListSort(prs: PullRequestSummary[]): PullRequestSummary[] {
 // ── Filtering ─────────────────────────────────────────────────────────────────
 
 export function applyListFilters(snapshot: DashboardSnapshot): PullRequestSummary[] {
-  return applyListSort(snapshot.prs.filter((pr) => {
+  return applyListSort(selectedPrs(snapshot).filter((pr) => {
     if (!matchesSearch(pr, state.listSearchQuery)) return false;
     if (!state.showDraft && pr.isDraft) return false;
-    if (state.hiddenRepos.includes(pr.repo)) return false;
 
     if (state.onlyMyPullRequests) {
       const viewerLogin = snapshot.viewerLogin?.toLowerCase();
@@ -67,19 +76,24 @@ export function applyListFilters(snapshot: DashboardSnapshot): PullRequestSummar
 // ── Active filters ────────────────────────────────────────────────────────────
 
 /**
- * Whether a filter narrows what Show lists: a reviewer, the authors, the repos
- * or a search. Show itself is which list you look at, and Drafts and grouping
- * how it is seen: none of them counts.
+ * Whether a filter narrows what Show lists: a reviewer, the authors or a
+ * search. Show itself is which list you look at, Drafts and grouping how it is
+ * seen, and the repositories what is loaded at all: none of them counts.
  */
-export function filtersOn(snapshot: DashboardSnapshot): boolean {
+export function filtersOn(): boolean {
   if (state.filteredReviewer || state.listSearchQuery) return true;
-  if (!(state.showInternalOnly && state.showTeamOnly && state.showCollaboratorOnly)) return true;
-  return getAvailableRepos(snapshot).some((repo) => state.hiddenRepos.includes(repo));
+  return !(state.showInternalOnly && state.showTeamOnly && state.showCollaboratorOnly);
+}
+
+/** Whether every repository is turned off in the selector: nothing is loaded. */
+export function noRepoSelected(snapshot: DashboardSnapshot): boolean {
+  const repos = getAvailableRepos(snapshot);
+  return repos.length > 0 && repos.every((repo) => state.hiddenRepos.includes(repo));
 }
 
 /** The PRs the Drafts switch lets through, before any filter: the count on All. */
 export function listBase(snapshot: DashboardSnapshot): number {
-  return snapshot.prs.filter((pr) => state.showDraft || !pr.isDraft).length;
+  return selectedPrs(snapshot).filter((pr) => state.showDraft || !pr.isDraft).length;
 }
 
 /** Drafts the filters would let through were drafts shown: told on an empty list. */
@@ -96,7 +110,7 @@ export function draftsMatching(snapshot: DashboardSnapshot): number {
 // ── Notification counters ─────────────────────────────────────────────────────
 
 export function countNeedsViewer(snapshot: DashboardSnapshot): number {
-  return snapshot.prs.filter((pr) => needsViewer(pr, snapshot.viewerLogin)).length;
+  return selectedPrs(snapshot).filter((pr) => needsViewer(pr, snapshot.viewerLogin)).length;
 }
 
 export function getMyPendingReviewIds(snapshot: DashboardSnapshot): Set<string> {

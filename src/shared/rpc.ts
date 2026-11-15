@@ -26,6 +26,8 @@ export interface RepoSyncStatus {
   ok: boolean;
   prCount: number;
   detail: string;
+  /** Turned off in the list's repository selector: GitHub was not asked about it. */
+  skipped?: boolean;
 }
 
 export interface TokenStoreStatus {

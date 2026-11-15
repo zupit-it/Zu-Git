@@ -86,8 +86,10 @@ pub async fn save_settings(
     // Clear caches after settings change.
     state.jira_cache.lock().clear();
 
+    let hidden_repos = storage::load_list_filter_preferences(&app).await?.hidden_repos;
     let mut snap = dashboard::build_dashboard_snapshot(
         &settings,
+        &hidden_repos,
         &state.jira_cache,
         &state.http_client,
     )
@@ -102,14 +104,22 @@ pub async fn save_settings(
 
 // ── Refresh dashboard ─────────────────────────────────────────────────────────
 
+/// `hidden_repos` is the selector as the list shows it right now — it may not
+/// be saved yet; left out, the saved one is used.
 #[tauri::command]
 pub async fn refresh_dashboard(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
+    hidden_repos: Option<Vec<String>>,
 ) -> Result<DashboardSnapshot, String> {
     let settings = storage::load_settings(&app).await?;
+    let hidden_repos = match hidden_repos {
+        Some(repos) => repos,
+        None => storage::load_list_filter_preferences(&app).await?.hidden_repos,
+    };
     let mut snap = dashboard::build_dashboard_snapshot(
         &settings,
+        &hidden_repos,
         &state.jira_cache,
         &state.http_client,
     )

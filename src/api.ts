@@ -83,8 +83,11 @@ let refreshAgain = false;
 
 /**
  * `manual` from the Refresh button, `auto` from the timer and at start-up,
- * `after-change` after ZuGit wrote to GitHub: that one is never lost to a
- * refresh already in flight.
+ * `after-change` after ZuGit wrote to GitHub, or a repository was turned on in
+ * the selector: that one is never lost to a refresh already in flight, which
+ * read GitHub before the change or without that repository.
+ *
+ * Only the repositories picked in the selector are asked for.
  */
 export async function refreshDashboard(mode: "manual" | "auto" | "after-change" = "manual") {
   if (state.refreshInProgress) {
@@ -103,7 +106,7 @@ export async function refreshDashboard(mode: "manual" | "auto" | "after-change" 
 
   const readAt = Date.now();
   try {
-    const payload = withNewerAnswers(await invoke<DashboardSnapshot>("refresh_dashboard"), readAt);
+    const payload = withNewerAnswers(await invoke<DashboardSnapshot>("refresh_dashboard", { hiddenRepos: state.hiddenRepos }), readAt);
     if (myId !== state.refreshRequestId) return;
     state.dashboardReadAt = readAt;
     renderDashboard(payload);

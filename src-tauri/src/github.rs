@@ -664,12 +664,13 @@ pub async fn request_review(
     Ok(())
 }
 
+/// The open pull requests of `repos`, one answer each and in their order.
 pub async fn fetch_open_pull_requests(
+    repos: &[String],
     settings: &AppSettings,
     client: &reqwest::Client,
 ) -> Vec<GithubRepoFetchResult> {
-    let futures = settings
-        .github_repos
+    let futures = repos
         .iter()
         .map(|repo| fetch_repo_pull_requests(repo, settings, client));
     futures::future::join_all(futures).await

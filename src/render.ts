@@ -11,7 +11,7 @@ import {
   personLoadLevel, teamLoadLevel, loginInitials, errorMessage,
 } from "./utils";
 import {
-  applyListFilters, draftsMatching, filtersOn, listBase,
+  applyListFilters, draftsMatching, filtersOn, listBase, noRepoSelected, selectedPrs,
   countNeedsViewer,
   getMyPendingReviewIds, getMyChangesRequestedIds,
   getAvailableRepos,
@@ -299,7 +299,7 @@ export function renderToolbarRepoFilters(snapshot: DashboardSnapshot | null) {
     return;
   }
 
-  // Count PRs per repo (all, not filtered)
+  // PRs per repo — told only on the selected ones: the others are not loaded.
   const prCountByRepo = new Map<string, number>();
   for (const pr of snapshot.prs) {
     prCountByRepo.set(pr.repo, (prCountByRepo.get(pr.repo) ?? 0) + 1);
@@ -323,7 +323,7 @@ export function renderToolbarRepoFilters(snapshot: DashboardSnapshot | null) {
     return `<div class="repos-selector-repo${isActive ? " is-active" : ""}" data-repos-selector-repo="${escHtml(repo)}"${filterHidden ? " hidden" : ""}>
       <span class="repos-selector-check">${isActive ? checkSvg : ""}</span>
       <span class="repos-selector-name">${escHtml(repo)}</span>
-      ${prCount > 0 ? `<span class="repos-selector-pr-count">${prCount} PR</span>` : ""}
+      ${isActive && prCount > 0 ? `<span class="repos-selector-pr-count">${prCount} PR</span>` : ""}
     </div>`;
   }).join("");
 
@@ -392,7 +392,7 @@ export function renderListFilters(snapshot: DashboardSnapshot) {
   };
   const shownDrafts = (pr: PullRequestSummary) => state.showDraft || !pr.isDraft;
   setCount("all", listBase(snapshot));
-  setCount("mine", viewer ? snapshot.prs.filter((pr) => pr.author.toLowerCase() === viewer && shownDrafts(pr)).length : 0);
+  setCount("mine", viewer ? selectedPrs(snapshot).filter((pr) => pr.author.toLowerCase() === viewer && shownDrafts(pr)).length : 0);
   setCount("needs", countNeedsViewer(snapshot));
 
   // Authors: a set, at least one on.
@@ -701,7 +701,11 @@ export function renderListTable(prs: PullRequestSummary[]) {
   if (prs.length === 0) {
     const snapshot = state.currentDashboard;
     const scoped = state.onlyMyPendingReviews || state.onlyMyPullRequests;
-    const filtered = !!snapshot && filtersOn(snapshot);
+    const filtered = filtersOn();
+    if (snapshot && noRepoSelected(snapshot)) {
+      target.innerHTML = `<div class="list-empty">No repository is selected.</div>`;
+      return;
+    }
     if (!snapshot || (!scoped && !filtered)) {
       target.innerHTML = `<div class="list-empty">No pull requests available.</div>`;
       return;
@@ -846,7 +850,7 @@ export function renderReviewerLoad(snapshot: DashboardSnapshot) {
     if (isPending) pending.set(canonical, (pending.get(canonical) ?? 0) + 1);
   };
 
-  for (const pr of snapshot.prs) {
+  for (const pr of selectedPrs(snapshot)) {
     if (pr.isDraft) continue;
     for (const r of pr.pendingReviewers)   touch(r.login, true);
     for (const r of pr.currentApprovers)   touch(r.login, false);
@@ -914,7 +918,7 @@ export function renderReviewerLoad(snapshot: DashboardSnapshot) {
 
   const myScore = snapshot.viewerLogin && state.reactionScoreEnabled
     ? computeMyScore(
-        snapshot.prs.filter(pr => !state.hiddenRepos.includes(pr.repo)),
+        selectedPrs(snapshot),
         snapshot.viewerLogin,
         new Date(),
         {
@@ -1195,9 +1199,9 @@ export function renderRepoSyncs(snapshot: DashboardSnapshot) {
         <article class="repo-sync-card repo-sync-${repoSync.ok ? "ok" : "warn"}">
           <div class="integration-header">
             <span class="metric-label">${repoSync.repo}</span>
-            <span class="integration-pill">${repoSync.ok ? "Loaded" : "Error"}</span>
+            <span class="integration-pill">${repoSync.skipped ? "Not selected" : repoSync.ok ? "Loaded" : "Error"}</span>
           </div>
-          <strong>${repoSync.prCount} open PRs</strong>
+          <strong>${repoSync.skipped ? "Not loaded" : `${repoSync.prCount} open PRs`}</strong>
           <p>${repoSync.detail}</p>
         </article>
       `,
@@ -1396,7 +1400,7 @@ export function redrawList() {
 export function redrawPullRequests() {
   const snapshot = state.currentDashboard;
   if (!snapshot) return;
-  renderSummary(snapshot.prs);
+  renderSummary(selectedPrs(snapshot));
   renderListFilters(snapshot);
   renderReviewerLoad(snapshot);
   renderListBoard(applyListFilters(snapshot));
@@ -1427,7 +1431,7 @@ export function renderDashboard(snapshot: DashboardSnapshot) {
   const myPendingReviewIds = getMyPendingReviewIds(snapshot);
   const myChangesRequestedIds = getMyChangesRequestedIds(snapshot);
   const filteredPrs = applyListFilters(snapshot);
-  renderSummary(snapshot.prs);
+  renderSummary(selectedPrs(snapshot));
   renderIntegrations(snapshot);
   renderAuthBanner(snapshot);
   renderRepoSyncs(snapshot);

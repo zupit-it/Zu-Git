@@ -33,18 +33,22 @@ const VERSIONS: VersionBlock[] = [
         body: "<strong>Show</strong> is now <strong>All</strong>, <strong>Mine</strong> and <strong>Needs you</strong>: the reviews asked of you, and your own PRs with changes requested, a failed check or a branch to bring up to date. Its count is the only one filled in. The line under the filters is gone — the toolbar already says what is on — and the reviewer you pick in <strong>Review load</strong> is tinted, with an × to turn it off.",
       },
       {
+        title: "Only the repositories you select are loaded",
+        body: "A repository turned off in the list's selector is no longer asked to GitHub at every refresh — less of your token's hourly limit — and its PRs are no longer counted: the numbers on <strong>All</strong>, <strong>Mine</strong>, <strong>Needs you</strong> and in <strong>Review load</strong> are about the selected repositories only, so they match the list. Turn one back on and it loads right away. The Sprint cards, the merge queue and the notifications follow the same selection.",
+      },
+      {
         title: "GitHub's hourly limit in the top bar",
         body: "Turn on <strong>Settings → GitHub → API usage</strong> and the top bar shows, beside the sync status, how much of your token's hourly limit is used, as <strong>52/5000</strong>: the one used the most of GraphQL and REST, with both and when they start again on hover. Amber from 70%, red from 90%. GitHub says it in every answer, so nothing is asked for it.",
+      },
+      {
+        title: "Performance — the GPU rests when ZuGit does",
+        body: "On Windows ZuGit kept the GPU busy all day, even with nothing moving. The sync dot now pulses only while a sync is on, and a window at rest draws nothing. The PR diff, the release diff and the Toggl planner dim the page behind them instead of blurring it: with a diff open the GPU goes from about 10% to nothing at rest, and from 13% to almost nothing while scrolling.",
       },
     ],
   },
   {
     label: "Older news",
     entries: [
-      {
-        title: "Performance — the GPU rests when ZuGit does",
-        body: "On Windows ZuGit kept the GPU busy all day, even with nothing moving. The sync dot now pulses only while a sync is on, and a window at rest draws nothing. The PR diff, the release diff and the Toggl planner dim the page behind them instead of blurring it: with a diff open the GPU goes from about 10% to nothing at rest, and from 13% to almost nothing while scrolling.",
-      },
       {
         title: "PR diff — the conversation folds and opens in place",
         body: "Above the files, <strong>Conversation</strong> is one line with what is there and who spoke last. <strong>Show</strong> opens it right there — description, comments and reviews in full — and <strong>Hide</strong> folds it again; ZuGit remembers your choice. No more separate section to go back from. And <strong>Add comment</strong>, <strong>Save</strong> and <strong>Cancel</strong> in the diff answer again.",
