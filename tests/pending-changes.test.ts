@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mockPullRequests, type PullRequestSummary } from "../src/shared/pr-model.ts";
 import {
   MAX_READS, PENDING_TTL_MS, RETRY_MS, autoMergeIs, duePendingPrs, givenUpMessage, nextPendingRead, pendingChange,
-  prKey, reconcilePending, reviewAskedOf, shownPr, waitingOn, withAnswer, withPending, withoutOwnRead,
+  prKey, reconcilePending, reviewAskedOf, reviewChange, shownPr, verdictOf, waitingOn, withAnswer, withPending, withoutOwnRead,
   type GitHubSays, type PendingChange,
 } from "../src/pending-changes.ts";
 
@@ -205,4 +205,90 @@ test("two reviewers asked on a PR wait apart, each badge finds its own, and one 
   assert.deepEqual(duePendingPrs(changes, T0 + 100), ["org/app/12"]);
   const listed = github({ pendingReviewers: [{ login: "Anna" }, { login: "bob" }] });
   assert.deepEqual(reconcilePending(changes, says([listed], T0 + 200), T0 + 900), { waiting: [], expired: [] });
+});
+
+// ── A verdict published from the diff ─────────────────────────────────────────
+
+const changesAskedBy = (pr: PullRequestSummary, login = "Gio", at = T0): PendingChange =>
+  pendingChange(pr, "review", { subject: login, label: "Your request for changes", patch: verdictOf(login, "changes-requested") }, at);
+
+test("a published verdict shows on its reviewer's badge at once, as waiting", () => {
+  // Asked for a review, they ask for changes: GitHub took it, the list is from before.
+  const pr = github({ pendingReviewers: [{ login: "gio", avatarUrl: "g.png" }], commentedReviewers: [{ login: "anna" }] });
+  const changes = [changesAskedBy(pr)];
+
+  const shown = shownPr(changes, pr);
+  assert.deepEqual(shown.blockingReviewers, [{ login: "gio", avatarUrl: "g.png" }]);
+  assert.deepEqual(shown.pendingReviewers, []);
+  assert.deepEqual(shown.commentedReviewers, [{ login: "anna" }], "the others are GitHub's");
+  assert.equal(shown.reviewState, "needs-review", "what follows from it is GitHub's to say");
+  assert.deepEqual(pr.pendingReviewers, [{ login: "gio", avatarUrl: "g.png" }], "GitHub's PR is not edited");
+  assert.equal(waitingOn(changes, pr, "review", "GIO")?.label, "Your request for changes");
+
+  // An approval takes the place of what they said before.
+  const approved = verdictOf("gio", "approved")(github({ blockingReviewers: [{ login: "Gio" }] }));
+  assert.deepEqual([approved.currentApprovers, approved.blockingReviewers], [[{ login: "Gio" }], []]);
+});
+
+test("the PR moving for anything else does not end the wait for a verdict", () => {
+  const pr = github({ pendingReviewers: [{ login: "gio" }] });
+  const made = [changesAskedBy(pr), pendingChange(pr, "activity", { label: "", quiet: true }, T0)];
+
+  // GitHub shows the review's comments, and still lists the review it had asked for: the verdict is not there yet.
+  const behind = github({ pendingReviewers: [{ login: "gio" }], updatedAtIso: "2026-11-12T10:05:00Z", unresolvedThreads: 2, commentedReviewers: [{ login: "anna" }] });
+  const first = reconcilePending(made, says([behind], T0 + 50), T0 + 800);
+  assert.deepEqual(first.waiting.map((c) => [c.kind, c.reads]), [["review", 1]]);
+  assert.equal(shownPr(first.waiting, behind).blockingReviewers[0].login, "gio", "the row keeps saying it");
+  // One read more, as for any change.
+  assert.equal(nextPendingRead(first.waiting, T0 + 800), RETRY_MS);
+
+  // Then GitHub says it: the row is GitHub's.
+  const said = github({ blockingReviewers: [{ login: "gio" }], reviewState: "changes-requested" });
+  assert.deepEqual(reconcilePending(first.waiting, says([said], T0 + 7000), T0 + 7500), { waiting: [], expired: [] });
+  // Or does not, and it is given up and said.
+  const never = reconcilePending(first.waiting, says([behind], T0 + 7000), T0 + 7500);
+  assert.equal(givenUpMessage(never.expired), "GitHub does not show it yet: Your request for changes on org/app#12. The list is what GitHub says — refresh in a moment.");
+});
+
+test("a verdict GitHub already shows, or has moved past, waits for nothing", () => {
+  // A second request for changes: they already stand there.
+  const blocking = github({ blockingReviewers: [{ login: "gio" }], reviewState: "changes-requested" });
+  assert.equal(shownPr([changesAskedBy(blocking)], blocking), blocking);
+  assert.deepEqual(reconcilePending([changesAskedBy(blocking)], says([blocking], T0 + 50), T0 + 800), { waiting: [], expired: [] });
+
+  // The author asked them again before the read: that is GitHub's news about them.
+  const pr = github();
+  const askedAgain = github({ pendingReviewers: [{ login: "gio" }] });
+  assert.deepEqual(reconcilePending([changesAskedBy(pr)], says([askedAgain], T0 + 50), T0 + 800), { waiting: [], expired: [] });
+});
+
+test("comments are drawn only where they leave their reviewer is known", () => {
+  const review = (pr: PullRequestSummary) => reviewChange(pr, "Gio", "COMMENT", "g.png");
+  const waitFor = (pr: PullRequestSummary) => [pendingChange(pr, "review", review(pr)!, T0)];
+
+  // They stood nowhere: they have commented.
+  const nobody = github();
+  assert.deepEqual(shownPr(waitFor(nobody), nobody).commentedReviewers, [{ login: "Gio", avatarUrl: "g.png" }]);
+  const commented = github({ commentedReviewers: [{ login: "gio" }] });
+  assert.deepEqual(reconcilePending(waitFor(nobody), says([commented], T0 + 50), T0 + 800), { waiting: [], expired: [] });
+
+  // Asked for a review: what they said before it may stand again, so the badge waits as it is…
+  const asked = github({ pendingReviewers: [{ login: "gio" }] });
+  const changes = waitFor(asked);
+  assert.equal(shownPr(changes, asked), asked, "nothing is drawn over GitHub's");
+  assert.equal(waitingOn(changes, asked, "review", "gio")?.label, "Your review");
+  // …while GitHub still lists the request, whatever else moved on the PR…
+  const behind = github({ pendingReviewers: [{ login: "gio" }], updatedAtIso: "2026-11-12T10:05:00Z", unresolvedThreads: 1 });
+  assert.equal(reconcilePending(changes, says([behind], T0 + 50), T0 + 800).waiting.length, 1);
+  // …and until GitHub says where they stand: here, their earlier approval again.
+  const again = github({ currentApprovers: [{ login: "gio" }], reviewState: "approved" });
+  assert.deepEqual(reconcilePending(changes, says([again], T0 + 50), T0 + 800), { waiting: [], expired: [] });
+
+  // Their verdict stands after a comment, and an author is no reviewer of their PR: nothing to wait for.
+  assert.equal(review(github({ blockingReviewers: [{ login: "gio" }] })), null);
+  assert.equal(review(commented), null);
+  assert.equal(review(github({ author: "gio" })), null);
+  // A verdict is one whoever they were.
+  assert.equal(reviewChange(asked, "gio", "REQUEST_CHANGES")?.label, "Your request for changes");
+  assert.equal(reviewChange(asked, "gio", "APPROVE")?.label, "Your approval");
 });

@@ -231,3 +231,10 @@ reason when it refused.
   reported, rather than sinking the review.
 - One publish per PR at a time: a second call while one runs is refused, so a double click cannot
   post twice.
+- The list behind follows (`listFollows`, `reviewChange` in `pending-changes.ts`): an approval or
+  a request for changes GitHub accepted is drawn at once on the reviewer's own badge, as waiting,
+  and the PR is read on its own — once, and once more if GitHub's Reviewers list does not show it
+  yet. The PR moving for anything else (the review's comments, another reviewer) does not end that
+  wait. A review that only comments makes a reviewer who stood nowhere *Commented*; from one asked
+  for a review it draws nothing — an earlier verdict of theirs may stand again — and their badge
+  waits as it is until GitHub moves it; after a verdict of theirs, or on their own PR, nothing moves.

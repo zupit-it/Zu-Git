@@ -150,13 +150,25 @@ let pendingTimer = 0;
  * if that answer does not show the change.
  */
 export function trackGitHubChange(pr: { repo: string; id: number }, kind: PendingKind, options: PendingOptions) {
+  trackGitHubChanges(pr, [{ kind, options }]);
+}
+
+/**
+ * One act that changed a PR in more than one way (a review: its verdict, and
+ * its comments). They are made at the same moment, so the same read of the PR
+ * answers them all.
+ */
+export function trackGitHubChanges(pr: { repo: string; id: number }, changes: { kind: PendingKind; options: PendingOptions }[]) {
   const known = state.currentDashboard?.prs.find((p) => p.repo === pr.repo && p.id === pr.id);
   if (!known) {
     // Not a PR of the list (yet): there is no row to keep true, and only a refresh can bring one.
     void refreshDashboard("after-change");
     return;
   }
-  state.pendingChanges = withPending(state.pendingChanges, pendingChange(known, kind, options, Date.now()));
+  const now = Date.now();
+  for (const { kind, options } of changes) {
+    state.pendingChanges = withPending(state.pendingChanges, pendingChange(known, kind, options, now));
+  }
   redrawList();
   followPendingChanges();
 }

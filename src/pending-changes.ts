@@ -17,15 +17,20 @@
 //
 // Only what GitHub answered to the change is drawn over. What follows from it
 // (the PR's review state, what the viewer may do next) is GitHub's to say.
+//
+// A review published from the diff is such an answer: GitHub took it, so its
+// reviewer's badge says it, as waiting, until GitHub's own list does — where
+// the review leaves them is known (`reviewChange`).
 
 import type { PullRequestSummary, ReviewActor } from "./shared/pr-model";
 
 /**
- * `activity` is a change with nothing of its own to draw (a review published
- * from the diff, a conversation resolved): it only has GitHub read again until
- * the PR shows that something happened.
+ * `review` is a review GitHub accepted from its `subject` — an approval, a
+ * request for changes, comments. `activity` is a change with nothing of its
+ * own to draw (a reply, a conversation resolved): it only has GitHub read
+ * again until the PR shows that something happened.
  */
-export type PendingKind = "auto-merge" | "rebase" | "review-request" | "activity";
+export type PendingKind = "auto-merge" | "rebase" | "review-request" | "review" | "activity";
 
 export type PendingPatch = (pr: PullRequestSummary) => PullRequestSummary;
 
@@ -33,7 +38,7 @@ export interface PendingChange {
   /** `repo/id` of the PR it was made on. */
   pr: string;
   kind: PendingKind;
-  /** Tells two changes of a kind on a PR apart: the reviewer asked. */
+  /** Tells two changes of a kind on a PR apart: the reviewer asked, or the one who gave a verdict. */
   subject: string;
   /** What was done, for the row's tooltip and for the status if GitHub never shows it. */
   label: string;
@@ -66,19 +71,29 @@ export const prKey = (pr: Pick<PullRequestSummary, "repo" | "id">): string => `$
 
 const logins = (list: ReviewActor[]): string => list.map((a) => a.login.toLowerCase()).sort().join(",");
 
-const reviewers = (pr: PullRequestSummary): string =>
-  [pr.pendingReviewers, pr.currentApprovers, pr.staleApprovers, pr.blockingReviewers, pr.commentedReviewers].map(logins).join("|");
+const reviewerLists = (pr: PullRequestSummary): ReviewActor[][] =>
+  [pr.pendingReviewers, pr.currentApprovers, pr.staleApprovers, pr.blockingReviewers, pr.commentedReviewers];
+
+const reviewers = (pr: PullRequestSummary): string => reviewerLists(pr).map(logins).join("|");
+
+/** Where one reviewer stands on a PR: which of its lists hold them. */
+const standing = (pr: PullRequestSummary, login: string): string =>
+  reviewerLists(pr).map((list) => (list.some((a) => a.login.toLowerCase() === login) ? "1" : "0")).join("");
 
 /**
  * What a change of `kind` is about on a PR, as one string: a difference from
  * when the change was made is GitHub's news about it. A rebase shows as a new
- * head, whatever GitHub makes of the merge state meanwhile.
+ * head, whatever GitHub makes of the merge state meanwhile. A review is about
+ * its reviewer alone: the PR moving for anything else — its comments, another
+ * reviewer — says nothing of it, and GitHub can show those a moment before it
+ * lets go of the review it had asked of them.
  */
-function trace(kind: PendingKind, pr: PullRequestSummary): string {
+function trace(kind: PendingKind, pr: PullRequestSummary, subject: string): string {
   switch (kind) {
     case "auto-merge": return pr.autoMergeMethod ?? "";
     case "rebase": return pr.headSha;
     case "review-request": return reviewers(pr);
+    case "review": return standing(pr, subject);
     case "activity": return `${pr.updatedAtIso} ${reviewers(pr)} ${pr.unresolvedThreads}`;
   }
 }
@@ -94,13 +109,14 @@ export interface PendingOptions {
 
 /** A change just made on `pr` (as GitHub last gave it), at `now`. */
 export function pendingChange(pr: PullRequestSummary, kind: PendingKind, options: PendingOptions, now: number): PendingChange {
+  const subject = (options.subject ?? "").toLowerCase();
   return {
     pr: prKey(pr),
     kind,
-    subject: (options.subject ?? "").toLowerCase(),
+    subject,
     label: options.label,
     patch: options.patch,
-    before: trace(kind, pr),
+    before: trace(kind, pr, subject),
     at: now,
     readAt: now + (options.readIn ?? 0),
     reads: 0,
@@ -120,9 +136,9 @@ export function withPending(changes: PendingChange[], change: PendingChange): Pe
 
 /** GitHub's data on the change has moved since it was made, or already says what the row draws. */
 function shows(change: PendingChange, pr: PullRequestSummary): boolean {
-  const now = trace(change.kind, pr);
+  const now = trace(change.kind, pr, change.subject);
   if (now !== change.before) return true;
-  return !!change.patch && trace(change.kind, change.patch(pr)) === now;
+  return !!change.patch && trace(change.kind, change.patch(pr), change.subject) === now;
 }
 
 /** What GitHub last said of a PR — nothing when it is not in the list — and when that was asked for. */
@@ -225,4 +241,62 @@ export function reviewAskedOf(login: string, avatarUrl?: string): PendingPatch {
       pendingReviewers: [...pr.pendingReviewers, known ?? { login, avatarUrl }],
     };
   };
+}
+
+/**
+ * `login` approved, or asked for changes, and GitHub took the review: that is
+ * where they stand, whatever they said before and whether a review was asked of
+ * them — as GitHub's Reviewers list shows them once it has caught up.
+ */
+export function verdictOf(login: string, verdict: "approved" | "changes-requested", avatarUrl?: string): PendingPatch {
+  const is = (a: ReviewActor) => a.login.toLowerCase() === login.toLowerCase();
+  const without = (list: ReviewActor[]) => list.filter((a) => !is(a));
+  return (pr) => {
+    const said = verdict === "approved" ? pr.currentApprovers : pr.blockingReviewers;
+    const elsewhere = reviewerLists(pr).filter((list) => list !== said);
+    if (said.some(is) && !elsewhere.some((list) => list.some(is))) return pr;
+    const actor = reviewerLists(pr).flat().find(is) ?? { login, avatarUrl };
+    return {
+      ...pr,
+      pendingReviewers: without(pr.pendingReviewers),
+      staleApprovers: without(pr.staleApprovers),
+      commentedReviewers: without(pr.commentedReviewers),
+      currentApprovers: verdict === "approved" ? [...without(pr.currentApprovers), actor] : without(pr.currentApprovers),
+      blockingReviewers: verdict === "changes-requested" ? [...without(pr.blockingReviewers), actor] : without(pr.blockingReviewers),
+    };
+  };
+}
+
+/** `login` commented and stood nowhere on the PR: they have commented, and that is all they said. */
+function commentedBy(login: string, avatarUrl?: string): PendingPatch {
+  const is = (a: ReviewActor) => a.login.toLowerCase() === login.toLowerCase();
+  return (pr) => (reviewerLists(pr).some((list) => list.some(is))
+    ? pr
+    : { ...pr, commentedReviewers: [...pr.commentedReviewers, { login, avatarUrl }] });
+}
+
+/**
+ * What a review GitHub accepted from `login` changes on the PR's row (`pr` as
+ * GitHub last gave it), as a `review` change to wait for — null when it moves
+ * nothing there:
+ * - an approval or a request for changes is where they stand from now on;
+ * - comments from someone who stood nowhere make them one who commented;
+ * - comments from someone asked for a review end that request, and what they
+ *   said before it, if anything, stands again: only GitHub knows which, so
+ *   nothing is drawn over — their badge waits as it is, until GitHub moves it;
+ * - comments after a verdict of theirs leave it standing, and the PR's author
+ *   is no reviewer of it.
+ */
+export function reviewChange(
+  pr: PullRequestSummary, login: string, event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT", avatarUrl?: string,
+): PendingOptions | null {
+  if (event === "APPROVE") return { subject: login, label: "Your approval", patch: verdictOf(login, "approved", avatarUrl) };
+  if (event === "REQUEST_CHANGES") {
+    return { subject: login, label: "Your request for changes", patch: verdictOf(login, "changes-requested", avatarUrl) };
+  }
+  const is = (a: ReviewActor) => a.login.toLowerCase() === login.toLowerCase();
+  if (pr.author.toLowerCase() === login.toLowerCase()) return null;
+  if (pr.pendingReviewers.some(is)) return { subject: login, label: "Your review" };
+  if (reviewerLists(pr).some((list) => list.some(is))) return null;
+  return { subject: login, label: "Your review", patch: commentedBy(login, avatarUrl) };
 }

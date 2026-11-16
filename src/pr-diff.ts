@@ -9,7 +9,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { PullRequestSummary } from "./shared/pr-model";
-import { openExternal, trackGitHubChange } from "./api";
+import { openExternal, trackGitHubChanges } from "./api";
+import { reviewChange, type PendingKind, type PendingOptions } from "./pending-changes";
 import { SVG, errorMessage, escHtml, formatDiffNum } from "./utils";
 import {
   EXPAND_STEP, alignSides, diffGaps, expandGap, fileLines, gapLines, gapSize, hunkFor, hunkSides, isGeneratedFile, linesFor,
@@ -669,11 +670,21 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
 
   /**
    * Something went out to GitHub from here: the list behind is read again until
-   * the PR shows it. Nothing is drawn meanwhile — what a review makes of the
-   * PR's state is GitHub's to say.
+   * the PR shows it. A review GitHub accepted is drawn meanwhile on the
+   * viewer's own badge, as waiting — closing the diff right after publishing
+   * finds it there. What it makes of the PR's state is GitHub's to say.
    */
-  function listFollows() {
-    trackGitHubChange(pr, "activity", { label: "", quiet: true });
+  function listFollows(published?: ReviewEvent) {
+    const changes: { kind: PendingKind; options: PendingOptions }[] = [];
+    const snapshot = appState.currentDashboard;
+    const listed = snapshot?.prs.find(p => p.repo === pr.repo && p.id === pr.id);
+    const review = published && viewerLogin && listed
+      ? reviewChange(listed, viewerLogin, published, snapshot?.reviewerAvatars?.[viewerLogin])
+      : null;
+    if (review) changes.push({ kind: "review", options: review });
+    // Its comments, a reply, a resolve: nothing of their own to draw.
+    changes.push({ kind: "activity", options: { label: "", quiet: true } });
+    trackGitHubChanges(pr, changes);
   }
 
   function close() {
@@ -2005,7 +2016,8 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     // The list behind shows the PR's review state: brought up to date now, not on close.
     if (result.published.length) {
       changedOnGitHub = false;
-      listFollows();
+      // The verdict went with the main review, on the latest commit: the others are plain comments.
+      listFollows(publishDone?.reviews.some(r => r.latest) ? event : "COMMENT");
     }
     // What GitHub accepted comes back as its own conversations.
     void loadConversation();

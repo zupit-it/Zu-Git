@@ -21,6 +21,10 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Your review shows on the list as soon as it is published",
+        body: "After <strong>Request changes</strong> or <strong>Approve</strong> from the diff, your badge on the PR's row says so at once, dimmed until GitHub's own Reviewers list shows it. After <strong>Comment</strong> it says <em>Commented</em> — or, when a review was asked of you, <em>Review required</em> stays, dimmed, until GitHub says where you stand: an earlier verdict of yours may stand again. Before, closing the diff right after publishing could find <em>Review required</em> still there until the next refresh. GitHub is asked no more than before: that one PR, once, and once more only if it does not show your review yet.",
+      },
+      {
         title: "Only the repositories you select are loaded",
         body: "A repository turned off in the list's selector is no longer asked to GitHub at every refresh — less of your token's hourly limit — and its PRs are no longer counted: the numbers on <strong>All</strong>, <strong>Mine</strong>, <strong>Needs you</strong> and in <strong>Review load</strong> are about the selected repositories only, so they match the list. Turn one back on and it loads right away. The Sprint cards, the merge queue and the notifications follow the same selection.",
       },

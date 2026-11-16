@@ -446,8 +446,9 @@ export function renderReviewBadges(pr: PullRequestSummary, viewerLogin?: string,
   // people Settings → Slack knows.
   const canNudge = (login: string) => isMyPr && !isDraft && !!slackMember(state.slackDirectory, login);
 
-  // Asked from ZuGit a moment ago, and GitHub does not show it yet: the badge says so.
-  const waiting = (login: string) => waitingOn(state.pendingChanges, pr, "review-request", login);
+  // Asked, or said, from ZuGit a moment ago, and GitHub does not show it yet: the badge says so.
+  const waiting = (login: string) =>
+    waitingOn(state.pendingChanges, pr, "review-request", login) ?? waitingOn(state.pendingChanges, pr, "review", login);
 
   const items: Array<{ login: string; avatarUrl?: string; tone: string; label: string; stale?: boolean; canRerequest?: boolean; canNudge?: boolean }> = [
     ...dedup(pr.blockingReviewers).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl, tone: "fail", label: "Changes requested", canRerequest: isMyPr })),

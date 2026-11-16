@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Your review shows on the list as soon as it is published** — after **Request changes** or
+  **Approve** from the diff, your badge on the PR's row says so at once, dimmed while GitHub's own
+  Reviewers list catches up; after **Comment** it says *Commented*, or, when a review was asked of
+  you, *Review required* stays dimmed until GitHub says where you stand — an earlier verdict of
+  yours may stand again. Before, the row kept its old state until GitHub was read again — and
+  could stop reading too early, when GitHub showed the review's comments a moment before the
+  review itself — so closing the diff right after publishing found *Review required* still there.
+
 ---
 
 ## [3.3.1] - 2026-11-15
