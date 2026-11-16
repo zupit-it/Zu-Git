@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Silent mode — do not disturb between two times of day** — in **Settings → Silent mode**, a
+  switch and two times, **From** and **To**. Between them ZuGit sends no system notification (PRs
+  to review, changes requested, the merge queue, Toggl), the Tiny King stays away and the Toggl
+  planner does not open by itself. A **To** earlier than **From** is the next day's (14:00 → 08:00
+  is until 8 the next morning); the same time twice is the whole day. Once it is over nothing is
+  replayed one by one: at the next refresh you are told once what changed in the meantime and is
+  still there — the reviews now asked of you, the changes requested, and the King's news against
+  how things stood before — and the Toggl reminder comes for the day it was due on, with the
+  planner on that day. What answers something you just did stays as it is: status lines, the King
+  when you try him out or click him, the planner for a plan you asked your assistant for. No
+  request is added to GitHub; while silent the King asks it nothing at all.
+
 ### Fixed
 - **Your review shows on the list as soon as it is published** — after **Request changes** or
   **Approve** from the diff, your badge on the PR's row says so at once, dimmed while GitHub's own

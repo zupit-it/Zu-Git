@@ -21,6 +21,10 @@ const VERSIONS: VersionBlock[] = [
   {
     entries: [
       {
+        title: "Silent mode — do not disturb between two times of day",
+        body: "In <strong>Settings → Silent mode</strong>, a switch and two times, <strong>From</strong> and <strong>To</strong>. Between them ZuGit sends no notification, the Tiny King stays away and the Toggl planner does not open by itself. A <strong>To</strong> earlier than <strong>From</strong> is the next day's — 14:00 → 08:00 is until 8 the next morning — and the same time twice is the whole day. Once it is over nothing is replayed one by one: at the next refresh you are told once what changed in the meantime and is still there, and the Toggl reminder comes for the day it was due on. What answers something you just did — a status line, the King when you try him out — stays as it is, and GitHub is asked nothing more.",
+      },
+      {
         title: "Your review shows on the list as soon as it is published",
         body: "After <strong>Request changes</strong> or <strong>Approve</strong> from the diff, your badge on the PR's row says so at once, dimmed until GitHub's own Reviewers list shows it. After <strong>Comment</strong> it says <em>Commented</em> — or, when a review was asked of you, <em>Review required</em> stays, dimmed, until GitHub says where you stand: an earlier verdict of yours may stand again. Before, closing the diff right after publishing could find <em>Review required</em> still there until the next refresh. GitHub is asked no more than before: that one PR, once, and once more only if it does not show your review yet.",
       },

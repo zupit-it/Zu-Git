@@ -1,5 +1,6 @@
 import type { DashboardSnapshot, StaleBranchesResult } from "./shared/rpc";
 import type { PendingChange } from "./pending-changes";
+import { isSilentAt, type SilentWindow } from "./silent-mode";
 import type { PullRequestSummary } from "./shared/pr-model";
 import { defaultListFilterPreferences, defaultSettings } from "./shared/settings";
 import type { SlackDirectory } from "./slack-people";
@@ -59,6 +60,12 @@ export const state = {
   currentInternalMarker: defaultSettings.internalAuthorMarker,
   currentCollaborators: [] as string[],
   notificationsEnabled: defaultSettings.notificationsEnabled,
+  /** Settings → Silent mode, as saved: see `silentNow`. */
+  silentMode: {
+    enabled: defaultSettings.silentModeEnabled,
+    from: defaultSettings.silentModeFrom,
+    to: defaultSettings.silentModeTo,
+  } as SilentWindow,
   reactionScoreEnabled: defaultSettings.reactionScoreEnabled,
   scoreRuleReviewsEnabled: defaultSettings.scoreRuleReviewsEnabled,
   scoreRuleChangesRequestedEnabled: defaultSettings.scoreRuleChangesRequestedEnabled,
@@ -155,3 +162,12 @@ export const state = {
   draftPrNumber: null as number | null,
   draftPrNodeId: null as string | null,
 };
+
+/**
+ * Whether silent mode is on right now. Asked wherever ZuGit would interrupt on
+ * its own — a system notification, the Tiny King, a panel opening by itself —
+ * never for the answer to something the user just did.
+ */
+export function silentNow(now = new Date()): boolean {
+  return isSilentAt(state.silentMode, now);
+}

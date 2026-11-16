@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { escHtml, errorMessage } from "./utils";
-import { state } from "./state";
+import { silentNow, state } from "./state";
 import { notifyTogglProposal, notifyTogglReminder, refreshGoogleStatus, setStatus } from "./render";
 import type { Assignment, Edge, FillStory, PlannerActivity, PlannerEvent, Span } from "./toggl-plan";
 import {
   busyIntervals, calendarBlocks, candidatesFor, ceilTo, clockLabel, dateAt, eventKeys,
   floorTo, freeGaps, gapAt, midnightOf, minutesFromMidnight, moveEdge, moveRow, normalizeDescription,
-  overlappingIds, parseClock, parseDurationInput, parseTimeInput, planStories, shouldRemind, toIsoWithOffset,
+  overlappingIds, parseClock, parseDurationInput, parseTimeInput, planStories, reminderStep, toIsoWithOffset,
 } from "./toggl-plan";
 import type { RuleContext, RuleIssue } from "./toggl-rules";
 import { checkEntry, fixableCount, fixEntry, storyIds } from "./toggl-rules";
@@ -538,6 +538,8 @@ const I = {
 
 /** Marks the day whose reminder already fired, so it survives an app restart. */
 const REMINDER_KEY = "zugit-toggl-reminder";
+/** The day whose reminder came due in silent mode: said once that is over. */
+const REMINDER_HELD_KEY = "zugit-toggl-reminder-held";
 
 let reminderTimer: number | null = null;
 let proposalTimer: number | null = null;
@@ -545,6 +547,8 @@ let proposalTimer: number | null = null;
 /**
  * Once the working range is over, nudge the user and open the planner for a
  * check. Fires at most once a day, and only when Toggl is actually configured.
+ * In silent mode it waits: neither the notification nor the planner comes up
+ * until that is over, then both do, once, about the day it was due on.
  */
 export function startTogglReminder() {
   if (reminderTimer !== null) window.clearInterval(reminderTimer);
@@ -593,7 +597,9 @@ async function checkProposals() {
   }
 
   const latest = fresh[fresh.length - 1];
-  if (state.notificationsEnabled) void notifyTogglProposal(dayLabel(latest.date));
+  // Silent mode: no notification, now or later. The planner below is the answer
+  // to what the user just asked their assistant, and it still opens.
+  if (state.notificationsEnabled && !silentNow()) void notifyTogglProposal(dayLabel(latest.date));
   if (openPanel) {
     // The planner is open — likely on the day the user just asked about.
     for (const proposal of fresh) onProposalArrived?.(proposal.date);
@@ -603,26 +609,35 @@ async function checkProposals() {
 }
 
 async function maybeRemind() {
-  const due = shouldRemind({
+  const now = new Date();
+  const step = reminderStep({
     ready: state.togglReady,
     dayEnd: state.togglDayEnd,
-    now: new Date(),
+    now,
     lastFiredDay: localStorage.getItem(REMINDER_KEY),
+    silent: silentNow(now),
+    heldDay: localStorage.getItem(REMINDER_HELD_KEY),
   });
-  if (!due) return;
+  if (!step) return;
+  if ("hold" in step) {
+    // Not marked as fired, nor claimed: it is still to be said.
+    localStorage.setItem(REMINDER_HELD_KEY, step.hold);
+    return;
+  }
 
   // Marked before doing anything, so a failure cannot turn into a loop.
-  const today = todayIso();
-  localStorage.setItem(REMINDER_KEY, today);
+  const day = step.say;
+  localStorage.removeItem(REMINDER_HELD_KEY);
+  if (day === todayIso()) localStorage.setItem(REMINDER_KEY, day);
   // The file on the backend is the real guard: localStorage can be lost on a
   // forced quit, and would let the same evening's reminder fire again.
-  const claimed = await invoke<boolean>("toggl_claim_reminder", { day: today }).catch(() => true);
+  const claimed = await invoke<boolean>("toggl_claim_reminder", { day }).catch(() => true);
   if (!claimed) return;
   if (state.notificationsEnabled) void notifyTogglReminder();
 
   // Never reopen over an open planner: that would throw away rows being edited.
   if (openPanel) return;
-  await openTogglPanel();
+  await openTogglPanel(day);
 }
 
 // ── Panel ─────────────────────────────────────────────────────────────────────

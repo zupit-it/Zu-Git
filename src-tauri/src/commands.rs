@@ -153,6 +153,12 @@ pub async fn show_native_notification(
 ) -> Result<bool, String> {
     use tauri_plugin_notification::NotificationExt;
 
+    // Every notification is ZuGit speaking on its own: in silent mode none is
+    // sent, whoever asks. The page asks first, and decides what is told later.
+    if crate::silent_mode::now(&app) {
+        return Ok(false);
+    }
+
     let mut builder = app.notification().builder().title(&title);
 
     if let Some(b) = &body {

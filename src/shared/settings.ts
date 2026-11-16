@@ -10,6 +10,11 @@ export interface AppSettings {
   jiraToken: string;
   jiraRepoBoards: Record<string, string>;
   notificationsEnabled: boolean;
+  /** Between the two times nothing ZuGit does on its own interrupts (silent-mode.ts). */
+  silentModeEnabled: boolean;
+  /** Local "HH:MM" bounds; from after to crosses midnight, the same time twice is the whole day. */
+  silentModeFrom: string;
+  silentModeTo: string;
   colorBlindMode: boolean;
   memeMode: boolean;
   /** Tiny King (meme mode): times he plays what he came for. */
@@ -80,6 +85,9 @@ export interface SettingsFormValues {
   jiraToken: string;
   jiraRepoBoards: string;
   notificationsEnabled: string;   // "on" | ""
+  silentModeEnabled: string;      // "on" | ""
+  silentModeFrom: string;         // "HH:MM"
+  silentModeTo: string;           // "HH:MM"
   colorBlindMode: string;         // "on" | ""
   memeMode: string;               // "on" | ""
   petCycles: string;
@@ -124,6 +132,9 @@ export const defaultSettings: AppSettings = {
   jiraToken: "",
   jiraRepoBoards: {},
   notificationsEnabled: true,
+  silentModeEnabled: false,
+  silentModeFrom: "14:00",
+  silentModeTo: "08:00",
   colorBlindMode: false,
   memeMode: false,
   petCycles: 3,
@@ -213,6 +224,9 @@ export function serializeSettingsForm(settings: AppSettings): SettingsFormValues
       .map(([repo, board]) => `${repo} = ${board}`)
       .join("\n"),
     notificationsEnabled: settings.notificationsEnabled ? "on" : "",
+    silentModeEnabled: settings.silentModeEnabled ? "on" : "",
+    silentModeFrom: settings.silentModeFrom,
+    silentModeTo: settings.silentModeTo,
     colorBlindMode: settings.colorBlindMode ? "on" : "",
     memeMode: settings.memeMode ? "on" : "",
     petCycles: String(settings.petCycles),
@@ -281,6 +295,9 @@ export function normalizeSettings(
     jiraToken: values.jiraToken?.trim() ?? "",
     jiraRepoBoards: parseRepoBoards(values.jiraRepoBoards),
     notificationsEnabled: values.notificationsEnabled === "on",
+    silentModeEnabled: values.silentModeEnabled === "on",
+    silentModeFrom: normalizeClock(values.silentModeFrom, defaultSettings.silentModeFrom),
+    silentModeTo: normalizeClock(values.silentModeTo, defaultSettings.silentModeTo),
     colorBlindMode: values.colorBlindMode === "on",
     memeMode: values.memeMode === "on",
     petCycles: boundedInt(values.petCycles, 1, 5, defaultSettings.petCycles),

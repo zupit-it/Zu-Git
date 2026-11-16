@@ -15,6 +15,7 @@ mod quota;
 mod release_picks;
 mod secret_store;
 mod slack;
+mod silent_mode;
 mod sprint;
 mod storage;
 mod toggl;

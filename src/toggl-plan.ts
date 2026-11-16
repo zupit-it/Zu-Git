@@ -795,6 +795,40 @@ export function shouldRemind({ ready, dayEnd, now, lastFiredDay }: ReminderCheck
   return now.getHours() * 60 + now.getMinutes() >= parseClock(dayEnd);
 }
 
+export interface ReminderStepCheck extends ReminderCheck {
+  /** Silent mode is on right now (silent-mode.ts). */
+  silent: boolean;
+  /** Day whose reminder came due in silent mode and is still to be said, or null. */
+  heldDay: string | null;
+}
+
+/** A held reminder is said within this many days, then let go: the day is long gone. */
+const REMINDER_HELD_DAYS = 4;
+
+/**
+ * What the reminder does now: say it about a day, hold today's until silent
+ * mode is over, or nothing.
+ *
+ * Due in silent mode it is held, not fired, and said once silent mode is over
+ * about the day it was due on — on a working day, like any reminder: Friday's,
+ * held through the weekend, comes on Monday. A day that comes due out of silent
+ * mode is said as ever, and takes the place of one still held.
+ */
+export function reminderStep(check: ReminderStepCheck): { say: string } | { hold: string } | null {
+  const { now, silent, heldDay } = check;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const due = shouldRemind(check);
+  if (silent) return due ? { hold: today } : null;
+  if (due) return { say: today };
+
+  if (!check.ready || !heldDay || heldDay === check.lastFiredDay) return null;
+  const weekday = now.getDay();
+  if (weekday === 0 || weekday === 6) return null;
+  const age = Math.round((midnightOf(today).getTime() - midnightOf(heldDay).getTime()) / 86_400_000);
+  return age >= 0 && age <= REMINDER_HELD_DAYS ? { say: heldDay } : null;
+}
+
 /** Every row involved in an overlap — the planner refuses to submit while any exist.
  *  All pairs are compared, not just neighbours, so a long row swallowing shorter
  *  ones highlights every row the user has to fix. */

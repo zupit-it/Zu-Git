@@ -11,6 +11,7 @@ import {
   type FillStory,
   type PlannerActivity,
   type PlannerIssue,
+  reminderStep,
 } from "../src/toggl-plan.ts";
 
 const DAY = "2026-10-01";
@@ -181,4 +182,39 @@ test("moves made in bulk weigh less than a move on its own", () => {
   const plan = (activity: PlannerActivity[]) =>
     minutesPerStory(planStories([{ from: min("08:00"), to: min("14:00") }], candidatesFor(issues, range, DAY, 15), activity, DAY, 15));
   assert.ok((plan(bulk)["PENT-BULK"] ?? 0) < (plan(single)["PENT-BULK"] ?? 0));
+});
+
+// ── End-of-day reminder and silent mode ───────────────────────────────────────
+
+/** Monday 16 November 2026 is day 16: `on(17, 15)` is Tuesday at 15:00. */
+const on = (day: number, hour: number, minute = 0) => new Date(2026, 10, day, hour, minute);
+const reminder = (now: Date, over: Partial<Parameters<typeof reminderStep>[0]> = {}) =>
+  reminderStep({ ready: true, dayEnd: "14:00", now, lastFiredDay: null, silent: false, heldDay: null, ...over });
+
+test("out of silent mode the reminder is said once the day is over, once", () => {
+  assert.equal(reminder(on(17, 13, 59)), null);
+  assert.deepEqual(reminder(on(17, 14)), { say: "2026-11-17" });
+  assert.equal(reminder(on(17, 15), { lastFiredDay: "2026-11-17" }), null);
+});
+
+test("due in silent mode, the reminder is held and said once that is over, about its day", () => {
+  assert.deepEqual(reminder(on(17, 14), { silent: true }), { hold: "2026-11-17" });
+  // Past midnight, still silent: nothing new is due, the held day waits.
+  assert.equal(reminder(on(18, 7, 59), { silent: true, heldDay: "2026-11-17" }), null);
+  assert.deepEqual(reminder(on(18, 8), { heldDay: "2026-11-17" }), { say: "2026-11-17" });
+  assert.equal(reminder(on(18, 8)), null);
+});
+
+test("a same-day silent window only delays the reminder", () => {
+  assert.deepEqual(reminder(on(17, 14, 30), { silent: true }), { hold: "2026-11-17" });
+  assert.deepEqual(reminder(on(17, 15), { heldDay: "2026-11-17" }), { say: "2026-11-17" });
+});
+
+test("a reminder held on Friday waits for Monday, and is let go when its day is long gone", () => {
+  const friday = "2026-11-20";
+  assert.equal(reminder(on(21, 8), { heldDay: friday }), null);
+  assert.equal(reminder(on(22, 8), { heldDay: friday }), null);
+  assert.deepEqual(reminder(on(23, 8), { heldDay: friday }), { say: friday });
+  assert.equal(reminder(on(26, 8), { heldDay: friday }), null);
+  assert.equal(reminder(on(23, 8), { heldDay: friday, ready: false }), null);
 });

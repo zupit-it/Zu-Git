@@ -2,6 +2,8 @@
 // Every settings card is a <details>: the summary shows a status badge so the
 // page can be scanned closed, and only the section being edited is opened.
 
+import { silentWindowLabel } from "./silent-mode";
+
 const OPEN_SECTIONS_KEY = "zugit.settings.openSections";
 
 export type SectionStatus = { label: string; tone: "ok" | "warn" | "neutral" } | null;
@@ -32,6 +34,14 @@ const statusBySection: Record<string, (form: HTMLFormElement) => SectionStatus> 
   toggl: (form) => toggle(form, "togglEnabled"),
   calendar: (form) => toggle(form, "googleCalendarEnabled"),
   accessibility: (form) => toggle(form, "colorBlindMode"),
+  // On, the badge is the window itself: closed, the card says when it is silent.
+  silent: (form) =>
+    formValue(form, "silentModeEnabled")
+      ? {
+          label: silentWindowLabel({ from: formValue(form, "silentModeFrom"), to: formValue(form, "silentModeTo") }),
+          tone: "ok",
+        }
+      : { label: "Off", tone: "neutral" },
   fun: (form) => toggle(form, "memeMode"),
 };
 

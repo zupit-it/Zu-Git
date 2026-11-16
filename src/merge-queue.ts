@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DashboardSnapshot } from "./shared/rpc";
 import type { PullRequestSummary } from "./shared/pr-model";
-import { state } from "./state";
+import { silentNow, state } from "./state";
 import { errorMessage } from "./utils";
 import { applyListFilters, byPriorityRank } from "./filters";
 import { renderListBoard, setStatus, notifyQueueRebaseTriggered, notifyQueueConflictBlocked } from "./render";
@@ -94,7 +94,9 @@ export async function processMergeQueue(snapshot: DashboardSnapshot) {
 }
 
 async function maybeNotifyConflict(pr: PullRequestSummary) {
-  if (!state.notificationsEnabled) return;
+  // Silent mode: not marked as told, so the first refresh after it tells it,
+  // if the queue is still stuck then.
+  if (!state.notificationsEnabled || silentNow()) return;
   const key = prKey(pr);
   if (state.queueConflictNotifiedFor.get(key) === pr.updatedAtIso) return;
   state.queueConflictNotifiedFor.set(key, pr.updatedAtIso);
@@ -114,7 +116,7 @@ async function triggerRebase(pr: PullRequestSummary) {
       headSha: pr.headSha,
     });
     setStatus(`Rebasing ${pr.repo}#${pr.id} to keep it moving in the merge queue…`);
-    if (state.notificationsEnabled) void notifyQueueRebaseTriggered(pr);
+    if (state.notificationsEnabled && !silentNow()) void notifyQueueRebaseTriggered(pr);
   } catch (error) {
     state.queueRebaseTriggeredFor.delete(key); // allow a retry on the next refresh
     setStatus(

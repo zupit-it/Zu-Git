@@ -905,6 +905,46 @@
                     </div>
                   </div>
                 </details>
+                <!-- Silent mode card -->
+                <details class="settings-card" data-settings-section="silent">
+                  <summary class="settings-card-header">
+                    <span class="settings-card-icon">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+                    </span>
+                    <div>
+                      <div class="settings-card-label">Silent mode</div>
+                      <div class="settings-card-title">Do not disturb</div>
+                    </div>
+                    <span class="settings-card-spacer"></span>
+                    <span class="settings-card-badge" data-section-status hidden></span>
+                    <svg class="settings-card-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+                  </summary>
+                  <div class="settings-card-grid">
+                    <div class="settings-field">
+                      <label class="field-label">Every day</label>
+                      <label class="filter-pill">
+                        <input id="silentModeEnabled" name="silentModeEnabled" type="checkbox" />
+                        <span>Silent between these times</span>
+                      </label>
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="silentModeFrom">From</label>
+                      <input id="silentModeFrom" name="silentModeFrom" type="time" step="300" placeholder="14:00" />
+                    </div>
+                    <div class="settings-field">
+                      <label class="field-label" for="silentModeTo">To</label>
+                      <input id="silentModeTo" name="silentModeTo" type="time" step="300" placeholder="08:00" />
+                    </div>
+                    <div class="settings-field settings-field-wide">
+                      <p class="field-hint">
+                        Between the two times: no notification, no Tiny King, no Toggl planner opening by itself. A
+                        <strong>To</strong> earlier than <strong>From</strong> is the next day's; the same time twice is
+                        the whole day. Afterwards you are told once, at the next refresh, what changed in the meantime
+                        and still stands.
+                      </p>
+                    </div>
+                  </div>
+                </details>
               </div>
 
               <div class="settings-group">

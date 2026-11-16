@@ -17,6 +17,11 @@ pub struct AppSettings {
     pub jira_token: String,
     pub jira_repo_boards: HashMap<String, String>,
     pub notifications_enabled: bool,
+    /// Between the two times nothing ZuGit does on its own interrupts (silent_mode.rs).
+    pub silent_mode_enabled: bool,
+    /// Local "HH:MM" bounds; from after to crosses midnight, the same time twice is the whole day.
+    pub silent_mode_from: String,
+    pub silent_mode_to: String,
     pub color_blind_mode: bool,
     pub meme_mode: bool,
     /// Tiny King (meme mode): times he plays what he came for.
@@ -80,6 +85,9 @@ impl Default for AppSettings {
             jira_token: String::new(),
             jira_repo_boards: HashMap::new(),
             notifications_enabled: true,
+            silent_mode_enabled: false,
+            silent_mode_from: "14:00".to_string(),
+            silent_mode_to: "08:00".to_string(),
             color_blind_mode: false,
             meme_mode: false,
             pet_cycles: 3,
@@ -136,6 +144,12 @@ pub struct SettingsFormValues {
     pub jira_token: String,
     pub jira_repo_boards: String,
     pub notifications_enabled: String,  // "on" | ""
+    #[serde(default)]
+    pub silent_mode_enabled: String,    // "on" | ""
+    #[serde(default)]
+    pub silent_mode_from: String,       // "HH:MM"
+    #[serde(default)]
+    pub silent_mode_to: String,         // "HH:MM"
     pub color_blind_mode: String,       // "on" | ""
     #[serde(default)]
     pub meme_mode: String,              // "on" | ""
@@ -556,6 +570,9 @@ pub fn normalize_settings(values: &SettingsFormValues) -> AppSettings {
         jira_token: values.jira_token.trim().to_string(),
         jira_repo_boards: parse_repo_boards(&values.jira_repo_boards),
         notifications_enabled: values.notifications_enabled.trim() == "on",
+        silent_mode_enabled: values.silent_mode_enabled.trim() == "on",
+        silent_mode_from: normalize_clock(&values.silent_mode_from, "14:00"),
+        silent_mode_to: normalize_clock(&values.silent_mode_to, "08:00"),
         color_blind_mode: values.color_blind_mode.trim() == "on",
         meme_mode: values.meme_mode.trim() == "on",
         pet_cycles: match values.pet_cycles.trim().parse::<u32>() {
@@ -652,6 +669,9 @@ pub fn serialize_settings_form(settings: &AppSettings) -> SettingsFormValues {
         } else {
             String::new()
         },
+        silent_mode_enabled: if settings.silent_mode_enabled { "on".to_string() } else { String::new() },
+        silent_mode_from: settings.silent_mode_from.clone(),
+        silent_mode_to: settings.silent_mode_to.clone(),
         color_blind_mode: if settings.color_blind_mode {
             "on".to_string()
         } else {

@@ -62,6 +62,12 @@ struct PersistedSettings {
     #[serde(default = "default_notifications_enabled")]
     notifications_enabled: bool,
     #[serde(default)]
+    silent_mode_enabled: bool,
+    #[serde(default = "default_silent_mode_from")]
+    silent_mode_from: String,
+    #[serde(default = "default_silent_mode_to")]
+    silent_mode_to: String,
+    #[serde(default)]
     color_blind_mode: bool,
     #[serde(default)]
     meme_mode: bool,
@@ -175,6 +181,14 @@ fn default_pet_linger_seconds() -> u32 {
 
 fn default_pet_nag_minutes() -> u32 {
     30
+}
+
+fn default_silent_mode_from() -> String {
+    "14:00".to_string()
+}
+
+fn default_silent_mode_to() -> String {
+    "08:00".to_string()
 }
 fn default_history_days() -> u32 {
     60
@@ -339,6 +353,9 @@ pub fn load_settings_from(dir: &Path) -> AppSettings {
         } else {
             String::new()
         },
+        silent_mode_enabled: if persisted.silent_mode_enabled { "on".to_string() } else { String::new() },
+        silent_mode_from: persisted.silent_mode_from,
+        silent_mode_to: persisted.silent_mode_to,
         color_blind_mode: if persisted.color_blind_mode {
             "on".to_string()
         } else {
@@ -416,6 +433,9 @@ pub async fn save_settings(
         jira_email: normalized.jira_email.clone(),
         jira_repo_boards: normalized.jira_repo_boards.clone(),
         notifications_enabled: normalized.notifications_enabled,
+        silent_mode_enabled: normalized.silent_mode_enabled,
+        silent_mode_from: normalized.silent_mode_from.clone(),
+        silent_mode_to: normalized.silent_mode_to.clone(),
         color_blind_mode: normalized.color_blind_mode,
         meme_mode: normalized.meme_mode,
         pet_cycles: normalized.pet_cycles,

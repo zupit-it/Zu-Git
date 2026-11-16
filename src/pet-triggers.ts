@@ -5,6 +5,9 @@
 // turn, the best first, his bubble going through the PRs. Between those, every
 // so often (Settings → Fun), he comes knocking about what still waits on you:
 // approved PRs of yours not merged, changes to make, reviews to do.
+// In silent mode (Settings → Silent mode) he stays away; once it is over, the
+// first refresh is compared with the last one before it, so he tells once what
+// changed in the meantime and still stands.
 
 import { invoke } from "@tauri-apps/api/core";
 import { getMyChangesRequestedIds, getMyPendingReviewIds } from "./filters";
@@ -16,7 +19,7 @@ import {
 import type { PetAnimation, PetPlay } from "./pet-sprites";
 import type { DashboardSnapshot } from "./shared/rpc";
 import { normalizeSettings } from "./shared/settings";
-import { state } from "./state";
+import { silentNow, state } from "./state";
 
 /** PRs of yours gone from the list asked about per refresh, at most. */
 const MAX_GONE_CHECKED = 5;
@@ -25,6 +28,8 @@ const NAG_CHECK_MS = 60_000;
 
 /** When he last came out: a reminder waits its whole interval after any visit. */
 let lastShownAt = Date.now();
+/** The last dashboard before silent mode began: what the first one after it is compared with. */
+let beforeSilence: DashboardSnapshot | null = null;
 
 type PetNews = Pick<PetPlay, "animation" | "pages">;
 
@@ -39,8 +44,19 @@ export function playPet(
   void invoke("pet_play", { plays }).catch(() => {});
 }
 
-export async function petReactToDashboard(previous: DashboardSnapshot | null, next: DashboardSnapshot) {
-  if (!memeMode() || !previous || previous === next) return;
+export async function petReactToDashboard(latest: DashboardSnapshot | null, next: DashboardSnapshot) {
+  if (!memeMode()) {
+    beforeSilence = null;
+    return;
+  }
+  if (!latest || latest === next) return;
+  if (silentNow()) {
+    // Nothing is asked of GitHub either: which PRs were merged is found out later.
+    if (latest.source === "live") beforeSilence ??= latest;
+    return;
+  }
+  const previous = beforeSilence ?? latest;
+  beforeSilence = null;
   if (previous.source !== "live" || next.source !== "live") return;
   const viewer = next.viewerLogin?.toLowerCase();
   if (!viewer) return;
@@ -125,6 +141,12 @@ export function petReminder(snapshot: DashboardSnapshot): PetPage[] {
 export function installPetReminder() {
   setInterval(() => {
     const snapshot = state.currentDashboard;
+    // Silent mode counts as a visit: after it the news comes first (the next
+    // refresh), and a reminder waits its whole interval as after any visit.
+    if (silentNow()) {
+      lastShownAt = Date.now();
+      return;
+    }
     if (!memeMode() || !state.petNagMinutes || !snapshot || snapshot.source !== "live") return;
     if (Date.now() - lastShownAt < state.petNagMinutes * 60_000) return;
     const pages = petReminder(snapshot);

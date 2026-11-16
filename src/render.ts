@@ -3,7 +3,7 @@ import type { DashboardSnapshot, TokenStoreStatus } from "./shared/rpc";
 import type { PullRequestSummary } from "./shared/pr-model";
 import type { SettingsFormValues } from "./shared/settings";
 import { defaultSettings, normalizeSettings, serializeSettingsForm } from "./shared/settings";
-import { state } from "./state";
+import { silentNow, state } from "./state";
 import type { AppView } from "./state";
 import {
   escHtml, relativeTime, avatarColor, avatarSm, chip,
@@ -191,6 +191,11 @@ export function renderSettings(values: SettingsFormValues) {
   }
 
   state.notificationsEnabled = values.notificationsEnabled === "on";
+  state.silentMode = {
+    enabled: values.silentModeEnabled === "on",
+    from: values.silentModeFrom || defaultSettings.silentModeFrom,
+    to: values.silentModeTo || defaultSettings.silentModeTo,
+  };
   state.reactionScoreEnabled = values.reactionScoreEnabled === "on";
   state.scoreRuleReviewsEnabled = values.scoreRuleReviewsEnabled === "on";
   state.scoreRuleChangesRequestedEnabled = values.scoreRuleChangesRequestedEnabled === "on";
@@ -1453,7 +1458,8 @@ export function renderDashboard(snapshot: DashboardSnapshot) {
   }
   if (givenUp) setStatus(givenUp);
 
-  if (state.notificationsEnabled) {
+  const silent = silentNow();
+  if (state.notificationsEnabled && !silent) {
     if (state.lastMyPendingReviewIds !== null) {
       const newReviews = countNewIds(myPendingReviewIds, state.lastMyPendingReviewIds);
       if (newReviews > 0) void notifyPendingReviewReminder(newReviews);
@@ -1462,8 +1468,12 @@ export function renderDashboard(snapshot: DashboardSnapshot) {
       void notifyMyChangesRequested(countNewIds(myChangesRequestedIds, state.lastMyChangesRequestedIds));
     }
   }
-  state.lastMyPendingReviewIds = myPendingReviewIds;
-  state.lastMyChangesRequestedIds = myChangesRequestedIds;
+  // In silent mode what was last told stays as it was: the first refresh after
+  // it tells, once, what came in the meantime and is still there.
+  if (!silent || state.lastMyPendingReviewIds === null) {
+    state.lastMyPendingReviewIds = myPendingReviewIds;
+    state.lastMyChangesRequestedIds = myChangesRequestedIds;
+  }
 
   if (!github?.configured) {
     setView("settings");
