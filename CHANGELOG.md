@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.3.2] - 2026-11-16
+
 ### Added
 - **Silent mode — do not disturb between two times of day** — in **Settings → Silent mode**, a
   switch and two times, **From** and **To**. Between them ZuGit sends no system notification (PRs
