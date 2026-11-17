@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.3.3] - 2026-11-17
+
 ### Changed
 - **PR list — Needs you without rebases, unresolved straight to the conversation** — one of your
   PRs whose branch is only behind its base no longer shows in **Needs you**, nor counts there: its
