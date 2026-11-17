@@ -28,13 +28,18 @@ test("a review asked of the viewer needs them, until they approve", () => {
   assert.equal(needsViewer(pr({ pendingReviewers: [me], currentApprovers: [me] }), "giorgio"), false);
 });
 
-test("the viewer's own PR needs them with changes requested, a failed check, or a branch to bring up", () => {
+test("the viewer's own PR needs them with changes requested, a failed check, or conflicts", () => {
   const mine = { author: "Giorgio" };
   assert.equal(needsViewer(pr({ ...mine, reviewState: "changes-requested", blockingReviewers: [{ login: "anna" }] }), "giorgio"), true);
   assert.equal(needsViewer(pr({ ...mine, hasFailedPipeline: true }), "giorgio"), true);
-  assert.equal(needsViewer(pr({ ...mine, mergeStatus: "behind" }), "giorgio"), true);
   assert.equal(needsViewer(pr({ ...mine, mergeStatus: "conflicting" }), "giorgio"), true);
   assert.equal(needsViewer(pr({ ...mine, mergeStatus: "blocked" }), "giorgio"), false);
+});
+
+test("the viewer's own PR only behind its base does not need them, unless something else does", () => {
+  const mine = { author: "Giorgio" };
+  assert.equal(needsViewer(pr({ ...mine, mergeStatus: "behind" }), "giorgio"), false);
+  assert.equal(needsViewer(pr({ ...mine, mergeStatus: "behind", hasFailedPipeline: true }), "giorgio"), true);
 });
 
 test("someone else's failed check or stale branch is theirs to fix", () => {

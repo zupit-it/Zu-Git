@@ -386,7 +386,7 @@ export function renderListFilters(snapshot: DashboardSnapshot) {
       ? "Unavailable until GitHub viewer info is loaded"
       : button.dataset.scope === "needs"
         ? "Waiting on you: a review to give, or a pull request of yours with changes requested, " +
-          "a failed check, or a branch behind its base or in conflict"
+          "a failed check, or conflicts with its base"
         : `Pull requests opened by ${snapshot.viewerLogin}`;
   });
   const setCount = (name: string, n: number) => {

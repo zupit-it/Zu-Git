@@ -3,7 +3,8 @@ import type { PullRequestSummary } from "./shared/pr-model";
 /**
  * Whether a PR waits on the viewer, which is what Show → Needs you lists: a
  * review they were asked for and have not given, or a PR of theirs with changes
- * requested, a failed check, or a branch behind its base or in conflict with it.
+ * requested, a failed check, or a branch in conflict with its base. A branch
+ * only behind its base does not: a click on its row's Needs rebase settles it.
  * A draft never does. The row's own badges say which.
  */
 export function needsViewer(pr: PullRequestSummary, viewerLogin: string | undefined): boolean {
@@ -15,7 +16,6 @@ export function needsViewer(pr: PullRequestSummary, viewerLogin: string | undefi
   return (
     (pr.reviewState === "changes-requested" && pr.blockingReviewers.length > 0) ||
     pr.hasFailedPipeline ||
-    pr.mergeStatus === "behind" ||
     pr.mergeStatus === "conflicting"
   );
 }
