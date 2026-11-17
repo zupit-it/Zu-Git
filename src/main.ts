@@ -313,7 +313,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const diffButton = target.closest<HTMLElement>("[data-pr-diff]");
     if (diffButton) {
       const pr = state.currentDashboard?.prs.find(p => `${p.repo}/${p.id}` === diffButton.dataset.prDiff);
-      if (pr) void openPrDiff(pr);
+      if (pr) void openPrDiff(pr, diffButton.dataset.prDiffAt === "unresolved" ? { at: "unresolved" } : undefined);
       return;
     }
 

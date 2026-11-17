@@ -611,8 +611,10 @@ export function renderPRRow(fromGitHub: PullRequestSummary, isLast: boolean, vie
     );
   }
 
+  // Opens the diff on the first conversation still open.
   const threadsChip = pr.unresolvedThreads > 0
-    ? chip(isDraft ? "mute" : "warn", `${pr.unresolvedThreads} unresolved`, SVG.threads)
+    ? `<button class="chip-btn" data-pr-diff="${escHtml(pr.repo)}/${pr.id}" data-pr-diff-at="unresolved" type="button" title="Open the diff at the first unresolved conversation">` +
+      `${chip(isDraft ? "mute" : "warn", `${pr.unresolvedThreads} unresolved`, SVG.threads)}</button>`
     : "";
 
   // A rebase asked from ZuGit: GitHub is at it until the branch shows a new head.

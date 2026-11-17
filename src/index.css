@@ -5068,8 +5068,15 @@ ul.field-hint {
   100% { background: transparent; box-shadow: inset 3px 0 0 transparent; }
 }
 
+/* The conversation the list's "unresolved" opened the diff on */
+.pd-gh-thread--flash { animation: pd-gh-thread-flash 1.6s ease-out; }
+@keyframes pd-gh-thread-flash {
+  0%, 30% { box-shadow: 0 0 0 3px var(--accent-bd); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .rm-shape, .rm-tip, .rd-item--flash { transition: none; animation: none; }
+  .rm-shape, .rm-tip, .rd-item--flash, .pd-gh-thread--flash { transition: none; animation: none; }
 }
 
 /* ── Add-reviewer button (inline with last reviewer badge) ───────────────── */

@@ -529,7 +529,8 @@ function takePrefetch(pr: PullRequestSummary) {
 
 // ── Overlay ───────────────────────────────────────────────────────────────────
 
-export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
+/** `at: "unresolved"`: opens on the first GitHub conversation not resolved yet. */
+export async function openPrDiff(pr: PullRequestSummary, opts?: { at?: "unresolved" }): Promise<void> {
   document.querySelector("[data-pr-diff-overlay]")?.remove();
 
   const overlay = document.createElement("div");
@@ -974,8 +975,57 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     scrollToFile(next);
   }
 
+  // A conversation jumped to: the files drawn above it on the way push it down, so it is re-centred as they land.
+  let pendingThread: string | null = null;
+  let pendingThreadTimer = 0;
+
+  function centreThread(id: string): boolean {
+    const el = content.querySelector<HTMLElement>(`[data-pd-gh="${CSS.escape(id)}"]`);
+    if (!el) return false;
+    content.scrollTop += el.getBoundingClientRect().top - content.getBoundingClientRect().top
+      - Math.max(0, (content.clientHeight - el.offsetHeight) / 2);
+    return true;
+  }
+
+  /**
+   * The first conversation still open on GitHub, in the order the diff reads:
+   * by file as listed, then by line, the one on the whole file first. Those
+   * without a line in this diff come last, in the GitHub panel above the files.
+   */
+  function jumpToFirstUnresolved() {
+    const open = threads.filter(t => !t.resolved);
+    if (open.length === 0) return;
+    const rank = new Map([...content.querySelectorAll<HTMLElement>("[data-pd-section]:not([hidden])")]
+      .map((el, k) => [Number(el.dataset.pdSection), k]));
+    const placed = open
+      .flatMap(t => {
+        const i = ghAnchor(t) === null ? undefined : indexByPath.get(t.path);
+        const at = i === undefined ? undefined : rank.get(i);
+        return i === undefined || at === undefined ? [] : [{ t, i, at }];
+      })
+      .sort((a, b) => a.at - b.at || (a.t.line ?? -1) - (b.t.line ?? -1));
+    const first = placed[0];
+    const target = first?.t ?? open[0];
+    if (first) {
+      if (views[first.i].collapsed) toggleFile(first.i);
+      else if (!views[first.i].rendered) drawBody(first.i);
+      setActive(first.i);
+    } else {
+      // Folded in the panel: unfolded to be read.
+      openThreads.add(target.id);
+      drawPanel();
+    }
+    if (!centreThread(target.id)) return;
+    pendingThread = target.id;
+    window.clearTimeout(pendingThreadTimer);
+    pendingThreadTimer = window.setTimeout(() => { pendingThread = null; }, 600);
+    const el = content.querySelector<HTMLElement>(`[data-pd-gh="${CSS.escape(target.id)}"]`);
+    el?.classList.add("pd-gh-thread--flash");
+    el?.addEventListener("animationend", () => el.classList.remove("pd-gh-thread--flash"), { once: true });
+  }
+
   // The reader scrolling on their own wins over a jump still settling.
-  content.addEventListener("wheel", () => { pendingJump = null; }, { passive: true });
+  content.addEventListener("wheel", () => { pendingJump = null; pendingThread = null; }, { passive: true });
 
   // The active file is the last one whose header has reached the top.
   let scrollFrame = 0;
@@ -2309,6 +2359,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     v.rendered = true;
     paintSelections(i);
     if (pendingJump !== null) alignTo(pendingJump);
+    if (pendingThread !== null) centreThread(pendingThread);
     const gen = ++v.renderGen;
     if (v.lang && v.hunks.length > 0) void highlightBody(v, v.lang, body, gen, !v.hunkTokens);
   }
@@ -2514,6 +2565,7 @@ export async function openPrDiff(pr: PullRequestSummary): Promise<void> {
     indexComments();
 
     layout();
+    if (opts?.at === "unresolved") jumpToFirstUnresolved();
     drawPublish();
     aiPoll = window.setInterval(() => void loadReviews(), AI_POLL_MS);
     headPoll = window.setInterval(() => { if (!newHead) void checkHead(); }, HEAD_POLL_MS);

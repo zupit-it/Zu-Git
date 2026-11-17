@@ -24,6 +24,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   when you try him out or click him, the planner for a plan you asked your assistant for. No
   request is added to GitHub; while silent the King asks it nothing at all.
 
+### Changed
+- **PR list — Needs you without rebases, unresolved straight to the conversation** — one of your
+  PRs whose branch is only behind its base no longer shows in **Needs you**, nor counts there: its
+  row still says **Needs rebase**, a click away, and it is listed again when something else waits
+  on you — changes requested, a failed check, conflicts. And **N unresolved** on a row is now a
+  button: it opens the diff scrolled to the first conversation not resolved yet on GitHub, by file
+  in the diff's order and then by line, and lights it up a moment. One that is outdated or on a
+  line the diff does not show is unfolded in the GitHub panel above the files.
+
 ### Fixed
 - **Your review shows on the list as soon as it is published** — after **Request changes** or
   **Approve** from the diff, your badge on the PR's row says so at once, dimmed while GitHub's own
