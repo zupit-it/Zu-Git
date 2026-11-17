@@ -19,6 +19,20 @@ for tool in npx npm cargo; do
   command -v "$tool" >/dev/null 2>&1 || fail "looking for $tool (not on PATH)"
 done
 
+# First, and on what is pushed rather than what is on disk: the release stops
+# on an [Unreleased] with no notes, which a rebase over "chore: release vX"
+# leaves behind by putting them in [X]. Git gives the refs pushed on stdin.
+printf '▸ Changelog\n'
+refs=0
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+  refs=1
+  case "$local_ref" in refs/heads/*) ;; *) continue ;; esac   # tags: nothing to write
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac         # a branch deleted
+  node scripts/changelog.js check "$local_sha" || fail "Changelog"
+done
+# Run by hand, with no push behind it: the commit checked out.
+[ "$refs" = 1 ] || node scripts/changelog.js check HEAD || fail "Changelog"
+
 printf '▸ TypeScript (tsc --noEmit)\n'
 npx --no-install tsc --noEmit || fail "TypeScript"
 
